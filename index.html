@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#3c763d">
+  <title>奇门遁甲 · 排盘占断</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="assets/icon-192.png">
+  <link rel="stylesheet" href="style.css">
+  <style>
+    body { padding: 8px; max-width: 720px; margin: 0 auto; font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
+    .pwa-controls { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 8px; }
+    .pwa-controls label { font-size: 13px; }
+    .pwa-controls input, .pwa-controls select { padding: 4px 6px; font-size: 14px; }
+    .seg { display: inline-flex; border: 1px solid #ccc; border-radius: 6px; overflow: hidden; }
+    .seg button { border: none; background: #fff; padding: 6px 14px; font-size: 14px; }
+    .seg button.on { background: #3c763d; color: #fff; }
+    .btn { background: #3c763d; color: #fff; border: none; border-radius: 6px; padding: 7px 16px; font-size: 15px; }
+    .btn:disabled { opacity: .5; }
+    .panel { border: 1px solid #ddd; border-radius: 8px; padding: 10px; margin: 10px 0; }
+    .panel h3 { margin: 0 0 8px; font-size: 16px; }
+    .muted { color: #888; font-size: 12px; }
+    #basicInfo .item { display: inline-block; margin-right: 12px; font-size: 13px; }
+    #aiAnswer { white-space: pre-wrap; background: #f7f7f7; border-radius: 6px; padding: 10px; margin-top: 10px; display: none; }
+    .ai-cfg { font-size: 13px; }
+    .ai-cfg label { display: inline-block; min-width: 88px; }
+    .ai-cfg input, .ai-cfg select { width: 60%; max-width: 360px; padding: 4px; margin: 2px 0; }
+    details > summary { cursor: pointer; font-size: 13px; color: #3c763d; }
+    .geju-list li, .suggestion-list li { margin: 3px 0; }
+  </style>
+</head>
+<body>
+  <h2 style="text-align:center;margin:6px 0;">奇门遁甲 · 排盘占断</h2>
+
+  <div class="pwa-controls">
+    <span class="seg" id="schoolSeg">
+      <button data-school="zhuanpan" class="on">转盘</button>
+      <button data-school="feipan">飞盘（鸣法）</button>
+    </span>
+    <label>日期 <input type="date" id="inDate"></label>
+    <label>时间 <input type="time" id="inTime"></label>
+    <label>目的
+      <select id="inPurpose">
+        <option value="综合">综合</option><option value="事业">事业</option><option value="财运">财运</option>
+        <option value="婚姻">婚姻</option><option value="健康">健康</option><option value="学业">学业</option>
+        <option value="出行">出行</option><option value="失物">失物</option><option value="寻人">寻人追踪</option>
+        <option value="怀孕">怀孕</option><option value="官司">官司</option><option value="风水">风水(阴阳宅)</option>
+        <option value="射覆">射覆</option><option value="天气">天气</option>
+      </select>
+    </label>
+    <button class="btn" id="castBtn">排盘</button>
+  </div>
+
+  <div id="basicInfo" class="panel" style="display:none;"></div>
+  <div id="chart"></div>
+  <div id="analysis"></div>
+
+  <!-- AI 占断 -->
+  <div class="panel">
+    <h3>AI 占断　<span class="muted" id="aiProviderTag"></span></h3>
+    <details>
+      <summary>⚙️ AI 设置（Provider / Key，仅存本机）</summary>
+      <div class="ai-cfg" style="margin-top:8px;">
+        <div><label>Provider</label>
+          <select id="cfgProvider">
+            <option value="gemini">Gemini（免费云端·手机推荐）</option>
+            <option value="local">Local Ollama（本机/PC）</option>
+            <option value="custom">Custom（OpenAI 兼容·Groq/OpenRouter等）</option>
+          </select>
+        </div>
+        <div class="prov prov-gemini"><label>Gemini Key</label><input id="cfgGeminiKey" type="password" placeholder="AI Studio 免费获取"></div>
+        <div class="prov prov-gemini"><label>Gemini 模型</label><input id="cfgGeminiModel" placeholder="gemini-1.5-flash"></div>
+        <div class="prov prov-local"><label>Ollama URL</label><input id="cfgOllamaUrl" placeholder="http://localhost:11434"></div>
+        <div class="prov prov-local"><label>Ollama 模型</label><input id="cfgOllamaModel" placeholder="qwen3:latest"></div>
+        <div class="prov prov-custom"><label>端点 URL</label><input id="cfgCustomUrl" placeholder="https://api.groq.com/openai/v1"></div>
+        <div class="prov prov-custom"><label>API Key</label><input id="cfgCustomKey" type="password" placeholder="Bearer key"></div>
+        <div class="prov prov-custom"><label>模型</label><input id="cfgCustomModel" placeholder="llama-3.1-8b-instant"></div>
+        <button class="btn" id="cfgSaveBtn" style="margin-top:6px;">保存设置</button>
+        <span class="muted" id="cfgSavedTag"></span>
+      </div>
+    </details>
+    <div style="margin-top:8px;">
+      <textarea id="aiQuestion" rows="2" style="width:100%;" placeholder="例：我的钥匙丢了，能找回吗？在哪里找？"></textarea>
+      <div style="margin-top:6px;">
+        <label class="muted">年命天干(可选)
+          <select id="aiNianMing">
+            <option value="">不提供</option><option>甲</option><option>乙</option><option>丙</option><option>丁</option>
+            <option>戊</option><option>己</option><option>庚</option><option>辛</option><option>壬</option><option>癸</option>
+          </select>
+        </label>
+        <button class="btn" id="aiBtn">AI 解读此盘</button>
+        <span class="muted" id="aiStatus"></span>
+      </div>
+      <div id="aiAnswer"></div>
+    </div>
+  </div>
+
+  <p class="muted" style="text-align:center;">排盘/解断离线可用 · AI 需所选 provider 可达 · Key 仅存于本机</p>
+
+  <script src="engine.bundle.js"></script>
+  <script src="llm.js"></script>
+  <script src="app.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+  </script>
+</body>
+</html>
