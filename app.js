@@ -98,7 +98,7 @@
     // 九宫详解
     html += `<div class="panel"><h3>九宫详解</h3><div class="gong-details">`;
     for (let i = 1; i <= 9; i++) { const d = ja[i]; if (!d) continue;
-      html += `<div style="border-bottom:1px solid #eee;padding:4px 0;font-size:13px;"><b>${i}-${esc(d.gongName)}</b> <span class="muted">${esc(d.direction)}</span> · ${esc(d.jiXiongText || '')} ${d.keYing ? '['+esc(d.keYing.name)+']' : ''}${d.menPo ? ' [门迫]' : ''}${d.kongWang ? ' [空亡]' : ''}${d.yiMa ? ' [驿马]' : ''}<br><span class="muted">${esc(d.explain || '')}</span></div>`;
+      html += `<div style="border-bottom:1px solid #eee;padding:4px 0;font-size:13px;"><b>${i}-${esc(d.gongName)}</b> <span class="muted">${esc(d.direction)}</span> · ${esc(d.jiXiongText || '')} ${d.isYongShen ? '<b style="color:#3c763d;">【用神·' + esc(d.yongShenName) + '】</b>' : ''}${d.keYing ? '['+esc(d.keYing.name)+']' : ''}${d.menPo ? ' [门迫]' : ''}${d.kongWang ? ' [空亡]' : ''}${d.yiMa ? ' [驿马]' : ''}<br><span class="muted">${esc(d.explain || '')}</span></div>`;
     }
     html += `</div></div>`;
     $('analysis').innerHTML = html;
@@ -160,7 +160,8 @@
     $('aiStatus').textContent = 'AI 解读中…(云端约 10-30s，本机模型更久)';
     try {
       const methodText = await getMethodText();
-      const opts = { nianMingGan: $('aiNianMing').value, methodText };
+      // 占类：先按问句关键词自动识别；识别不出时回退到排盘所选「目的」
+      const opts = { nianMingGan: $('aiNianMing').value, methodText, fallbackCategory: $('inPurpose').value };
       const builder = school === 'feipan' ? QM.feipanPredict : QM.zhuanpanPredict;
       const prompt = builder.buildPrompt(pan, q, opts);
       const answer = await LLM.chat(prompt.system, prompt.user);
@@ -174,7 +175,9 @@
   /* ---------- init ---------- */
   function init() {
     const now = new Date();
-    $('inDate').value = now.toISOString().slice(0, 10);
+    // 必须用本地时区格式化：toISOString() 是 UTC，在 UTC+8 的 00:00-07:59 会给出昨天的日期 → 日柱全错
+    const p2 = (n) => String(n).padStart(2, '0');
+    $('inDate').value = `${now.getFullYear()}-${p2(now.getMonth() + 1)}-${p2(now.getDate())}`;
     $('inTime').value = now.toTimeString().slice(0, 5);
     $('schoolSeg').addEventListener('click', e => {
       const b = e.target.closest('button[data-school]'); if (!b) return;

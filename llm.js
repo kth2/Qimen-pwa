@@ -43,12 +43,13 @@ const LLM = (() => {
   async function callGemini(cfg, system, user) {
     if (!cfg.geminiKey) throw new Error('未填写 Gemini API Key（在 Google AI Studio 免费获取）');
     const model = cfg.geminiModel || 'gemini-1.5-flash';
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${cfg.geminiKey}`;
+    // key 走请求头而非 URL query：避免密钥进入代理/服务器日志与浏览器历史
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), cfg.timeoutMs || 120000);
     try {
       const r = await fetch(url, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: ctrl.signal,
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': cfg.geminiKey }, signal: ctrl.signal,
         body: JSON.stringify({
           system_instruction: { parts: [{ text: system }] },
           contents: [{ role: 'user', parts: [{ text: user }] }],

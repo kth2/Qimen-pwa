@@ -53,12 +53,15 @@ body {
     margin: 0 auto;
 }
 
-/* 九宫格网格 */
+/* 九宫格网格
+ * 网格线画法：用 gap+底色 而非单元格边框——minmax(0,1fr) 防止 nowrap 内容把列撑爆、
+ * 把右列推出外框导致"缺线"；gap 线永远完整。 */
 .pan-grid {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    grid-template-rows: repeat(3, 1fr);
-    gap: 0;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-rows: repeat(3, minmax(0, 1fr));
+    gap: 1px;
+    background-color: #ccc;
     width: 100%;
     max-width: 480px;
     aspect-ratio: 1/1;
@@ -71,18 +74,11 @@ body {
 /* 宫格样式 */
 .gong {
     position: relative;
-    border-right: 1px solid #ccc;
-    border-bottom: 1px solid #ccc;
     background-color: #fff;
     padding: 0;
     overflow: hidden;
-    aspect-ratio: 1/1;
-}
-.gong:nth-child(3n) {
-    border-right: none;
-}
-.gong:nth-child(7), .gong:nth-child(8), .gong:nth-child(9) {
-    border-bottom: none;
+    min-width: 0;
+    min-height: 0;
 }
 
 /* 宫位吉凶颜色 - 暂时去掉背景色 */
@@ -515,7 +511,7 @@ body {
     margin-bottom: 20px;
 }
 .pan-grid {
-    gap: 0;
+    gap: 1px;
 }
 .panel {
     margin-bottom: 15px;
