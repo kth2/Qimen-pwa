@@ -150,21 +150,42 @@
   async function getMethodText() {
     const key = school === 'feipan' ? 'feipan' : 'zhuanpan';
     if (_methodCache[key]) return _methodCache[key];
-    try { const r = await fetch('assets/' + key + '-method.md'); _methodCache[key] = await r.text(); } catch (e) { _methodCache[key] = ''; }
-    return _methodCache[key];
+    // 必须校验 r.ok 且只缓存成功结果：SW 离线时会回 503 "offline" 正文，
+    // 若把它(或空串)当纲要缓存，AI 将失去理论载荷、只凭模型自身知识臆断
+    const r = await fetch('assets/' + key + '-method.md');
+    if (!r.ok) throw new Error('解断纲要加载失败(HTTP ' + r.status + ')');
+    const text = (await r.text()).trim();
+    if (!text) throw new Error('解断纲要内容为空');
+    _methodCache[key] = text;
+    return text;
   }
+
+  // 追加在引擎 system prompt 之后的硬性纪律：把"参考纲要"收紧为"只许按纲要断"，
+  // 防止模型引入纲要之外的门派理论或自创断法
+  const AI_DISCIPLINE = [
+    '',
+    '=== 解读纪律（必须逐条遵守，违反即为错误回答） ===',
+    '1. 你的全部推理依据仅限于：①上方《解断方法纲要》所载规则与衍象；②盘面/引擎给出的数据（宫位元素、格局、九宫吉凶、用神落宫）。除此之外的任何理论一律禁止。',
+    '2. 严禁引入纲要之外的体系与断法：不得使用八字、六爻、梅花易数、紫微、塔罗、星座、心理学话术，也不得自创或"综合各家"发挥。即使你的训练知识中有其他奇门流派的断法，只要与本纲要不一致，一律以本纲要为准。',
+    '3. 用神以【用神落宫】所列为准，不得另取用神；吉凶格局以盘面/引擎已判者为准，不得推翻或另判。',
+    '4. 每一条结论后必须注明依据，格式如「依据：××落×宫，纲要·×××条」。凡写不出对应盘面元素和纲要条目的话，不要写。',
+    '5. 纲要与盘面数据未涉及之处，如实写明「纲要未载，不予推断」，禁止用模型自身知识补足或含糊其辞地编造。',
+    '6. 不要输出与占断无关的泛泛安慰语、免责声明或通用建议；只输出按骨架要求的占断内容。'
+  ].join('\n');
   async function runAI() {
     const pan = window._pan; if (!pan) { $('aiStatus').textContent = '请先排盘'; return; }
     const q = $('aiQuestion').value.trim(); if (!q) { $('aiStatus').textContent = '请填写占问'; return; }
     const btn = $('aiBtn'); btn.disabled = true; $('aiAnswer').style.display = 'none';
     $('aiStatus').textContent = 'AI 解读中…(云端约 10-30s，本机模型更久)';
     try {
-      const methodText = await getMethodText();
+      let methodText;
+      try { methodText = await getMethodText(); }
+      catch (me) { throw new Error(me.message + '。为避免 AI 脱离流派纲要自行发挥，已中止本次解读，请检查网络后重试。'); }
       // 占类：先按问句关键词自动识别；识别不出时回退到排盘所选「目的」
       const opts = { nianMingGan: $('aiNianMing').value, methodText, fallbackCategory: $('inPurpose').value };
       const builder = school === 'feipan' ? QM.feipanPredict : QM.zhuanpanPredict;
       const prompt = builder.buildPrompt(pan, q, opts);
-      const answer = await LLM.chat(prompt.system, prompt.user);
+      const answer = await LLM.chat(prompt.system + '\n' + AI_DISCIPLINE, prompt.user);
       const head = `【占类：${prompt.context.category || '综合'}　模型：${LLM.info().provider}/${LLM.info().model}】\n\n`;
       $('aiAnswer').textContent = head + (answer || '(无内容)'); $('aiAnswer').style.display = 'block';
       $('aiStatus').textContent = '完成';

@@ -27,7 +27,7 @@ const LLM = (() => {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: ctrl.signal,
         body: JSON.stringify({ model, stream: false, think: false,
           messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
-          options: { temperature: 0.4, num_ctx: 8192 } })
+          options: { temperature: 0.2, num_ctx: 8192 } })
       });
       if (!r.ok) throw new Error('Ollama HTTP ' + r.status);
       const d = await r.json();
@@ -53,7 +53,7 @@ const LLM = (() => {
         body: JSON.stringify({
           system_instruction: { parts: [{ text: system }] },
           contents: [{ role: 'user', parts: [{ text: user }] }],
-          generationConfig: { temperature: 0.4 }
+          generationConfig: { temperature: 0.2 }
         })
       });
       if (!r.ok) { const b = await r.text().catch(() => ''); throw new Error('Gemini HTTP ' + r.status + ' ' + b.slice(0, 160)); }
@@ -77,7 +77,7 @@ const LLM = (() => {
         signal: ctrl.signal,
         body: JSON.stringify({
           model: cfg.customModel || 'gpt-3.5-turbo',
-          temperature: 0.4,
+          temperature: 0.2,
           messages: [{ role: 'system', content: system }, { role: 'user', content: user }]
         })
       });
