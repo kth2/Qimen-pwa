@@ -6,7 +6,12 @@ const LLM = (() => {
   const LS = 'qm_llm_cfg';
 
   function getCfg() {
-    try { return JSON.parse(localStorage.getItem(LS)) || {}; } catch (e) { return {}; }
+    try {
+      const cfg = JSON.parse(localStorage.getItem(LS)) || {};
+      // 旧默认 gemini-1.5-flash 曾被 saveCfg 自动写进本机配置且已退役，读取时静默迁移到新默认
+      if (cfg.geminiModel === 'gemini-1.5-flash') cfg.geminiModel = 'gemini-3.5-flash';
+      return cfg;
+    } catch (e) { return {}; }
   }
   function saveCfg(cfg) { localStorage.setItem(LS, JSON.stringify(cfg)); }
 
@@ -42,7 +47,7 @@ const LLM = (() => {
   // 2) Gemini 免费版
   async function callGemini(cfg, system, user) {
     if (!cfg.geminiKey) throw new Error('未填写 Gemini API Key（在 Google AI Studio 免费获取）');
-    const model = cfg.geminiModel || 'gemini-1.5-flash';
+    const model = cfg.geminiModel || 'gemini-3.5-flash';
     // key 走请求头而非 URL query：避免密钥进入代理/服务器日志与浏览器历史
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
     const ctrl = new AbortController();
@@ -98,7 +103,7 @@ const LLM = (() => {
   function info() {
     const cfg = getCfg();
     const p = cfg.provider || 'gemini';
-    const model = p === 'local' ? (cfg.ollamaModel || 'qwen3:latest') : p === 'custom' ? (cfg.customModel || '?') : (cfg.geminiModel || 'gemini-1.5-flash');
+    const model = p === 'local' ? (cfg.ollamaModel || 'qwen3:latest') : p === 'custom' ? (cfg.customModel || '?') : (cfg.geminiModel || 'gemini-3.5-flash');
     return { provider: p, model };
   }
 
