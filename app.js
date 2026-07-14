@@ -185,9 +185,16 @@
       const opts = { nianMingGan: $('aiNianMing').value, methodText, fallbackCategory: $('inPurpose').value };
       const builder = school === 'feipan' ? QM.feipanPredict : QM.zhuanpanPredict;
       const prompt = builder.buildPrompt(pan, q, opts);
-      const answer = await LLM.chat(prompt.system + '\n' + AI_DISCIPLINE, prompt.user);
       const head = `【占类：${prompt.context.category || '综合'}　模型：${LLM.info().provider}/${LLM.info().model}】\n\n`;
-      $('aiAnswer').textContent = head + (answer || '(无内容)'); $('aiAnswer').style.display = 'block';
+      // 流式：边生成边显示，既提升观感也避免长响应在网关侧 504
+      $('aiStatus').textContent = 'AI 解读中…(边生成边显示)';
+      $('aiAnswer').style.display = 'block'; $('aiAnswer').textContent = head;
+      let streamed = false;
+      const answer = await LLM.chat(prompt.system + '\n' + AI_DISCIPLINE, prompt.user, (full) => {
+        streamed = true; $('aiAnswer').textContent = head + (full || '');
+      });
+      if (!streamed || !answer) $('aiAnswer').textContent = head + (answer || '(无内容)');
+      else $('aiAnswer').textContent = head + answer; // 收尾用清理后的完整文本(去 <think> 等)
       $('aiStatus').textContent = '完成';
     } catch (e) { $('aiStatus').textContent = '出错：' + (e.message || e); }
     finally { btn.disabled = false; }
