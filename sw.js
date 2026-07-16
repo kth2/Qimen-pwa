@@ -3,7 +3,7 @@
  * 后台再取新版本更新缓存，下次打开即最新；跨域(AI provider)与非 GET 一律不拦截。
  * CACHE 版本号由 build.js 在产出 dist/ 时以内容哈希盖章（源文件保持 dev 占位）。
  */
-const CACHE = 'qimen-pwa-97478e3fe9';
+const CACHE = 'qimen-pwa-066950f298';
 const ASSETS = [
   './', './index.html', './style.css', './engine.bundle.js', './llm.js', './app.js',
   './manifest.json', './assets/feipan-method.md', './assets/zhuanpan-method.md', './assets/icon.svg'
@@ -17,6 +17,10 @@ self.addEventListener('activate', (e) => {
   e.waitUntil(
     caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
+      // 通知已打开的页面：新版本已激活。页面据此自动刷新一次，
+      // 消除 stale-while-revalidate 的"首开跑旧代码"窗口
+      .then(() => self.clients.matchAll({ type: 'window' }))
+      .then((cs) => cs.forEach((c) => c.postMessage({ type: 'sw-updated', cache: CACHE })))
   );
 });
 

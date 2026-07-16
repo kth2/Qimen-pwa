@@ -99,8 +99,10 @@ const LLM = (() => {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse`;
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), cfg.timeoutMs || 180000);
-    // 限定输出长度以收敛延迟；thinkingBudget 仅在用户显式配置时下发(不同模型字段支持不一，默认不发以免 400)
-    const genCfg = { temperature: 0.2, maxOutputTokens: Number(cfg.maxTokens) || 2048 };
+    // maxOutputTokens 对思考型模型(如 3.5-flash)是"思考+回答"的总额——
+    // 定 2048 会被思考吃光、答案截断甚至为空，故默认 8192；thinkingBudget
+    // 仅在用户显式配置时下发(不同模型字段支持不一，默认不发以免 400)
+    const genCfg = { temperature: 0.2, maxOutputTokens: Number(cfg.maxTokens) || 8192 };
     if (cfg.geminiThinkingBudget != null && cfg.geminiThinkingBudget !== '')
       genCfg.thinkingConfig = { thinkingBudget: Number(cfg.geminiThinkingBudget) };
     if (isRetry && onToken) onToken(''); // 重试：清空上次流出的残缺内容
@@ -143,13 +145,18 @@ const LLM = (() => {
         body: JSON.stringify({
           model: cfg.customModel || 'gpt-3.5-turbo',
           temperature: 0.2,
-          max_tokens: Number(cfg.maxTokens) || 2048,
+          max_tokens: Number(cfg.maxTokens) || 4096, // 推理型模型的 <think> 也占此额度
+
           messages: [{ role: 'system', content: system }, { role: 'user', content: user }]
         })
       });
       if (!r.ok) { const b = await r.text().catch(() => ''); const e = new Error('自定义端点 HTTP ' + r.status + ' ' + b.slice(0, 160)); e.status = r.status; throw e; }
       const d = await r.json();
       return stripThink(d.choices && d.choices[0] && d.choices[0].message && d.choices[0].message.content || '');
+    } catch (e) {
+      // 不做转换会把浏览器原生 "signal is aborted without reason" 直漏到界面
+      if (e.name === 'AbortError') throw new Error('自定义端点生成超时（可在设置调大 timeoutMs 或降低 maxTokens）');
+      throw e;
     } finally { clearTimeout(timer); }
   }
 

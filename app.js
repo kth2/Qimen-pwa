@@ -172,6 +172,30 @@
     '5. 纲要与盘面数据未涉及之处，如实写明「纲要未载，不予推断」，禁止用模型自身知识补足或含糊其辞地编造。',
     '6. 不要输出与占断无关的泛泛安慰语、免责声明或通用建议；只输出按骨架要求的占断内容。'
   ].join('\n');
+  // 转盘断局补充：日干(求测人)/时干(所占之事)天盘落宫。
+  // 引擎序列化只给四柱与九宫干，不点明二者落宫；此处算好喂给 AI，
+  // 配合纲要新增的「日干为人、时干为事」总纲落地。甲不上天盘，遁于旬首、以值符落宫论。
+  function riShiGanBlock(pan) {
+    const sz = pan.siZhu || {}, tianPan = pan.tianPan || {};
+    const riGan = (sz.day || '').charAt(0), shiGan = (sz.time || '').charAt(0);
+    if (!riGan || !shiGan) return '';
+    const fmt = (label, gan) => {
+      if (gan === '甲') {
+        const zf = pan.zhiFuLuoGong || pan.zhiFuGong, JG = QM.JIU_GONG[zf] || {};
+        return `  - ${label}甲：甲遁于旬首，以值符落宫论 → ${zf}宫(${JG.name || '?'}·${JG.direction || '?'})`;
+      }
+      for (const g in tianPan) if (tianPan[g] === gan) {
+        const JG = QM.JIU_GONG[g] || {};
+        return `  - ${label}${gan}：天盘落${g}宫(${JG.name || '?'}·${JG.direction || '?'})，同宫地盘干${(pan.diPan || {})[g] || '?'}`;
+      }
+      return `  - ${label}${gan}：天盘未见，以地盘${gan}所在宫论`;
+    };
+    return ['', '【日干/时干落宫（转盘断局补充）】',
+      fmt('日干(求测人)', riGan),
+      fmt('时干(所占之事/对方)', shiGan),
+      '请按纲要「日干为人、时干为事」：先审时干宫对日干宫(或年命宫)的生克盗泄定成败，再合值符值使、用神宫参断。'].join('\n');
+  }
+
   async function runAI() {
     const pan = window._pan; if (!pan) { $('aiStatus').textContent = '请先排盘'; return; }
     const q = $('aiQuestion').value.trim(); if (!q) { $('aiStatus').textContent = '请填写占问'; return; }
@@ -190,7 +214,8 @@
       $('aiStatus').textContent = 'AI 解读中…(边生成边显示)';
       $('aiAnswer').style.display = 'block'; $('aiAnswer').textContent = head;
       let streamed = false;
-      const answer = await LLM.chat(prompt.system + '\n' + AI_DISCIPLINE, prompt.user, (full) => {
+      const userMsg = prompt.user + (school !== 'feipan' ? riShiGanBlock(pan) : '');
+      const answer = await LLM.chat(prompt.system + '\n' + AI_DISCIPLINE, userMsg, (full) => {
         streamed = true; $('aiAnswer').textContent = head + (full || '');
       });
       if (!streamed || !answer) $('aiAnswer').textContent = head + (answer || '(无内容)');
@@ -217,6 +242,19 @@
     $('cfgProvider').addEventListener('change', showProvFields);
     $('cfgSaveBtn').addEventListener('click', saveCfg);
     $('aiBtn').addEventListener('click', runAI);
+    // SW 更新后自动刷新一次：消除"首开跑旧代码"的窗口，测到的永远是最新版。
+    // 仅在「更新」时刷(首次安装 hadController=false 不刷)；AI 生成中或答案正在阅读时
+    // 不打断，只提示，下次打开自然生效
+    if ('serviceWorker' in navigator) {
+      const hadController = !!navigator.serviceWorker.controller;
+      let reloaded = false;
+      navigator.serviceWorker.addEventListener('message', (e) => {
+        if (!e.data || e.data.type !== 'sw-updated' || !hadController || reloaded) return;
+        const busy = $('aiBtn').disabled || $('aiAnswer').style.display === 'block';
+        if (busy) { $('aiStatus').textContent = '发现新版本，下次打开自动生效'; return; }
+        reloaded = true; location.reload();
+      });
+    }
     loadCfgForm();
     cast();
   }
