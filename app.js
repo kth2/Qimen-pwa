@@ -110,11 +110,25 @@
     if (d && t) { const dt = new Date(d + 'T' + t); if (!isNaN(dt)) return dt; }
     return new Date();
   }
+  // 自定义局：把 select 的 "yang-3" 解析成引擎起局对象；空串=跟随日期自动起局。
+  // 该对象注入 calculate(opts.juShu)，引擎据此重排地盘并连带重算值符/值使/天盘等，
+  // 四柱/旬首/空亡等由时辰决定者不变（强制局仅换地盘底，符合手工指定局的做法）。
+  function getJuShuOverride() {
+    const v = $('inJuShu').value;
+    if (!v) return null;
+    const [type, number] = v.split('-');
+    return { type, number, yuan: '',
+      fullName: `${type === 'yin' ? '阴遁' : '阳遁'}${number}局（自定义）`, formatCode: v };
+  }
   function cast() {
-    const date = getDate(), purpose = $('inPurpose').value;
+    const date = getDate(), purpose = $('inPurpose').value, juShu = getJuShuOverride();
+    const opts = school === 'feipan'
+      ? { method: '时家', purpose }
+      : { type: '四柱', method: '时家', purpose, location: '默认位置' };
+    if (juShu) opts.juShu = juShu;
     const pan = school === 'feipan'
-      ? QM.feipanQimen.calculate(date, { method: '时家', purpose })
-      : QM.qimen.calculate(date, { type: '四柱', method: '时家', purpose, location: '默认位置' });
+      ? QM.feipanQimen.calculate(date, opts)
+      : QM.qimen.calculate(date, opts);
     if (pan.error) { $('analysis').innerHTML = `<div class="panel">排盘出错：${esc(pan.message)}</div>`; return; }
     if (!pan.jiuGongAnalysis) pan.jiuGongAnalysis = {};
     window._pan = pan;
@@ -239,6 +253,7 @@
       cast();
     });
     $('castBtn').addEventListener('click', cast);
+    $('inJuShu').addEventListener('change', cast);
     $('cfgProvider').addEventListener('change', showProvFields);
     $('cfgSaveBtn').addEventListener('click', saveCfg);
     $('aiBtn').addEventListener('click', runAI);
