@@ -1,8 +1,10 @@
 /* 奇门遁甲 PWA 控制器 + 渲染（client-side） */
 (function () {
   const QM = window.QM;
+  const SX = window.ShanXiang;
   const $ = (id) => document.getElementById(id);
   let school = 'zhuanpan';
+  let mode = 'shijia'; // 'shijia'(时家) | 'shanxiang'(山向/宅盘)
 
   /* ---------- 五行配色 ---------- */
   const ganColor = (g) => ({ '戊': 'wuxing-tu', '己': 'wuxing-tu', '庚': 'wuxing-jin', '辛': 'wuxing-jin', '壬': 'wuxing-shui', '癸': 'wuxing-shui', '丁': 'wuxing-huo', '丙': 'wuxing-huo', '乙': 'wuxing-mu', '甲': 'wuxing-mu' }[g] || '');
@@ -68,8 +70,11 @@
   function renderBasicInfo(pan) {
     const bi = pan.basicInfo || {}, sz = pan.siZhu || {};
     const zfGong = pan.zhiFuLuoGong || pan.zhiFuGong;
+    const sx = pan.shanXiang;
     $('basicInfo').style.display = 'block';
     $('basicInfo').innerHTML = [
+      sx ? `<span class="item" style="color:#8a6d3b;"><b>山向/宅盘</b> 坐${esc(sx.sitting.name)}(${esc(sx.sitting.gua)})向${esc(sx.facing.name)}(${esc(sx.facing.gua)}) · 定局据 ${esc(sx.juBasis.jieqi)}${esc(sx.juBasis.yuan)}</span>` : '',
+      sx ? `<span class="item muted">时间激活：${esc(sx.activation.source)}</span>` : '',
       `<span class="item"><b>公历</b> ${esc(bi.date)}</span>`,
       `<span class="item"><b>四柱</b> ${esc(sz.year)} ${esc(sz.month)} ${esc(sz.day)} ${esc(sz.time)}</span>`,
       `<span class="item"><b>局</b> ${esc(pan.juShu && pan.juShu.fullName)}</span>`,
@@ -120,15 +125,31 @@
     return { type, number, yuan: '',
       fullName: `${type === 'yin' ? '阴遁' : '阳遁'}${number}局（自定义）`, formatCode: v };
   }
+  // 山向盘：坐山定局，日期作时间激活层。复用转盘引擎机器(经 core/shanxiang.js)。
+  function castShanXiang() {
+    const purpose = $('inPurpose').value;
+    const sitting = $('inSitting').value;         // 二十四山名
+    const facing = $('inFacing').value || null;   // 空=自动取冲
+    const method = $('inSxMethod').value || 'standard';
+    // 有填日期时间则作激活时间(混合盘)，否则默认当下
+    const d = $('inDate').value, t = $('inTime').value;
+    const date = (d && t) ? new Date(d + 'T' + t) : undefined;
+    return SX.generateShanXiangChart({ sitting, facing, date, method, purpose }, QM);
+  }
   function cast() {
-    const date = getDate(), purpose = $('inPurpose').value, juShu = getJuShuOverride();
-    const opts = school === 'feipan'
-      ? { method: '时家', purpose }
-      : { type: '四柱', method: '时家', purpose, location: '默认位置' };
-    if (juShu) opts.juShu = juShu;
-    const pan = school === 'feipan'
-      ? QM.feipanQimen.calculate(date, opts)
-      : QM.qimen.calculate(date, opts);
+    let pan;
+    if (mode === 'shanxiang') {
+      pan = castShanXiang();
+    } else {
+      const date = getDate(), purpose = $('inPurpose').value, juShu = getJuShuOverride();
+      const opts = school === 'feipan'
+        ? { method: '时家', purpose }
+        : { type: '四柱', method: '时家', purpose, location: '默认位置' };
+      if (juShu) opts.juShu = juShu;
+      pan = school === 'feipan'
+        ? QM.feipanQimen.calculate(date, opts)
+        : QM.qimen.calculate(date, opts);
+    }
     if (pan.error) { $('analysis').innerHTML = `<div class="panel">排盘出错：${esc(pan.message)}</div>`; return; }
     if (!pan.jiuGongAnalysis) pan.jiuGongAnalysis = {};
     window._pan = pan;
@@ -228,7 +249,11 @@
       $('aiStatus').textContent = 'AI 解读中…(边生成边显示)';
       $('aiAnswer').style.display = 'block'; $('aiAnswer').textContent = head;
       let streamed = false;
-      const userMsg = prompt.user + (school !== 'feipan' ? riShiGanBlock(pan) : '');
+      const sx = pan.shanXiang;
+      const sxBlock = sx ? ['', '【山向/宅盘背景】',
+        `此为宅盘：坐${sx.sitting.name}山(${sx.sitting.gua}宫)、向${sx.facing.name}(${sx.facing.gua}宫)，据${sx.juBasis.jieqi}${sx.juBasis.yuan}坐山定局得${pan.juShu && pan.juShu.fullName || ''}，时间激活层由所给日期起符。`,
+        '请以阳宅/风水视角断：向首宫为纳气之口(看门/开门/生门旺相为吉)，坐山宫为宅主根基，中五为宅心；结合各方位九宫吉凶给出宜忌与调整方位。仍严守纲要，不得引入纲要外体系。'].join('\n') : '';
+      const userMsg = prompt.user + (school !== 'feipan' ? riShiGanBlock(pan) : '') + sxBlock;
       const answer = await LLM.chat(prompt.system + '\n' + AI_DISCIPLINE, userMsg, (full) => {
         streamed = true; $('aiAnswer').textContent = head + (full || '');
       });
@@ -246,6 +271,29 @@
     const p2 = (n) => String(n).padStart(2, '0');
     $('inDate').value = `${now.getFullYear()}-${p2(now.getMonth() + 1)}-${p2(now.getDate())}`;
     $('inTime').value = now.toTimeString().slice(0, 5);
+    // 填充二十四山下拉(坐山/向首)——数据来自纯核心模块，默认坐子(北)
+    if (SX && SX.MOUNTAINS) {
+      const optsHtml = SX.MOUNTAINS.map(m => `<option value="${m.name}">${m.name}（${m.gua} ${m.center}°）</option>`).join('');
+      $('inSitting').innerHTML = optsHtml; $('inSitting').value = '子';
+      $('inFacing').innerHTML = '<option value="">（自动取冲）</option>' + optsHtml;
+    }
+    // 模式切换：时家 / 山向。山向复用转盘引擎，故强制 school=zhuanpan 并隐藏无关控件。
+    function applyMode() {
+      const sx = mode === 'shanxiang';
+      $('shanxiangInputs').style.display = sx ? '' : 'none';
+      $('schoolSeg').style.display = sx ? 'none' : '';
+      $('inJuShu').closest('label').style.display = sx ? 'none' : '';
+      if (sx && school === 'feipan') { // 山向不支持飞盘渲染，回退转盘
+        school = 'zhuanpan';
+        [...$('schoolSeg').children].forEach(x => x.classList.toggle('on', x.dataset.school === 'zhuanpan'));
+      }
+    }
+    $('modeSeg').addEventListener('click', e => {
+      const b = e.target.closest('button[data-mode]'); if (!b) return;
+      mode = b.dataset.mode;
+      [...$('modeSeg').children].forEach(x => x.classList.toggle('on', x === b));
+      applyMode(); cast();
+    });
     $('schoolSeg').addEventListener('click', e => {
       const b = e.target.closest('button[data-school]'); if (!b) return;
       school = b.dataset.school;
@@ -254,6 +302,7 @@
     });
     $('castBtn').addEventListener('click', cast);
     $('inJuShu').addEventListener('change', cast);
+    ['inSitting', 'inFacing', 'inSxMethod'].forEach(id => $(id).addEventListener('change', cast));
     $('cfgProvider').addEventListener('change', showProvFields);
     $('cfgSaveBtn').addEventListener('click', saveCfg);
     $('aiBtn').addEventListener('click', runAI);

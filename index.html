@@ -34,9 +34,29 @@
   <h2 style="text-align:center;margin:6px 0;">奇门遁甲 · 排盘占断</h2>
 
   <div class="pwa-controls">
+    <span class="seg" id="modeSeg">
+      <button data-mode="shijia" class="on">时家奇门</button>
+      <button data-mode="shanxiang">山向奇门 / 宅盘</button>
+    </span>
     <span class="seg" id="schoolSeg">
       <button data-school="zhuanpan" class="on">转盘</button>
       <button data-school="feipan">飞盘（括囊）</button>
+    </span>
+    <!-- 山向奇门专属输入：坐山定局，日期作时间激活层 -->
+    <span id="shanxiangInputs" style="display:none;">
+      <label>坐山
+        <select id="inSitting"></select>
+      </label>
+      <label>向首
+        <select id="inFacing">
+          <option value="">（自动取冲）</option>
+        </select>
+      </label>
+      <label>定局法
+        <select id="inSxMethod">
+          <option value="standard">坐山三元定局（standard）</option>
+        </select>
+      </label>
     </span>
     <label>日期 <input type="date" id="inDate"></label>
     <label>时间 <input type="time" id="inTime"></label>
@@ -114,6 +134,7 @@
   <p class="muted" style="text-align:center;">排盘/解断离线可用 · AI 需所选 provider 可达 · Key 仅存于本机</p>
 
   <script src="engine.bundle.js"></script>
+  <script src="core/shanxiang.js"></script>
   <script src="llm.js"></script>
   <script src="app.js"></script>
   <script>
