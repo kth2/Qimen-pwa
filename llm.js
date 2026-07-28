@@ -145,7 +145,7 @@ const LLM = (() => {
         body: JSON.stringify({
           model: cfg.customModel || 'gpt-3.5-turbo',
           temperature: Number(cfg.temperature) || 0.35,
-          max_tokens: Number(cfg.maxTokens) || 8192, // 推理型模型的 <think> 也占此额度，给足以免详尽答案被截断
+          max_tokens: Number(cfg.maxTokens) || 16384, // 与 Gemini 对齐：推理型模型 <think> 也占此额度，给足以免详尽答案被截断（严格端点可用 cfg.maxTokens 下调）
 
           messages: [{ role: 'system', content: system }, { role: 'user', content: user }]
         })
