@@ -99,10 +99,10 @@ const LLM = (() => {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse`;
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), cfg.timeoutMs || 180000);
-    // maxOutputTokens 对思考型模型(如 3.5-flash)是"思考+回答"的总额——
-    // 定 2048 会被思考吃光、答案截断甚至为空，故默认 8192；thinkingBudget
-    // 仅在用户显式配置时下发(不同模型字段支持不一，默认不发以免 400)
-    const genCfg = { temperature: 0.2, maxOutputTokens: Number(cfg.maxTokens) || 8192 };
+    // maxOutputTokens 对思考型模型(如 3.5-flash)是"思考+回答"的总额——思考会占额度，
+    // 故默认给足 16384，确保详尽解读不被截断；temperature 0.35 兼顾行文丰满与稳定。
+    // thinkingBudget 仅在用户显式配置时下发(不同模型字段支持不一，默认不发以免 400)。
+    const genCfg = { temperature: Number(cfg.temperature) || 0.35, maxOutputTokens: Number(cfg.maxTokens) || 16384 };
     if (cfg.geminiThinkingBudget != null && cfg.geminiThinkingBudget !== '')
       genCfg.thinkingConfig = { thinkingBudget: Number(cfg.geminiThinkingBudget) };
     if (isRetry && onToken) onToken(''); // 重试：清空上次流出的残缺内容
@@ -144,8 +144,8 @@ const LLM = (() => {
         signal: ctrl.signal,
         body: JSON.stringify({
           model: cfg.customModel || 'gpt-3.5-turbo',
-          temperature: 0.2,
-          max_tokens: Number(cfg.maxTokens) || 4096, // 推理型模型的 <think> 也占此额度
+          temperature: Number(cfg.temperature) || 0.35,
+          max_tokens: Number(cfg.maxTokens) || 8192, // 推理型模型的 <think> 也占此额度，给足以免详尽答案被截断
 
           messages: [{ role: 'system', content: system }, { role: 'user', content: user }]
         })

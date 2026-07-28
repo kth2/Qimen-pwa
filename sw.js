@@ -3,7 +3,7 @@
  * 后台再取新版本更新缓存，下次打开即最新；跨域(AI provider)与非 GET 一律不拦截。
  * CACHE 版本号由 build.js 在产出 dist/ 时以内容哈希盖章（源文件保持 dev 占位）。
  */
-const CACHE = 'qimen-pwa-c58fefb129';
+const CACHE = 'qimen-pwa-b1e64dc9a2';
 const ASSETS = [
   './', './index.html', './style.css', './engine.bundle.js', './core/shanxiang.js', './llm.js', './app.js',
   './manifest.json', './assets/feipan-method.md', './assets/zhuanpan-method.md', './assets/icon.svg'
