@@ -183,7 +183,8 @@
   /* ---------- AI 占断 ---------- */
   let _methodCache = {};
   async function getMethodText() {
-    const key = school === 'feipan' ? 'feipan' : 'zhuanpan';
+    // 山向/宅盘有专属纲要（阳宅方位断法），不再借用时家转盘纲要
+    const key = mode === 'shanxiang' ? 'shanxiang' : (school === 'feipan' ? 'feipan' : 'zhuanpan');
     if (_methodCache[key]) return _methodCache[key];
     // 必须校验 r.ok 且只缓存成功结果：SW 离线时会回 503 "offline" 正文，
     // 若把它(或空串)当纲要缓存，AI 将失去理论载荷、只凭模型自身知识臆断
@@ -258,7 +259,10 @@
       const sxBlock = sx ? ['', '【山向/宅盘背景】',
         `此为宅盘：坐${sx.sitting.name}山(${sx.sitting.gua}宫)、向${sx.facing.name}(${sx.facing.gua}宫)，据${sx.juBasis.jieqi}${sx.juBasis.yuan}坐山定局得${pan.juShu && pan.juShu.fullName || ''}，时间激活层由所给日期起符。`,
         '请以阳宅/风水视角断：向首宫为纳气之口(看门/开门/生门旺相为吉)，坐山宫为宅主根基，中五为宅心；结合各方位九宫吉凶给出宜忌与调整方位。仍严守纲要，不得引入纲要外体系。'].join('\n') : '';
-      const userMsg = prompt.user + (school !== 'feipan' ? riShiGanBlock(pan) : '') + sxBlock;
+      // 旺衰与四害：引擎不算，此处补全后注入——断强弱成败的关键依据
+      const wsBlock = (window.WangShuai && window.WangShuai.toPromptBlock)
+        ? window.WangShuai.toPromptBlock(pan, { JIU_GONG: QM.JIU_GONG }) : '';
+      const userMsg = prompt.user + (school !== 'feipan' ? riShiGanBlock(pan) : '') + wsBlock + sxBlock;
       const answer = await LLM.chat(prompt.system + '\n' + AI_DISCIPLINE, userMsg, (full) => {
         streamed = true; $('aiAnswer').textContent = head + (full || '');
       });
