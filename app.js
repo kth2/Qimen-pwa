@@ -262,7 +262,13 @@
       // 旺衰与四害：引擎不算，此处补全后注入——断强弱成败的关键依据
       const wsBlock = (window.WangShuai && window.WangShuai.toPromptBlock)
         ? window.WangShuai.toPromptBlock(pan, { JIU_GONG: QM.JIU_GONG }) : '';
-      const userMsg = prompt.user + (school !== 'feipan' ? riShiGanBlock(pan) : '') + wsBlock + sxBlock;
+      // 应期与数字：引擎虽算出空亡"地支"，序列化却只写宫号，AI 只能臆造填实/冲实之日。
+      // 此处把空亡支、填实/冲实日、驿马、冲墓日、各宫干→日辰/河图数全部算好写明。
+      const ysGongs = ((prompt.context && prompt.context.yong && prompt.context.yong.located) || [])
+        .map(x => x && x.gong).filter(Boolean);
+      const yqBlock = (window.YingQi && window.YingQi.toPromptBlock)
+        ? window.YingQi.toPromptBlock(pan, { JIU_GONG: QM.JIU_GONG, yongShenGongs: ysGongs }) : '';
+      const userMsg = prompt.user + (school !== 'feipan' ? riShiGanBlock(pan) : '') + wsBlock + yqBlock + sxBlock;
       const answer = await LLM.chat(prompt.system + '\n' + AI_DISCIPLINE, userMsg, (full) => {
         streamed = true; $('aiAnswer').textContent = head + (full || '');
       });
