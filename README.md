@@ -16,6 +16,13 @@ GitHub Pages 静态托管。支持 **时家奇门**（转盘 / 飞盘）与 **�
 | `core/wangshuai.test.js` | 旺衰核心单元测试（`node core/wangshuai.test.js`） |
 | `core/yingqi.js` | **应期与数字核心（纯函数、可移植）**，见下节 |
 | `core/yingqi.test.js` | 应期核心单元测试（`node core/yingqi.test.js`） |
+| `core/yongshen.js` | **占类用神核心（纯函数、可移植）**，见「结构化推理层」 |
+| `core/yongshen.test.js` | 用神核心单元测试（`node core/yongshen.test.js`） |
+| `core/evidence.js` | **证据包核心（纯函数、可移植）**，见「结构化推理层」 |
+| `core/evidence.test.js` | 证据包单元测试（`node core/evidence.test.js`） |
+| `core/reconciliation.test.js` | 用神归属与两派隔离回归测试（`node core/reconciliation.test.js`） |
+| `knowledge/symbols.json` | 结构化象义知识库（五行/八卦/九宫/天干/九星/八门/八神） |
+| `knowledge/domains.json` | 占类 → 用神角色映射（我方/主用神/辅用神/对方） |
 | `llm.js` | AI provider（Gemini 流式 / Ollama / 自定义端点） |
 | `assets/*-method.md` | 转盘 / 飞盘 / 山向宅盘 解断纲要（AI 理论载荷） |
 | `sw.js` | Service Worker（离线缓存 + 更新自动刷新） |
@@ -228,3 +235,180 @@ YQ.heTuOf('丙');                               // → 7
 ```bash
 python3 -m http.server 8000   # 然后访问 http://localhost:8000
 ```
+
+---
+
+## 结构化推理层（Structured Reasoning Layer）
+
+### 为什么加这一层
+
+原先送进 AI 的是一大段自然语言盘面文本，模型难以分辨其中**哪些是引擎算出来的事实、
+哪些是应用给的规则、哪些是传统象义**，于是常把三者混为一谈，甚至自行补一套用神与象义。
+本层不改动排盘与既有分析，只在其上把喂给模型的内容重新组织为可核验的结构：
+
+```
+用户问题 → 占类(domain) → 用神(YongShen) → 既有盘面/分析 → 证据包(Evidence) → 既有 LLM 层
+```
+
+分工如下：
+
+1. **排盘计算** —— `engine.bundle.js`（未改动）
+2. **确定性分析** —— 引擎 `jiuGongAnalysis`/`geju` + `core/wangshuai.js` + `core/yingqi.js` + `core/shanxiang.js`（均未改动）
+3. **符号知识** —— `knowledge/symbols.json`
+4. **占类用神** —— `knowledge/domains.json` + `core/yongshen.js`
+5. **LLM 解读** —— `llm.js`（未改动）
+
+模型收到的不再只是原始盘面文本，而是一份**结构化证据包**。
+
+### 三类证据
+
+| 类型 | 含义 | 对模型的约束 |
+|---|---|---|
+| `FACT` | 引擎算得的盘面事实（用神落宫、空亡、驿马、四柱、局） | 不得改写、不得虚构 |
+| `RULE` | 应用内确定性分析（引擎吉凶/格局、旺衰四害、应期数字） | 优先于模型自身判断 |
+| `SYMBOL` | 取自 `symbols.json` 的传统象义 | 优先采用，可组合，不可替换为自创象义 |
+
+「证据优先」而非「只许用证据」：模型仍可组合象义、推演情境、说明关系、表达不确定；
+但不得另立用神体系、不得虚构盘面元素、不得推翻确定性计算。
+
+### `knowledge/symbols.json`
+
+结构化象义库（v1.0.0），分七类：`wuxing` / `bagua` / `jiugong` / `tiangan` / `jiuxing` / `bamen` / `bashen`。
+每条统一 schema：
+
+```json
+{ "name": "...", "wuxing": "...",
+  "core": [], "people": [], "events": [], "objects": [],
+  "places": [], "body": [], "psychology": [], "industries": [], "keywords": [] }
+```
+
+**这是初版，刻意保守**：只收录两派纲要与通行奇门典籍共有、无争议的基础衍象，宁缺勿造；
+不适用的栏位留空数组，不代表「无此象」。`industries` / `psychology` 两栏属现代引申而非古籍原文。
+后续应逐类扩充与校订。
+
+### `knowledge/domains.json`
+
+占类 → 用神角色映射，支持 `general` / `wealth` / `career` / `relationship` / `health` / `lawsuit` / `lost_item`。
+每个占类声明四个角色槽（`self` / `primary` / `secondary` / `opponent`）、相关象义与查看优先级，
+并通过 `uiPurposes`（界面「目的」下拉框）与 `engineCategories`（引擎既有中文占类）与现有系统对接。
+
+**与引擎既有用神并存，不取代**：引擎 `YONG_SHEN_RULES` 选出的用神经 `options.engineYong`
+传入后原样保留在 `result.engine`，并一并纳入待查名单，确保两层看的是同一批元素。
+感情占类**未**引入性别硬编码取用；`乙` 为引擎既有规则所取，此处保留以免与引擎判定冲突。
+
+### `core/yongshen.js`
+
+```js
+YongShen.load(domainsJson);
+YongShen.normalizeDomain('财运');            // → 'wealth'（认不出一律回落 general）
+YongShen.resolve({ domain, chart, options }); // → { domain, roles, priority, located, missing, engine, source }
+```
+
+确定性、无副作用。**只回答「该看什么」，绝不判吉凶**——吉凶仍归引擎。
+`located` 逐条给出用神元素的落宫与同宫门/星/神/干；盘上未见者列入 `missing`，
+供提示层如实声明「未见」而非编造落宫。兼容转盘 / 飞盘 / 山向三种 schema。
+
+### `core/evidence.js`
+
+```js
+Evidence.load(symbolsJson);
+Evidence.getSymbol('bamen', '生门');
+Evidence.build({ question, domain, chart, yongshen, wangshuai, yingqi, shanxiang });
+Evidence.toPromptBlock(evidence);
+```
+
+**只收录用神相关元素的象义，绝不把整个知识库倾倒进提示词**（有单测把关条目数与体积）。
+未传入的分析结果一律缺席，不凭空补条目。输出可 JSON 序列化。
+
+### 向后兼容
+
+本层是**附加的**：
+`knowledge/*.json` 加载失败、或证据构建抛错时，`app.js` 自动退回原有的纯文本纲要流程，功能不减；
+不传 `domain` 时按 `general` 处理。排盘、渲染、九宫详解、既有 AI 纲要纪律均未改动。
+
+### 运行测试
+
+```bash
+node core/yongshen.test.js
+node core/evidence.test.js
+```
+
+---
+
+## 用神来源归属与优先级（Phase 1.1）
+
+### 三个不同的概念，不得合并
+
+审计发现最初的实现把三者揉进了同一个 `roles` 字段，导致「这个用神是谁定的」无法回答。
+现已严格分列：
+
+| 概念 | 字段 | 回答的问题 | 谁产生 |
+|---|---|---|---|
+| 引擎用神 | `engineRule` | **本盘**实际算出的用神是什么？ | `engine.bundle.js` |
+| 占类用神 | `domainRule` | 这**类**问题应该看什么？ | `knowledge/domains.json` |
+| 查看清单 | `examine` | 本次最终看哪些元素？ | 二者归并，逐条带 `origin` |
+| 裁定 | `resolution` | 谁说了算、为什么、排除了什么？ | `core/yongshen.js` |
+
+`examine` 中每一条都带 `origin: 'engine' | 'domain' | 'both'`，证据包与提示词均按此标注。
+
+### 优先级规则（确定性）
+
+```
+引擎用神（针对本盘，权威）
+      ↓  引擎未匹配到特定占类时才轮到
+占类用神（通用查看范围，仅作补充）
+      ↓
+证据包（分列呈现，标明裁定）
+      ↓
+LLM（按标注取舍，不得自行另取）
+```
+
+- 引擎 `matched === true` → `resolution.authority = 'engine'`。占类映射降为补充视角，**不覆盖**引擎判定。
+- 引擎 `matched === false`（综合类）→ `resolution.authority = 'domain'`。
+- 两者的差异记入 `resolution.conflicts`（`domain-extra` / `engine-extra`），留痕供人工校订，**不自动取舍**。
+
+### 零串味：盘别隔离
+
+`knowledge/domains.json` 的取用**全部源自转盘传统**，文件顶部以 `appliesTo: ["zhuanpan"]` 显式声明。
+`core/yongshen.js` 依盘面 schema 自动判定盘别（飞盘有 `renPanMen`/`tianPanYi`），
+遇飞盘时把 domains.json 的专属取用整体排除，只保留：
+
+1. 引擎自己算出的用神（飞盘走 `feipanPredict.YONG_SHEN_RULES`）
+2. `schoolNeutral` 声明的结构性元素（`值符` / `值使` / `时干`）
+
+排除项记入 `resolution.excluded` 留痕，提示词中只报数量不报名单（避免反向提示模型）。
+**`日干` 不属于 schoolNeutral**——「日干为人」是转盘断法，飞盘以年命/时干宫为主宰。
+山向盘复用转盘引擎机器，按 `zhuanpan` 处理。
+
+### 界面「目的」→ 引擎占类
+
+界面下拉框的取值与引擎内部占类名并不同名。引擎 `classifyQuestion` 的 `fallbackCategory`
+参数要求传**引擎占类名**，直传界面值会静默回落「综合」并丢掉该占类的专用用神：
+
+| 界面目的 | 引擎占类 |
+|---|---|
+| 财运 | 求财 |
+| 健康 | 疾病 |
+| 学业 | 功名 |
+
+其余 12 项同名。此映射表现存于 `domains.json` 的 `uiPurposeToEngineCategory`，
+经 `YongShen.toEngineCategory()` 使用。**这是 Phase 1.1 修复的一个既存缺陷**：
+修复前，当问句不含关键词时，选择「财运/健康/学业」会丢失对应的专用用神。
+
+### 象义溯源
+
+每条 SYMBOL 条目记录 `source: "knowledge/symbols.json"`、`category`、`element`，
+以及 `fields`——真正贡献了词条的知识库栏位（截断后落空的栏位不会被声明，否则溯源会说谎）。
+
+### 学派纲要仍然独立送达
+
+`assets/*-method.md` 由引擎 `buildPrompt()` 放入 **system prompt**，结构化证据包放入 **user message**。
+二者互补而非替代，最终送达模型的是：
+
+```
+system : 学派纲要(method.md) + AI_DISCIPLINE + EVIDENCE_DISCIPLINE
+user   : 引擎盘面文本 + 日干/时干落宫 + 结构化证据包 + 山向背景
+```
+
+飞盘专属的三乙四宫（天乙/太乙/地乙/时干宫/年命宫）由引擎 `buildPrompt` 直接写入 user message，
+证据包**不重复承载**，避免同一内容两次入提示词。
