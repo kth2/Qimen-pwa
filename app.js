@@ -2,6 +2,8 @@
 (function () {
   const QM = window.QM;
   const SX = window.ShanXiang;
+  const YS = window.YongShen;   // 结构化用神层（可缺失：缺则退回原有流程）
+  const EV = window.Evidence;   // 结构化证据层（同上）
   const $ = (id) => document.getElementById(id);
   let school = 'zhuanpan';
   let mode = 'shijia'; // 'shijia'(时家) | 'shanxiang'(山向/宅盘)
@@ -196,6 +198,25 @@
     return text;
   }
 
+  /* ---------- 结构化知识库（象义 + 占类用神） ---------- */
+  // 两份 JSON 随 SW 预缓存，离线可用。加载失败不是致命错误：
+  // 证据层只是"增益"，缺失时 runAI 自动退回原有的纯文本纲要流程，功能不减。
+  let _kbReady = false;
+  async function loadKnowledge() {
+    if (_kbReady || !YS || !EV) return _kbReady;
+    try {
+      const [d, s] = await Promise.all([
+        fetch('knowledge/domains.json').then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status))),
+        fetch('knowledge/symbols.json').then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
+      ]);
+      _kbReady = YS.load(d) && EV.load(s);
+    } catch (e) {
+      console.warn('[evidence] 知识库加载失败，本次按原有流程解读：', e.message);
+      _kbReady = false;
+    }
+    return _kbReady;
+  }
+
   // 追加在引擎 system prompt 之后的硬性纪律：把"参考纲要"收紧为"只许按纲要断"，
   // 防止模型引入纲要之外的门派理论或自创断法
   const AI_DISCIPLINE = [
@@ -212,6 +233,23 @@
     '7. 纲要与盘面确未直接载明处，可据纲要衍象作合理延伸并标注「（据×宫×象推）」；仅在毫无盘面依据时才写「纲要未载，不予推断」，不得以此搪塞本可分析之处。',
     '【结构——每节都要展开充分，理由部分尤须详尽】',
     '8. 按骨架输出：① 结论（一句断吉凶成败）② 用神与关键宫位逐宫详析 ③ 生克成败推理 ④ 方位 ⑤ 应期/数字 ⑥ 趋避建议。'
+  ].join('\n');
+  // 仅在证据包可用时追加。与上文纲要纪律互补：纲要管"按哪派理论断"，
+  // 这段管"哪些内容是既定事实、哪些可由你推理"，二者不重复。
+  const EVIDENCE_DISCIPLINE = [
+    '',
+    '=== 结构化证据（Evidence）使用规则 ===',
+    '用户消息中的《结构化证据包》是本次解读的首要事实依据，含三类条目：',
+    'FACT：由排盘引擎算得的盘面事实。RULE：应用生成的确定性分析。SYMBOL：应用知识库中的传统象义。',
+    'E1. 不得改动任何 FACT，不得虚构证据包中不存在的盘面元素（宫位、门、星、神、干）。',
+    'E2. 衍象优先采用所给 SYMBOL；可将多个 SYMBOL 组合成合理解释，但不得以自创象义取而代之。',
+    'E3. 用神以证据包所列【用神映射】为准，不得另立一套用神体系。',
+    'E4. 应期优先采用 RULE 中 yingqi 的确定性结果，不得另推。',
+    'E5. 明确区分「事实」与「推断」：属于你的推理请标注（据×宫×象推）。',
+    'E6. 证据互相矛盾或不足时，如实说明不确定，不得强作确定之断。',
+    'E7. 标为「盘上未见」的元素即为未见，须据此论断（如空亡/不上盘之意），不得代为安置落宫。',
+    'E8. 健康类只作传统奇门象义解读，明确声明非医学诊断，不给诊疗建议，劝其就医。',
+    'E9. 依所选占类作答，不要跑题到其他占类。'
   ].join('\n');
   // 转盘断局补充：日干(求测人)/时干(所占之事)天盘落宫。
   // 引擎序列化只给四柱与九宫干，不点明二者落宫；此处算好喂给 AI，
@@ -243,11 +281,17 @@
     const btn = $('aiBtn'); btn.disabled = true; $('aiAnswer').style.display = 'none';
     $('aiStatus').textContent = 'AI 解读中…(云端约 10-30s，本机模型更久)';
     try {
+      await loadKnowledge();   // 先备好知识库：fallbackCategory 的占类换算依赖它
       let methodText;
       try { methodText = await getMethodText(); }
       catch (me) { throw new Error(me.message + '。为避免 AI 脱离流派纲要自行发挥，已中止本次解读，请检查网络后重试。'); }
       // 占类：先按问句关键词自动识别；识别不出时回退到排盘所选「目的」
-      const opts = { nianMingGan: $('aiNianMing').value, methodText, fallbackCategory: $('inPurpose').value };
+      // fallbackCategory 必须传【引擎占类名】而非界面「目的」值：二者并不同名
+      // （财运↔求财、健康↔疾病、学业↔功名），直传界面值会静默回落「综合」、丢掉该占类的专用用神。
+      // 知识库未加载时 toEngineCategory 原样返回，行为与修复前一致。
+      const uiPurpose = $('inPurpose').value;
+      const fallbackCategory = (YS && YS.toEngineCategory) ? YS.toEngineCategory(uiPurpose) : uiPurpose;
+      const opts = { nianMingGan: $('aiNianMing').value, methodText, fallbackCategory };
       const builder = school === 'feipan' ? QM.feipanPredict : QM.zhuanpanPredict;
       const prompt = builder.buildPrompt(pan, q, opts);
       const head = `【占类：${prompt.context.category || '综合'}　模型：${LLM.info().provider}/${LLM.info().model}】\n\n`;
@@ -268,8 +312,40 @@
         .map(x => x && x.gong).filter(Boolean);
       const yqBlock = (window.YingQi && window.YingQi.toPromptBlock)
         ? window.YingQi.toPromptBlock(pan, { JIU_GONG: QM.JIU_GONG, yongShenGongs: ysGongs }) : '';
-      const userMsg = prompt.user + (school !== 'feipan' ? riShiGanBlock(pan) : '') + wsBlock + yqBlock + sxBlock;
-      const answer = await LLM.chat(prompt.system + '\n' + AI_DISCIPLINE, userMsg, (full) => {
+      // 结构化推理层：占类 → 用神 → 证据包。复用上面已算好的分析结果，不重复排盘、不二次调用引擎。
+      // 证据包接管 wangshuai/yingqi 的呈现，故二者不再单独拼接，避免同一内容进两次提示词；山向段另行保留。
+      let evBlock = '', sysExtra = '';
+      if (await loadKnowledge()) {
+        try {
+          // 占类优先取引擎按问句识别的结果（比下拉框更贴合实际所问），识别不出再回落界面「目的」
+          const domain = YS.normalizeDomain((prompt.context && prompt.context.category) || fallbackCategory);
+          const yongshen = YS.resolve({
+            domain, chart: pan,
+            options: {
+              engineYong: prompt.context && prompt.context.yong,
+              nianMingGan: $('aiNianMing').value,
+              school: school === 'feipan' ? 'feipan' : 'zhuanpan'   // 盘别显式下传，杜绝两派取用互串
+            }
+          });
+          // 不传 shanxiang：山向背景与阳宅断法要求仍由 sxBlock 原样承载（那段含解读指引而不止事实），
+          // 若再进证据包会造成同一内容重复入提示词。
+          const evidence = EV.build({
+            question: q, domain, chart: pan, yongshen,
+            wangshuai: wsBlock, yingqi: yqBlock
+          });
+          window._evidence = evidence;                 // 便于在控制台核对喂给模型的内容
+          evBlock = EV.toPromptBlock(evidence);
+          if (evBlock) sysExtra = '\n' + EVIDENCE_DISCIPLINE;
+        } catch (ee) {
+          console.warn('[evidence] 构建失败，本次按原有流程解读：', ee.message);
+          evBlock = '';
+        }
+      }
+      // 证据包可用时由它承载旺衰/应期；不可用则退回原有的两段拼接。山向段始终保留。
+      const analysisBlocks = evBlock || (wsBlock + yqBlock);
+      const userMsg = prompt.user + (school !== 'feipan' ? riShiGanBlock(pan) : '')
+        + analysisBlocks + sxBlock;
+      const answer = await LLM.chat(prompt.system + '\n' + AI_DISCIPLINE + sysExtra, userMsg, (full) => {
         streamed = true; $('aiAnswer').textContent = head + (full || '');
       });
       if (!streamed || !answer) $('aiAnswer').textContent = head + (answer || '(无内容)');
