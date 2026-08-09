@@ -1,0 +1,182 @@
+{
+  "version": "1.0.0",
+  "_note": "初版占类→用神映射。刻意保守：只登记两派纲要与引擎既有 YONG_SHEN_RULES 已共同认可的用神，不新造体系。engineCategories 用于与 engine.bundle.js 既有中文占类对接——本层是'附加的结构化视图'，不取代引擎判定；引擎已选出的用神由 yongshen.js 合并进 roles.engine，二者冲突时以引擎为准。",
+
+  "_domainOrder": ["general", "wealth", "career", "relationship", "health", "lawsuit", "lost_item"],
+
+  "_ruleProvenance": "本文件的用神取用全部源自【转盘】传统（左耶老道《遁甲集章》一系）与引擎 zhuanpanPredict.YONG_SHEN_RULES 的共识部分。飞盘（陈春林《奇门鸣法》一系）自有取用体系，二者不得互串——这是本项目的零串味铁律。",
+  "appliesTo": ["zhuanpan"],
+
+  "_schoolNeutralNote": "以下元素属盘面结构而非某派教义（两派排盘均产出），故不受 appliesTo 限制，可在任何盘别中查看。注意：日干【不在】此列——「日干为人」是转盘断法，飞盘以年命/时干宫为主宰。",
+  "schoolNeutral": ["值符", "值使", "时干"],
+
+  "_uiPurposeNote": "界面「目的」下拉框的取值与引擎内部占类名并不一一同名（如 财运↔求财、健康↔疾病、学业↔功名）。引擎 classifyQuestion 的 fallbackCategory 参数要求传【引擎占类名】，若直接传界面值会静默回落到「综合」并丢失该占类的专用用神。此表把边界显式化。",
+  "uiPurposeToEngineCategory": {
+    "综合": "综合",
+    "事业": "事业",
+    "财运": "求财",
+    "婚姻": "婚姻",
+    "健康": "疾病",
+    "学业": "功名",
+    "出行": "出行",
+    "失物": "失物",
+    "寻人": "寻人",
+    "怀孕": "怀孕",
+    "官司": "官司",
+    "风水": "风水",
+    "射覆": "射覆",
+    "天气": "天气",
+    "竞赛": "竞赛"
+  },
+
+  "domains": {
+    "general": {
+      "name": "general",
+      "label": "其他",
+      "uiPurposes": ["综合", "学业", "出行", "寻人", "怀孕", "风水", "射覆", "天气", "竞赛"],
+      "engineCategories": ["综合", "功名", "出行", "行人", "寻人", "怀孕", "风水", "射覆", "天气", "竞赛"],
+      "yongshen": {
+        "self": ["日干"],
+        "primary": ["值符"],
+        "secondary": ["值使"],
+        "opponent": ["时干"]
+      },
+      "relevantSymbols": {
+        "doors": {},
+        "stars": {},
+        "deities": { "值符": "主事之神，兼看求测人所倚" },
+        "palaces": {},
+        "stems": { "日干": "求测人", "时干": "所占之事/对方" }
+      },
+      "priority": ["日干", "时干", "值符", "值使"]
+    },
+
+    "wealth": {
+      "name": "wealth",
+      "label": "求财",
+      "uiPurposes": ["财运"],
+      "engineCategories": ["求财"],
+      "yongshen": {
+        "self": ["日干"],
+        "primary": ["生门", "戊"],
+        "secondary": ["开门", "六合"],
+        "opponent": ["庚"]
+      },
+      "relevantSymbols": {
+        "doors": { "生门": "财源与生机", "开门": "机会与通路" },
+        "stars": {},
+        "deities": { "六合": "合作与中介" },
+        "palaces": {},
+        "stems": { "戊": "财星", "庚": "竞争与阻隔", "日干": "求测人" }
+      },
+      "priority": ["生门", "戊", "日干", "开门", "六合", "庚"]
+    },
+
+    "career": {
+      "name": "career",
+      "label": "事业",
+      "uiPurposes": ["事业"],
+      "engineCategories": ["事业"],
+      "yongshen": {
+        "self": ["日干"],
+        "primary": ["开门"],
+        "secondary": ["值符", "生门"],
+        "opponent": ["庚"]
+      },
+      "relevantSymbols": {
+        "doors": { "开门": "公职、职位与通路", "生门": "结果与实利" },
+        "stars": {},
+        "deities": { "值符": "上司、主事者" },
+        "palaces": {},
+        "stems": { "庚": "竞争者与阻力", "日干": "求测人" }
+      },
+      "priority": ["开门", "日干", "值符", "生门", "庚"]
+    },
+
+    "relationship": {
+      "name": "relationship",
+      "label": "感情",
+      "uiPurposes": ["婚姻"],
+      "engineCategories": ["婚姻"],
+      "_methodNote": "不引入性别硬编码取用（如男看乙女看庚）。乙为引擎既有规则所取，此处保留以免与引擎判定冲突；景门取'表达/显现'、生门取'发展'为纲要通义。",
+      "yongshen": {
+        "self": ["日干"],
+        "primary": ["六合"],
+        "secondary": ["乙", "景门", "生门"],
+        "opponent": []
+      },
+      "relevantSymbols": {
+        "doors": { "景门": "表达与显现", "生门": "发展与生机" },
+        "stars": {},
+        "deities": { "六合": "和合、婚配、中介" },
+        "palaces": {},
+        "stems": { "乙": "柔顺、婚配之象", "日干": "求测人" }
+      },
+      "priority": ["六合", "日干", "乙", "景门", "生门"]
+    },
+
+    "health": {
+      "name": "health",
+      "label": "健康",
+      "uiPurposes": ["健康"],
+      "engineCategories": ["疾病"],
+      "_methodNote": "传统奇门象义解读，非医学诊断。任何身体部位对应仅为宫位/八卦象义，不得据以判断病情。",
+      "yongshen": {
+        "self": ["日干"],
+        "primary": ["天芮"],
+        "secondary": ["天心", "生门"],
+        "opponent": ["死门"]
+      },
+      "relevantSymbols": {
+        "doors": { "生门": "生机与康复", "死门": "终结之象" },
+        "stars": { "天芮": "病符", "天心": "医药与救治" },
+        "deities": {},
+        "palaces": {},
+        "stems": { "日干": "求测人" }
+      },
+      "priority": ["天芮", "天心", "生门", "日干", "死门"]
+    },
+
+    "lawsuit": {
+      "name": "lawsuit",
+      "label": "官司",
+      "uiPurposes": ["官司"],
+      "engineCategories": ["官司"],
+      "yongshen": {
+        "self": ["日干"],
+        "primary": ["惊门"],
+        "secondary": ["景门", "开门", "值符"],
+        "opponent": ["庚"]
+      },
+      "relevantSymbols": {
+        "doors": { "惊门": "争执、词讼", "景门": "文书与公开陈述", "开门": "官长、公门" },
+        "stars": {},
+        "deities": { "值符": "权威、主审者" },
+        "palaces": {},
+        "stems": { "庚": "对方与阻力", "日干": "求测人" }
+      },
+      "priority": ["惊门", "日干", "庚", "景门", "开门", "值符"]
+    },
+
+    "lost_item": {
+      "name": "lost_item",
+      "label": "失物",
+      "uiPurposes": ["失物"],
+      "engineCategories": ["失物", "寻物"],
+      "yongshen": {
+        "self": ["日干"],
+        "primary": ["玄武", "伤门"],
+        "secondary": ["杜门", "九地"],
+        "opponent": []
+      },
+      "relevantSymbols": {
+        "doors": { "伤门": "寻索、追回", "杜门": "隐蔽、闭塞" },
+        "stars": {},
+        "deities": { "玄武": "遗失与盗", "九地": "低伏、埋藏" },
+        "palaces": {},
+        "stems": { "日干": "失主" }
+      },
+      "priority": ["玄武", "伤门", "杜门", "九地", "日干"]
+    }
+  }
+}
