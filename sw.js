@@ -5,7 +5,7 @@
  */
 const CACHE = 'qimen-pwa-be8d9a5843';
 const ASSETS = [
-  './', './index.html', './style.css', './engine.bundle.js', './core/shanxiang.js', './core/wangshuai.js', './core/yingqi.js', './llm.js', './app.js',
+  './', './index.html', './style.css', './engine.bundle.js', './core/shanxiang.js', './core/wangshuai.js', './core/yingqi.js', './core/yongshen.js', './core/evidence.js', './knowledge/domains.json', './knowledge/symbols.json', './llm.js', './app.js',
   './manifest.json', './assets/feipan-method.md', './assets/zhuanpan-method.md', './assets/shanxiang-method.md', './assets/icon.svg'
 ];
 
