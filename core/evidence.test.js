@@ -13,11 +13,14 @@ var YS = require('./yongshen.js');
 var EV = require('./evidence.js');
 var WS = require('./wangshuai.js');
 var YQ = require('./yingqi.js');
+var XY = require('./xiangyi.js');
 var DOMAINS = require('../knowledge/domains.json');
 var SYMBOLS = require('../knowledge/symbols.json');
+var RULES = require('../knowledge/domain-rules.json');
 
 YS.load(DOMAINS);
 EV.load(SYMBOLS);
+XY.load(RULES);
 
 var pass = 0, fail = 0;
 function t(name, fn) {
@@ -178,6 +181,95 @@ t('无 domain 时回落 general', function () {
 t('toPromptBlock 收到坏数据返回空串，不阻断解读', function () {
   assert.strictEqual(EV.toPromptBlock(null), '');
   assert.strictEqual(EV.toPromptBlock({}), '');
+});
+
+console.log('== Phase 2：占类象义判读(READING)集成 ==');
+var XYRES = XY.analyze({ domain: 'wealth', chart: CHART, wangshuai: WS.analyze(CHART) });
+function buildWithXy(extra) {
+  var arg = { question: '今年求财如何？', domain: 'wealth', chart: CHART, yongshen: YONG, xiangyi: XYRES };
+  for (var k in (extra || {})) arg[k] = extra[k];
+  return EV.build(arg);
+}
+t('不传 xiangyi 时无 READING 条目（Phase 1 行为原样不变）', function () {
+  var ev = build();
+  assert.strictEqual(typesOf(ev, 'READING').length, 0);
+  assert.strictEqual(ev.xiangyi, null);
+  assert.ok(EV.toPromptBlock(ev).indexOf('READING') < 0);
+});
+t('传入 xiangyi 时产出 READING 条目，三种 scope 齐备', function () {
+  var ev = buildWithXy();
+  var reads = typesOf(ev, 'READING');
+  assert.ok(reads.length > 0, '应有 READING');
+  var scopes = {};
+  reads.forEach(function (r) { scopes[r.scope] = (scopes[r.scope] || 0) + 1; });
+  assert.ok(scopes.condition > 0, '应有单象判读');
+  assert.ok(scopes.combination > 0, '应有组合判读');
+  assert.ok(scopes.relation > 0, '应有宫际关系判读');
+});
+t('每条 READING 都可回查规则库，且注明出处与触发条件', function () {
+  var byId = {};
+  Object.keys(RULES.domains).forEach(function (dm) {
+    ['conditions', 'combinations', 'relations'].forEach(function (k) {
+      (RULES.domains[dm][k] || []).forEach(function (r) { byId[r.id] = r; });
+    });
+  });
+  typesOf(buildWithXy(), 'READING').forEach(function (r) {
+    assert.ok(byId[r.id], '证据包出现了规则库中没有的判读：' + r.id);
+    assert.strictEqual(r.source, 'knowledge/domain-rules.json');
+    assert.ok(r.basis && r.basis.length > 4, r.id + ' 缺出处');
+    assert.ok(r.trigger && r.trigger.length > 0, r.id + ' 缺触发条件——只给结论不给"因何而得"，模型无从核验');
+    assert.ok(['+', '-', '0'].indexOf(r.polarity) >= 0, r.id + ' polarity 非法');
+  });
+});
+t('READING 与 SYMBOL 分列，不得混为一谈', function () {
+  var ev = buildWithXy();
+  typesOf(ev, 'SYMBOL').forEach(function (s) { assert.strictEqual(s.source, 'knowledge/symbols.json'); });
+  typesOf(ev, 'READING').forEach(function (r) { assert.strictEqual(r.source, 'knowledge/domain-rules.json'); });
+  var txt = EV.toPromptBlock(ev);
+  assert.ok(txt.indexOf('SYMBOL（知识库通用象义') >= 0, '须说明 SYMBOL 是与占类无关的原料');
+  assert.ok(txt.indexOf('READING（占类象义判读') >= 0, '须说明 READING 是本占类下的读法');
+});
+t('提示块声明判读非吉凶断语', function () {
+  var txt = EV.toPromptBlock(buildWithXy());
+  assert.ok(txt.indexOf('不是成败断语') >= 0);
+  assert.ok(/倾向计数.*非结论/.test(txt), '倾向计数须明标非结论');
+});
+t('SYMBOL 按占类权重优先（Phase 2.2：重点用神不被截断挤掉）', function () {
+  var ev = buildWithXy();
+  var els = typesOf(ev, 'SYMBOL').map(function (s) { return s.element; });
+  var iSheng = els.indexOf('生门'), iLiu = els.indexOf('六合');
+  assert.ok(iSheng >= 0, '★5 的生门必须在列');
+  if (iLiu >= 0) assert.ok(iSheng < iLiu, '★5 的生门应排在 ★3 的六合之前，实得 ' + els.join('>'));
+});
+t('关注点与权重写进提示块，且未见者如实标注', function () {
+  var txt = EV.toPromptBlock(buildWithXy());
+  assert.ok(txt.indexOf('本占类关注点与权重') >= 0);
+  assert.ok(txt.indexOf('★★★★★ 生门＝财源') >= 0, '★5 的财源须明标：\n' + txt.slice(0, 400));
+});
+t('规则未建的占类：提示块明说是"规则未建"而非"盘上无碍"', function () {
+  var xy = XY.analyze({ domain: 'career', chart: CHART, wangshuai: WS.analyze(CHART) });
+  var ev = EV.build({ question: 'q', domain: 'career', chart: CHART, yongshen: YS.resolve({ domain: 'career', chart: CHART }), xiangyi: xy });
+  assert.strictEqual(typesOf(ev, 'READING').length, 0);
+  assert.ok(EV.toPromptBlock(ev).indexOf('规则未建') >= 0);
+});
+t('飞盘：象义层停用，证据包不得混入转盘判读', function () {
+  var xy = XY.analyze({ domain: 'wealth', chart: CHART, wangshuai: WS.analyze(CHART), options: { school: 'feipan' } });
+  var ev = EV.build({ question: 'q', domain: 'wealth', chart: CHART, yongshen: YONG, xiangyi: xy });
+  assert.strictEqual(typesOf(ev, 'READING').length, 0, '零串味：飞盘不得出现转盘判读');
+  assert.strictEqual(ev.xiangyi.applicable, false);
+});
+t('含判读的证据包仍受体积约束', function () {
+  var ev = buildWithXy({
+    wangshuai: WS.toPromptBlock(CHART, { JIU_GONG: QM.JIU_GONG }),
+    yingqi: YQ.toPromptBlock(CHART, { JIU_GONG: QM.JIU_GONG, yongShenGongs: ['2'] })
+  });
+  assert.ok(typesOf(ev, 'READING').length <= 32, 'READING 条目过多：' + typesOf(ev, 'READING').length);
+  var txt = EV.toPromptBlock(ev);
+  assert.ok(txt.length < 12000, '提示块过长会稀释注意力：' + txt.length);
+});
+t('含判读的证据包可 JSON 序列化且确定性', function () {
+  assert.doesNotThrow(function () { JSON.parse(JSON.stringify(buildWithXy())); });
+  assert.deepStrictEqual(buildWithXy(), buildWithXy());
 });
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');

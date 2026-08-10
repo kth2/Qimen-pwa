@@ -18,11 +18,14 @@ GitHub Pages 静态托管。支持 **时家奇门**（转盘 / 飞盘）与 **�
 | `core/yingqi.test.js` | 应期核心单元测试（`node core/yingqi.test.js`） |
 | `core/yongshen.js` | **占类用神核心（纯函数、可移植）**，见「结构化推理层」 |
 | `core/yongshen.test.js` | 用神核心单元测试（`node core/yongshen.test.js`） |
+| `core/xiangyi.js` | **占类象义推理核心（纯函数、可移植）**，见「占类象义推理层」 |
+| `core/xiangyi.test.js` | 象义推理单元测试（`node core/xiangyi.test.js`） |
 | `core/evidence.js` | **证据包核心（纯函数、可移植）**，见「结构化推理层」 |
 | `core/evidence.test.js` | 证据包单元测试（`node core/evidence.test.js`） |
 | `core/reconciliation.test.js` | 用神归属与两派隔离回归测试（`node core/reconciliation.test.js`） |
-| `knowledge/symbols.json` | 结构化象义知识库（五行/八卦/九宫/天干/九星/八门/八神） |
+| `knowledge/symbols.json` | 结构化象义知识库（五行/八卦/九宫/天干/九星/八门/八神），**与占类无关** |
 | `knowledge/domains.json` | 占类 → 用神角色映射（我方/主用神/辅用神/对方） |
+| `knowledge/domain-rules.json` | 占类象义规则库（角色权重 / 条件 / 组合 / 宫际关系），**与占类相关** |
 | `llm.js` | AI provider（Gemini 流式 / Ollama / 自定义端点） |
 | `assets/*-method.md` | 转盘 / 飞盘 / 山向宅盘 解断纲要（AI 理论载荷） |
 | `sw.js` | Service Worker（离线缓存 + 更新自动刷新） |
@@ -247,16 +250,21 @@ python3 -m http.server 8000   # 然后访问 http://localhost:8000
 本层不改动排盘与既有分析，只在其上把喂给模型的内容重新组织为可核验的结构：
 
 ```
-用户问题 → 占类(domain) → 用神(YongShen) → 既有盘面/分析 → 证据包(Evidence) → 既有 LLM 层
+用户问题 → 占类(domain) → 用神(YongShen) → 既有盘面/分析
+                                              ↓
+                                     象义判读(XiangYi)      ← Phase 2
+                                              ↓
+                                      证据包(Evidence) → 既有 LLM 层
 ```
 
 分工如下：
 
 1. **排盘计算** —— `engine.bundle.js`（未改动）
 2. **确定性分析** —— 引擎 `jiuGongAnalysis`/`geju` + `core/wangshuai.js` + `core/yingqi.js` + `core/shanxiang.js`（均未改动）
-3. **符号知识** —— `knowledge/symbols.json`
+3. **符号知识** —— `knowledge/symbols.json`（与占类无关的通用象义）
 4. **占类用神** —— `knowledge/domains.json` + `core/yongshen.js`
-5. **LLM 解读** —— `llm.js`（未改动）
+5. **占类象义** —— `knowledge/domain-rules.json` + `core/xiangyi.js`（见「占类象义推理层」）
+6. **LLM 解读** —— `llm.js`（未改动）
 
 模型收到的不再只是原始盘面文本，而是一份**结构化证据包**。
 
@@ -266,7 +274,8 @@ python3 -m http.server 8000   # 然后访问 http://localhost:8000
 |---|---|---|
 | `FACT` | 引擎算得的盘面事实（用神落宫、空亡、驿马、四柱、局） | 不得改写、不得虚构 |
 | `RULE` | 应用内确定性分析（引擎吉凶/格局、旺衰四害、应期数字） | 优先于模型自身判断 |
-| `SYMBOL` | 取自 `symbols.json` 的传统象义 | 优先采用，可组合，不可替换为自创象义 |
+| `SYMBOL` | 取自 `symbols.json` 的传统象义，**与占类无关的原料** | 优先采用，可组合，不可替换为自创象义 |
+| `READING` | 取自 `domain-rules.json` 的**占类象义判读**（Phase 2） | 涉及其所断元素时优先采用其读法；`[助]/[阻]` 只表倾向，非成败断语 |
 
 「证据优先」而非「只许用证据」：模型仍可组合象义、推演情境、说明关系、表达不确定；
 但不得另立用神体系、不得虚构盘面元素、不得推翻确定性计算。
@@ -313,7 +322,7 @@ YongShen.resolve({ domain, chart, options }); // → { domain, roles, priority, 
 ```js
 Evidence.load(symbolsJson);
 Evidence.getSymbol('bamen', '生门');
-Evidence.build({ question, domain, chart, yongshen, wangshuai, yingqi, shanxiang });
+Evidence.build({ question, domain, chart, yongshen, xiangyi, wangshuai, yingqi, shanxiang });
 Evidence.toPromptBlock(evidence);
 ```
 
@@ -325,12 +334,14 @@ Evidence.toPromptBlock(evidence);
 本层是**附加的**：
 `knowledge/*.json` 加载失败、或证据构建抛错时，`app.js` 自动退回原有的纯文本纲要流程，功能不减；
 不传 `domain` 时按 `general` 处理。排盘、渲染、九宫详解、既有 AI 纲要纪律均未改动。
+不传 `xiangyi` 时证据包不含 `READING`，行为与 Phase 1 **逐字一致**（有单测钉住）。
 
 ### 运行测试
 
 ```bash
 node core/yongshen.test.js
 node core/evidence.test.js
+node core/xiangyi.test.js
 ```
 
 ---
@@ -412,3 +423,106 @@ user   : 引擎盘面文本 + 日干/时干落宫 + 结构化证据包 + 山向�
 
 飞盘专属的三乙四宫（天乙/太乙/地乙/时干宫/年命宫）由引擎 `buildPrompt` 直接写入 user message，
 证据包**不重复承载**，避免同一内容两次入提示词。
+
+---
+
+## 占类象义推理层（Phase 2 · Domain Intelligence）
+
+### 症结：Phase 1 交付的是原料，不是读法
+
+Phase 1 解决了「怎么把结构化证据喂给模型」，但 `symbols.json` 里的象义是**与占类无关**的：
+无论问财、问病、问官司，「生门」都只是那一句「生发 / 财利 / 生机」。于是模型拿到的仍是原料，
+**「在这个具体问题里它意味着什么」全靠自由发挥**——同一张盘换个问法，解读就漂。
+
+本层补上这一步：
+
+```
+Phase 1：怎么把证据喂给模型          → FACT / RULE / SYMBOL
+Phase 2：在这个问题里该怎么读这些证据 → READING
+```
+
+### 为什么必须按占类来读
+
+同一个「旺」，角色不同则结论相反：
+
+| 元素 | 角色 | 旺相 | 空亡 / 入墓 |
+|---|---|---|---|
+| 生门 | 财源 | **助**：财源有力、进财可期 | **阻**：财看得见难兑现 / 财被困住 |
+| 庚 | 竞争、阻力 | **阻**：竞争者强势、同行分利 | **助**：阻力落空、对手受困 |
+
+脱离占类角色谈旺衰是没有意义的。`domain-rules.json` 中这两条规则的触发条件（`when.state`）
+**逐字相同**，差别只在角色——单测 `生门旺相判为助、庚旺相判为阻` 就钉住这一点。
+
+### 三类判读
+
+| scope | 是什么 | 例 |
+|---|---|---|
+| `condition` | 单象 × 旺衰/四害 | 生门 + 空亡 → 财看得见而难兑现，须待填实/冲实 |
+| `combination` | 两象**同宫**相遇（其义不等于两象相加） | 生门 + 玄武 → 暗财、账目不明、防欺诈 |
+| `relation` | 宫际五行生克（定成败向背） | 我方宫 生 财源宫 → 先投入后见利、脱泄耗力 |
+
+组合**只跑规则表列出的对**，不做全排列——组合数必须由占类相关性约束，否则爆炸。
+这也是 Phase 3（三象组合）的地基：扩展点在规则库，不在代码。
+
+### 角色权重（Phase 2.2）
+
+求财登记的角色与权重：
+
+| 元素 | 角色(aspect) | 权重 |
+|---|---|---|
+| 生门 | 财源 | ★★★★★ |
+| 日干 | 我方 | ★★★★★ |
+| 戊 | 资金 | ★★★★ |
+| 开门 / 六合 / 庚 / 时干 | 机会 / 合作 / 竞争 / 事体 | ★★★ |
+| 值符 | 贵人 | ★★ |
+
+权重有两个作用：① 证据包按它给 `SYMBOL` 排序，**截断时先保重点**；
+② 写进提示词，告诉模型「★★★★★ 者逐条展开，★★ 者点到为止，不要平均用力」。
+
+### 边界（与 Phase 1 一脉相承）
+
+- **不下吉凶断语**。`polarity` 只表示该条判读对本占类是助力 / 阻力，成败仍归引擎与模型综合。
+  倾向计数明标「非结论」，防止被当成打分。
+- **只读不写**。条件只读盘面与 `wangshuai` 已算出的旺衰四害，绝不反过来改写 `FACT`；
+  干的入墓/击刑只在该干**确实摆在天地盘上**时才断（日干为甲经值符定位者不硬断），
+  与 `wangshuai` 严格同源，杜绝「象义层说入墓、旺衰块说没有」。
+- **宁缺勿造**。八神不参五行，故对八神写 `state` 条件永不命中——宁可漏判也不放宽匹配。
+  每条 `concept` 都须能追溯到 `basis` 所引《解断方法纲要》条文。
+- **零串味**。规则库源自转盘传统（`appliesTo: ["zhuanpan"]`），遇飞盘盘面**整体停用**
+  并说明原因，不降级套用；提示块此时不会漏出任何转盘取用。
+- **规则未建 ≠ 盘上无碍**。事业/感情/健康/官司/失物在库中标 `status: "pending"`（Phase 2.3 待建），
+  此时明确告知模型「这是应用尚未收录该占类规则，不等于盘上没有阻碍」。
+
+### 缺件降级
+
+| 缺什么 | 后果 |
+|---|---|
+| `domain-rules.json` 加载失败 | 证据包不含 `READING`，其余照旧 |
+| 未传 `wangshuai` | 旺衰类与宫际关系规则停用，空亡/驿马类仍可用；`degraded: true` 并留痕 |
+| 占类 `pending` / 盘为飞盘 | 整体停用并说明原因 |
+
+任何一种都不阻断解读流程。
+
+### API
+
+```js
+XiangYi.load(domainRulesJson);
+XiangYi.analyze({ domain, chart, wangshuai, options: { school } });
+// → { applicable, status, reason, focus, readings, combinations, relations, absent, tally, degraded, notes }
+XiangYi.toPromptBlock(result);
+```
+
+确定性、无副作用：同盘同占类必得同一结果，输出按「权重降序、同权按 id 字典序」稳定排序。
+
+### 常量漂移守卫
+
+`core/` 各模块各自留存一份五行生克 / 入墓击刑 / 九宫方位常量副本（为保持可独立移植）。
+`xiangyi.test.js` 逐项比对 `wangshuai` 与 `yongshen` 的副本，并交叉验证元素落宫与
+`YongShen.locate` 一致——任一处改动而另一处未跟进，测试即失败。
+
+### 运行测试
+
+```bash
+node core/xiangyi.test.js     # 46 项：规则库自检、角色反转、盘面一致性、零串味、漂移守卫
+node core/evidence.test.js    # 31 项：含 READING 集成与体积约束
+```
