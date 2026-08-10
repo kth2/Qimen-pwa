@@ -37,6 +37,8 @@
   var MAX_COMBINATIONS = 12;
 
   var GAN = ['甲', '乙', '丙', '丁', '戊', '己', '庚', '辛', '壬', '癸'];
+  // 九星特征字（星名可能作「禽芮」等合称，据此还原为规范星名）。与 wangshuai.XING_WX 同源。
+  var XING_CHARS = '蓬芮冲辅禽心柱任英';
 
   /* ---------- 以下三组常量与 core/wangshuai.js、core/yongshen.js 同源。
      此处各存一份是为保持 core 模块可独立移植（与 yongshen.js 内置 GONG_INFO 同理）；
@@ -54,6 +56,14 @@
     '7': { name: '兑', direction: '正西' }, '8': { name: '艮', direction: '东北' },
     '9': { name: '离', direction: '正南' }
   };
+  /**
+   * 对宫相冲表。九宫各有所属地支（坎一子、坤二未申、震三卯、巽四辰巳、乾六戌亥、
+   * 兑七酉、艮八丑寅、离九午；中五无支），对宫之支恰为六冲：子午、卯酉、未丑+申寅、
+   * 辰戌+巳亥。故「二宫相冲」即对宫关系。
+   * 依据：纲要·一节「逢冲主散、速决、动」；纲要·三节地支六冲表。
+   * 宫支表与六冲表同源于 core/yingqi.js（GONG_ZHI / CHONG），test 有守卫逐对回推。
+   */
+  var GONG_CHONG = { '1': '9', '9': '1', '3': '7', '7': '3', '2': '8', '8': '2', '4': '6', '6': '4' };
 
   function load(rulesJson) {
     DB = (rulesJson && rulesJson.domains) ? rulesJson : null;
@@ -108,7 +118,17 @@
       primary[name] = String(g); layer[name] = lay;
     }
     for (g in men) { put(g, men[g]); claim(men[g], g, 'men'); }
-    for (g in xing) { put(g, xing[g]); claim(xing[g], g, 'xing'); }
+    for (g in xing) {
+      put(g, xing[g]); claim(xing[g], g, 'xing');
+      // 引擎可能输出「禽芮」这类合称（天禽寄于天芮之宫），此时规则里写的「天芮」将定位不到，
+      // 而天芮正是疾病占的首要用神——故逐字还原为规范星名一并登记。
+      // 与 yongshen.locate 的 loose 匹配同义；test 有守卫比对二者落宫。
+      var v = String(xing[g] || '');
+      for (var k = 0; k < v.length; k++) {
+        var ch = v.charAt(k);   // 勿用 c：本函数外层 var c = chart，同名会被覆盖
+        if (XING_CHARS.indexOf(ch) >= 0) { put(g, '天' + ch); claim('天' + ch, g, 'xing'); }
+      }
+    }
     for (g in shen) { put(g, shen[g]); claim(shen[g], g, 'shen'); }
     for (g in tian) { put(g, tian[g]); claim(tian[g], g, 'tianGan'); }
     for (g in di) { put(g, di[g]); claim(di[g], g, 'diGan'); }
@@ -219,6 +239,11 @@
       if (!ctx.state || states.indexOf(ctx.state) < 0) return null;
       hit.state = ctx.state;
     }
+    var gStates = asArray(when.gongState);
+    if (gStates.length) {
+      if (!ctx.gongState || gStates.indexOf(ctx.gongState) < 0) return null;
+      hit.gongState = ctx.gongState;
+    }
     var flags = asArray(when.flags), i;
     if (flags.length) {
       for (i = 0; i < flags.length; i++) if (ctx.flags.indexOf(flags[i]) < 0) return null;
@@ -281,6 +306,9 @@
     var base = {
       version: VERSION, domain: id, label: '', school: school,
       applicable: false, status: domainStatus(id), reason: '',
+      // 占类安全边界（如健康类的"非医学诊断"）。随占类走、与判读同时送达，
+      // 不能只靠提示词末尾的通用纪律——那一段离判读太远，容易被长上下文冲淡。
+      safetyNote: '',
       focus: [], readings: [], combinations: [], relations: [], absent: [],
       tally: { support: 0, obstruct: 0, neutral: 0, weighted: 0, byAspect: {} },
       degraded: !ws, notes: []
@@ -290,6 +318,8 @@
     var d = getDomain(id);
     if (!d) { base.reason = '规则库中无此占类（' + id + '），本层停用。'; return base; }
     base.label = d.label || '';
+    // 安全边界即使在本层停用时也照常送达——占类没变，边界就没变
+    base.safetyNote = d.safetyNote || '';
 
     // 零串味：规则库源自转盘，遇他派盘面整体停用，绝不降级套用。
     var appliesTo = DB.appliesTo || ['zhuanpan'];
@@ -352,6 +382,9 @@
       return {
         el: el, gong: el.gong,
         state: stateOfElement(el, wsGong),
+        // 宫旺衰：八神不参五行（wangshuai 亦不产 shenState），其力量只能以所落之宫论——
+        // 这正是纲要·四之二所列「用神/值符/值使/日干/时干**宫**旺相→事有力」的口径。
+        gongState: wsGong ? (wsGong.gongState || '') : '',
         flags: fl.flags, flagWhy: fl.why,
         sameGong: sameGongNames(el.gong)
       };
@@ -393,8 +426,10 @@
       }
       var trig = [];
       if (hit.state) trig.push(hit.state);
+      if (hit.gongState) trig.push('宫' + hit.gongState);
       if (hit.flags) trig.push(hit.flags.join('·'));
       if (hit['with']) trig.push('同宫' + hit['with'].join('·'));
+      if (hit.gong) trig.push('临' + hit.gong + '宫' + ((GONG_INFO[hit.gong] || {}).name || ''));
       base.readings.push({
         id: rule.id, kind: 'condition', on: rule.on,
         aspect: aspectFor(d, rule.on), weight: weightFor(d, rule.on),
@@ -442,20 +477,26 @@
         if (!a || !b) return;
         var ea = (ws.gongs[a.gong] || {}).gongElement || '';
         var eb = (ws.gongs[b.gong] || {}).gongElement || '';
+        var w = Math.max(weightFor(d, rule.from), weightFor(d, rule.to));
+        function emit(kind, entry) {
+          base.relations.push({
+            id: rule.id, kind: 'relation',
+            from: rule.from, to: rule.to,
+            fromLabel: rule.fromLabel || rule.from, toLabel: rule.toLabel || rule.to,
+            fromGong: a.gong, toGong: b.gong,
+            fromElement: ea, toElement: eb, relation: kind,
+            trigger: ((DB.relationKinds || {})[kind] || kind),
+            weight: w,
+            concept: (entry.concept || []).slice(),
+            polarity: entry.polarity || '0', basis: rule.basis || ''
+          });
+        }
         var kind = relationKind(a.gong, b.gong, ea, eb);
         var entry = kind && rule.map ? rule.map[kind] : null;
-        if (!entry) return;
-        base.relations.push({
-          id: rule.id, kind: 'relation',
-          from: rule.from, to: rule.to,
-          fromLabel: rule.fromLabel || rule.from, toLabel: rule.toLabel || rule.to,
-          fromGong: a.gong, toGong: b.gong,
-          fromElement: ea, toElement: eb, relation: kind,
-          trigger: ((DB.relationKinds || {})[kind] || kind),
-          weight: Math.max(weightFor(d, rule.from), weightFor(d, rule.to)),
-          concept: (entry.concept || []).slice(),
-          polarity: entry.polarity || '0', basis: rule.basis || ''
-        });
+        if (entry) emit(kind, entry);
+        // 相冲与五行生克并不互斥（如坤二与艮八既比和又相冲），故另行加判、不覆盖上一条。
+        // 仅在规则显式声明 map.chong 时才产出——不给所有关系一律附送一条冲。
+        if (rule.map && rule.map.chong && GONG_CHONG[a.gong] === b.gong) emit('chong', rule.map.chong);
       });
     }
 
@@ -502,6 +543,7 @@
     L.push('【占类象义判读 XiangYi v' + res.version + '　占类：' + res.domain + (res.label ? '(' + res.label + ')' : '') + '】');
     L.push('· 以下判读由应用按 domain-rules.json 确定性求值得出，已注明依据；' +
       '判读只说明「该元素在本占类中意味着什么」，**不是最终吉凶断语**，成败仍须结合引擎吉凶与全盘综合。');
+    if (res.safetyNote) L.push('· ⚠ 本占类边界：' + res.safetyNote);
     if (res.focus.length) {
       L.push('· 本占类关注点（★为权重，越高越应重点着墨）：');
       res.focus.forEach(function (f) {
@@ -556,6 +598,9 @@
     analyze: analyze, toPromptBlock: toPromptBlock,
     VERSION: VERSION,
     // 供漂移守卫测试比对（不供业务调用）
-    _TABLES: { SHENG: SHENG, KE: KE, RU_MU_GONG: RU_MU_GONG, JI_XING_GONG: JI_XING_GONG, GONG_INFO: GONG_INFO }
+    _TABLES: {
+      SHENG: SHENG, KE: KE, RU_MU_GONG: RU_MU_GONG, JI_XING_GONG: JI_XING_GONG,
+      GONG_INFO: GONG_INFO, GONG_CHONG: GONG_CHONG
+    }
   };
 });

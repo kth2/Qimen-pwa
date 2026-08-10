@@ -247,10 +247,16 @@ t('关注点与权重写进提示块，且未见者如实标注', function () {
   assert.ok(txt.indexOf('★★★★★ 生门＝财源') >= 0, '★5 的财源须明标：\n' + txt.slice(0, 400));
 });
 t('规则未建的占类：提示块明说是"规则未建"而非"盘上无碍"', function () {
-  var xy = XY.analyze({ domain: 'career', chart: CHART, wangshuai: WS.analyze(CHART) });
-  var ev = EV.build({ question: 'q', domain: 'career', chart: CHART, yongshen: YS.resolve({ domain: 'career', chart: CHART }), xiangyi: xy });
+  // 五类既已建成，库中无 pending 者；以合成规则库验证该机制仍在（日后新增占类必经此态）
+  XY.load({
+    appliesTo: ['zhuanpan'], defaultWeights: RULES.defaultWeights, relationKinds: RULES.relationKinds,
+    domains: { fixture_pending: { label: '待建占类', status: 'pending', roles: {}, conditions: [], combinations: [], relations: [] } }
+  });
+  var xy = XY.analyze({ domain: 'fixture_pending', chart: CHART, wangshuai: WS.analyze(CHART) });
+  var ev = EV.build({ question: 'q', domain: 'fixture_pending', chart: CHART, yongshen: YS.resolve({ chart: CHART }), xiangyi: xy });
   assert.strictEqual(typesOf(ev, 'READING').length, 0);
   assert.ok(EV.toPromptBlock(ev).indexOf('规则未建') >= 0);
+  XY.load(RULES);
 });
 t('飞盘：象义层停用，证据包不得混入转盘判读', function () {
   var xy = XY.analyze({ domain: 'wealth', chart: CHART, wangshuai: WS.analyze(CHART), options: { school: 'feipan' } });
@@ -266,6 +272,38 @@ t('含判读的证据包仍受体积约束', function () {
   assert.ok(typesOf(ev, 'READING').length <= 32, 'READING 条目过多：' + typesOf(ev, 'READING').length);
   var txt = EV.toPromptBlock(ev);
   assert.ok(txt.length < 12000, '提示块过长会稀释注意力：' + txt.length);
+});
+t('五个新占类都能产出 READING 并进入证据包', function () {
+  var ws = WS.analyze(CHART), got = {};
+  ['career', 'relationship', 'health', 'lawsuit', 'lost_item'].forEach(function (dm) {
+    var xy = XY.analyze({ domain: dm, chart: CHART, wangshuai: ws });
+    var ev = EV.build({ question: 'q', domain: dm, chart: CHART, yongshen: YS.resolve({ domain: dm, chart: CHART }), xiangyi: xy });
+    var reads = typesOf(ev, 'READING');
+    assert.strictEqual(ev.xiangyi.applicable, true, dm + ' 规则应已建成并生效');
+    assert.ok(reads.length > 0, dm + ' 应产出 READING，实得 0');
+    reads.forEach(function (r) {
+      assert.strictEqual(r.source, 'knowledge/domain-rules.json');
+      assert.ok(/纲要|symbols\.json|domains\.json/.test(r.basis), dm + ' 的 ' + r.id + ' 出处不合规');
+    });
+    got[dm] = reads.length;
+  });
+  assert.ok(Object.keys(got).length === 5, JSON.stringify(got));
+});
+t('健康占：安全边界进入证据包与提示块', function () {
+  var xy = XY.analyze({ domain: 'health', chart: CHART, wangshuai: WS.analyze(CHART) });
+  var ev = EV.build({ question: '身体如何', domain: 'health', chart: CHART, yongshen: YS.resolve({ domain: 'health', chart: CHART }), xiangyi: xy });
+  assert.ok(/不得作为医学诊断/.test(ev.xiangyi.safetyNote), '证据包须带健康边界');
+  var txt = EV.toPromptBlock(ev);
+  assert.ok(txt.indexOf('本占类边界') >= 0 && txt.indexOf('不得作为医学诊断') >= 0, '提示块须显式声明健康边界');
+  assert.ok(txt.indexOf('咨询合格医疗专业人士') >= 0, '须提示就医');
+});
+t('五个新占类在飞盘上均不得混入转盘判读', function () {
+  ['career', 'relationship', 'health', 'lawsuit', 'lost_item'].forEach(function (dm) {
+    var xy = XY.analyze({ domain: dm, chart: CHART, wangshuai: WS.analyze(CHART), options: { school: 'feipan' } });
+    var ev = EV.build({ question: 'q', domain: dm, chart: CHART, yongshen: YS.resolve({ domain: dm, chart: CHART }), xiangyi: xy });
+    assert.strictEqual(typesOf(ev, 'READING').length, 0, dm + ' 零串味失守');
+    assert.strictEqual(ev.xiangyi.applicable, false);
+  });
 });
 t('含判读的证据包可 JSON 序列化且确定性', function () {
   assert.doesNotThrow(function () { JSON.parse(JSON.stringify(buildWithXy())); });

@@ -324,6 +324,7 @@
       // 便于在界面/控制台核对，也让"规则未建"与"盘上无碍"不至于被混为一谈。
       xiangyi: xy ? {
         version: xy.version, applicable: xy.applicable, status: xy.status, reason: xy.reason,
+        safetyNote: xy.safetyNote || '',
         focus: xy.focus, absent: xy.absent, tally: xy.tally, degraded: xy.degraded, notes: xy.notes
       } : null,
       items: items,
@@ -382,6 +383,8 @@
     }
     // 占类关注点（权重）须排在 FACT 之前：先告诉模型"这一占该重点看谁"，再给材料
     var xy = ev.xiangyi;
+    // 安全边界紧贴判读呈现（不止依赖提示词末尾的通用纪律），且本层停用时照样送达
+    if (xy && xy.safetyNote) L.push('· ⚠ 本占类边界：' + xy.safetyNote);
     if (xy && xy.applicable && xy.focus && xy.focus.length) {
       L.push('· 本占类关注点与权重（★越多越应重点着墨，勿平均用力）：');
       xy.focus.forEach(function (f) {
