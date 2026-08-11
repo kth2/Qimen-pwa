@@ -14,13 +14,16 @@ var EV = require('./evidence.js');
 var WS = require('./wangshuai.js');
 var YQ = require('./yingqi.js');
 var XY = require('./xiangyi.js');
+var TM = require('./timing.js');
 var DOMAINS = require('../knowledge/domains.json');
 var SYMBOLS = require('../knowledge/symbols.json');
 var RULES = require('../knowledge/domain-rules.json');
+var TIMING_RULES = require('../knowledge/timing-rules.json');
 
 YS.load(DOMAINS);
 EV.load(SYMBOLS);
 XY.load(RULES);
+TM.load(TIMING_RULES);
 
 var pass = 0, fail = 0;
 function t(name, fn) {
@@ -304,6 +307,60 @@ t('五个新占类在飞盘上均不得混入转盘判读', function () {
     assert.strictEqual(typesOf(ev, 'READING').length, 0, dm + ' 零串味失守');
     assert.strictEqual(ev.xiangyi.applicable, false);
   });
+});
+console.log('== Phase 4：应期锚点(TIMING)集成 ==');
+function buildWithTiming() {
+  var ws = WS.analyze(CHART);
+  var xy = XY.analyze({ domain: 'wealth', chart: CHART, wangshuai: ws });
+  var yq = YQ.analyze(CHART, { yongShenGongs: xy.focus.map(function (f) { return f.gong; }) });
+  var tm = TM.analyze({ chart: CHART, yingqi: yq, xiangyi: xy, wangshuai: ws, options: { domain: 'wealth' } });
+  return EV.build({ question: '何时可得？', domain: 'wealth', chart: CHART, yongshen: YONG, xiangyi: xy, timing: tm });
+}
+t('不传 timing 时无 TIMING 条目（Phase 1/2 行为原样不变）', function () {
+  var ev = build();
+  assert.strictEqual(typesOf(ev, 'TIMING').length, 0);
+  assert.strictEqual(ev.timing, null);
+  assert.ok(EV.toPromptBlock(ev).indexOf('TIMING') < 0);
+});
+t('传入 timing 时产出 TIMING 条目，且各带机制与出处', function () {
+  var ev = buildWithTiming();
+  var ts = typesOf(ev, 'TIMING');
+  assert.ok(ts.length > 0, '应有 TIMING 条目');
+  ts.forEach(function (x) {
+    assert.ok(TIMING_RULES.mechanisms[x.mechanism], '出现了规则库中没有的机制：' + x.mechanism);
+    assert.ok(/纲要/.test(x.basis), x.id + ' 缺纲要出处');
+    assert.ok(['high', 'medium', 'low'].indexOf(x.strength) >= 0, x.id + ' 强弱非法');
+    assert.ok(x.content.length > 0);
+  });
+});
+t('TIMING 与 READING/SYMBOL 分列，来源各自标明', function () {
+  var ev = buildWithTiming();
+  typesOf(ev, 'TIMING').forEach(function (x) { assert.ok(/timing\.js/.test(x.source), 'TIMING 来源须标明'); });
+  typesOf(ev, 'READING').forEach(function (x) { assert.strictEqual(x.source, 'knowledge/domain-rules.json'); });
+  var txt = EV.toPromptBlock(ev);
+  assert.ok(txt.indexOf('TIMING（应期锚点') >= 0);
+  assert.ok(txt.indexOf('READING（占类象义判读') >= 0);
+});
+t('提示块声明应期与 yingqi 同源，并禁止自造日辰', function () {
+  var txt = EV.toPromptBlock(buildWithTiming());
+  assert.ok(/取自上方 yingqi 同一组计算/.test(txt), '须声明同源，避免被当成两套推算');
+  assert.ok(/不得自造日辰/.test(txt));
+  assert.ok(/仅表先到后到/.test(txt), '位次不得被读成"几天后"');
+  assert.ok(/严禁改用天干或无关地支充数/.test(txt), '机制禁令须带出');
+});
+t('证据包保留时间线次序、迟速与用神宫河图数', function () {
+  var ev = buildWithTiming();
+  assert.ok(ev.timing.timeline.length > 0, '应保留时间线');
+  for (var i = 1; i < ev.timing.timeline.length; i++) {
+    assert.ok(ev.timing.timeline[i - 1].offset <= ev.timing.timeline[i].offset, '时间线须按位次升序');
+  }
+  assert.ok(ev.timing.numbers.length > 0, '应保留用神宫河图数');
+  assert.ok(ev.timing.horizon && /近事看日时/.test(ev.timing.horizon.basis), '应保留断日/月/年之据');
+});
+t('含应期的证据包仍受体积约束', function () {
+  var ev = buildWithTiming();
+  assert.ok(typesOf(ev, 'TIMING').length <= 12, 'TIMING 条目过多');
+  assert.ok(EV.toPromptBlock(ev).length < 12000, '提示块过长会稀释注意力');
 });
 t('含判读的证据包可 JSON 序列化且确定性', function () {
   assert.doesNotThrow(function () { JSON.parse(JSON.stringify(buildWithXy())); });

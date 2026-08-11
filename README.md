@@ -20,12 +20,15 @@ GitHub Pages 静态托管。支持 **时家奇门**（转盘 / 飞盘）与 **�
 | `core/yongshen.test.js` | 用神核心单元测试（`node core/yongshen.test.js`） |
 | `core/xiangyi.js` | **占类象义推理核心（纯函数、可移植）**，见「占类象义推理层」 |
 | `core/xiangyi.test.js` | 象义推理单元测试（`node core/xiangyi.test.js`） |
+| `core/timing.js` | **应期时间线核心（纯函数、可移植）**，见「应期时间线」 |
+| `core/timing.test.js` | 应期时间线单元测试（`node core/timing.test.js`） |
 | `core/evidence.js` | **证据包核心（纯函数、可移植）**，见「结构化推理层」 |
 | `core/evidence.test.js` | 证据包单元测试（`node core/evidence.test.js`） |
 | `core/reconciliation.test.js` | 用神归属与两派隔离回归测试（`node core/reconciliation.test.js`） |
 | `knowledge/symbols.json` | 结构化象义知识库（五行/八卦/九宫/天干/九星/八门/八神），**与占类无关** |
 | `knowledge/domains.json` | 占类 → 用神角色映射（我方/主用神/辅用神/对方） |
 | `knowledge/domain-rules.json` | 占类象义规则库（角色权重 / 条件 / 组合 / 宫际关系），**与占类相关** |
+| `knowledge/timing-rules.json` | 应期机制规则库（填实 / 冲实 / 冲墓 / 马星 / 宫干定日，含盘别与强弱） |
 | `llm.js` | AI provider（Gemini 流式 / Ollama / 自定义端点） |
 | `assets/*-method.md` | 转盘 / 飞盘 / 山向宅盘 解断纲要（AI 理论载荷） |
 | `sw.js` | Service Worker（离线缓存 + 更新自动刷新） |
@@ -264,7 +267,8 @@ python3 -m http.server 8000   # 然后访问 http://localhost:8000
 3. **符号知识** —— `knowledge/symbols.json`（与占类无关的通用象义）
 4. **占类用神** —— `knowledge/domains.json` + `core/yongshen.js`
 5. **占类象义** —— `knowledge/domain-rules.json` + `core/xiangyi.js`（见「占类象义推理层」）
-6. **LLM 解读** —— `llm.js`（未改动）
+6. **应期时间线** —— `knowledge/timing-rules.json` + `core/timing.js`（见「应期时间线」）
+7. **LLM 解读** —— `llm.js`（未改动）
 
 模型收到的不再只是原始盘面文本，而是一份**结构化证据包**。
 
@@ -276,6 +280,7 @@ python3 -m http.server 8000   # 然后访问 http://localhost:8000
 | `RULE` | 应用内确定性分析（引擎吉凶/格局、旺衰四害、应期数字） | 优先于模型自身判断 |
 | `SYMBOL` | 取自 `symbols.json` 的传统象义，**与占类无关的原料** | 优先采用，可组合，不可替换为自创象义 |
 | `READING` | 取自 `domain-rules.json` 的**占类象义判读**（Phase 2） | 涉及其所断元素时优先采用其读法；`[助]/[阻]` 只表倾向，非成败断语 |
+| `TIMING` | 取自 `core/timing.js` 的**应期锚点**（Phase 4） | 断应期只在其列出的候选中选，不得自造日辰；`[★强]` 表机制与用神的关系，非应验概率 |
 
 「证据优先」而非「只许用证据」：模型仍可组合象义、推演情境、说明关系、表达不确定；
 但不得另立用神体系、不得虚构盘面元素、不得推翻确定性计算。
@@ -322,7 +327,7 @@ YongShen.resolve({ domain, chart, options }); // → { domain, roles, priority, 
 ```js
 Evidence.load(symbolsJson);
 Evidence.getSymbol('bamen', '生门');
-Evidence.build({ question, domain, chart, yongshen, xiangyi, wangshuai, yingqi, shanxiang });
+Evidence.build({ question, domain, chart, yongshen, xiangyi, timing, wangshuai, yingqi, shanxiang });
 Evidence.toPromptBlock(evidence);
 ```
 
@@ -573,3 +578,81 @@ node core/evidence.test.js    # 34 项：含 READING 集成、健康边界与体
 每个占类的 `_omittedNote` 字段逐条记录了「本可以写、但纲要不支持故未写」的规则及其理由，
 例如：事业不借用功名行的天辅、不给庚单立竞争强弱条件；官司不硬派「天盘为客、地盘为主」的
 原被告角色（引擎未产出可靠标识）。**留白本身也是可审计的**。
+
+---
+
+## 应期时间线（Phase 4 · Timing）
+
+### 症结：干支算准了，但是一张平铺的表
+
+`core/yingqi.js` 已经把应期所需的具体干支全部算准（填实/冲实/冲墓/马星/宫干日辰/河图数），
+Phase 之前的错误——「午未空亡 → 应在戊己日」——也早已修掉。但它输出的是一张**平铺的表**：
+九宫的干日全列、空亡与冲墓并陈。**谁要紧、谁先到、为什么是这个日子，仍要模型自己从表里挑**。
+实测中模型常挑到与本占用神毫无关系的宫干日，或把「空亡的填实之期」与「入墓的冲墓之期」
+混作一谈。本层补的正是这一步：
+
+```
+yingqi：这些日子在数学上成立   →   timing：其中哪几个与本占用神有关、孰强孰弱、谁先到
+```
+
+### 四件事
+
+1. **只留与本占用神相关的锚点**。用神与权重取自 `core/xiangyi.js`，故**随占类而变**——
+   求财的应期落在生门/戊上，官司落在开门/庚上。非用神宫的同类推算记为参考级。
+2. **强弱是机制与用神的关系，不是打分**。机制正好解开压在用神身上的那一害
+   （空亡→填实/冲实、入墓→冲墓），纲要明言「须待…方应」，故为 `high`；
+   用神宫的干日与马星动象为 `medium`；与用神无关之宫为 `low`。级别由规则库
+   显式声明（`mechanism.onTarget`），不由描述字段的有无去推断。
+3. **排出先后**。按同一循环内的**距今位次**（地支 12、天干 10）把并列的候选排成一条线，
+   回答「先到哪个」。位次**只表先到后到，不是「几天后」**——提示词与单测都钉死这一点。
+4. **定迟速**。以权重最高之用神的旺衰论：旺相应速、休囚墓绝应迟；用神入墓者纵旺相
+   亦须待冲墓方发（纲要·三节应期5 + 四之二节要诀2）。
+
+### 绝不重算干支
+
+所有支与干**一律取自 `YingQi.analyze()` 的结果**，本层只做筛选、定强弱与排序。
+若两处各推一套，模型面对两份不一致的日辰必然选错——单测逐条回查每个锚点的干支
+确实出现在 yingqi 的输出中，并回归了「填实必为空亡支本身、冲实必为其六冲支、
+四支类机制绝不取天干」这些实测错法。
+
+### 零串味做到机制一级
+
+不是整层按盘别开关，而是**逐个机制**判定：
+
+| 机制 | 转盘 | 飞盘 | 依据 |
+|---|---|---|---|
+| 填实 / 冲实 | ✅ | ✅ | 两份纲要表述一致（转盘·三节应期2；飞盘·应期节同条） |
+| 冲墓 | ✅ | ✅ | 转盘·三节应期4 + 四之二要诀2；飞盘·应期节「入墓」 |
+| 宫干定日 | ✅ | ✅ | 转盘·三节应期1；飞盘·应期节「近期取地盘奇仪定日」 |
+| 马星发动 | ✅ | ❌ | 只见于转盘·三节应期3；飞盘应期节未列此法，故不推及 |
+
+两派通用的机制，`basis` **分别注明两份纲要的出处**（有单测强制），不是由一派推及另一派。
+用神的**取用**仍是分派的：转盘用 `xiangyi` 的占类用神与权重，飞盘退回引擎自算的用神宫，
+且权重如实记 0（表示「知道是用神宫，但不知其在本占中的分量」），绝不编造。
+
+### 缺件降级
+
+| 缺什么 | 后果 |
+|---|---|
+| `timing-rules.json` 加载失败 | 证据包不含 `TIMING`，应期仍由 yingqi 块承载 |
+| 未传 `yingqi` | **整层停用**——本层只做筛选排序，绝不自行推算干支 |
+| 未传 `wangshuai` | 不产出迟速（不臆断），锚点照常 |
+| 未取得用神落宫 | 锚点全记参考级并留痕，不代为排主次 |
+
+### API
+
+```js
+Timing.load(timingRulesJson);
+Timing.analyze({ chart, yingqi, xiangyi, wangshuai, options: { domain, school, yongShenGongs } });
+// → { applicable, anchors, timeline, pace, numbers, horizon, dayZhi, targetSource, notes }
+Timing.toPromptBlock(result);
+```
+
+确定性、无副作用。`anchors` 按「强弱→用神权重→距今位次」排序，`timeline` 按「距今位次」排序——
+两者各司其职：前者答「该看哪个」，后者答「先到哪个」。
+
+### 运行测试
+
+```bash
+node core/timing.test.js      # 35 项：干支同源、强弱语义、位次与排序、机制级隔离、缺件降级
+```

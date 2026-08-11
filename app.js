@@ -4,6 +4,7 @@
   const SX = window.ShanXiang;
   const YS = window.YongShen;   // 结构化用神层（可缺失：缺则退回原有流程）
   const XY = window.XiangYi;    // 占类象义推理层（Phase 2；缺则证据包不含 READING，其余照旧）
+  const TM = window.Timing;     // 应期时间线层（Phase 4；缺则不含 TIMING，yingqi 块照常承载应期）
   const EV = window.Evidence;   // 结构化证据层（同上）
   const $ = (id) => document.getElementById(id);
   let school = 'zhuanpan';
@@ -204,6 +205,7 @@
   // 证据层只是"增益"，缺失时 runAI 自动退回原有的纯文本纲要流程，功能不减。
   let _kbReady = false;
   let _rulesReady = false;      // 象义规则库单独计：它缺席只减 READING，不该拖垮整个证据层
+  let _timingReady = false;     // 应期规则库同理：缺席只减 TIMING
   async function loadKnowledge() {
     if (!YS || !EV) return false;
     const get = (p) => fetch(p).then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)));
@@ -220,6 +222,11 @@
     if (_kbReady && XY && !_rulesReady) {
       try { _rulesReady = XY.load(await get('knowledge/domain-rules.json')); }
       catch (e) { console.warn('[xiangyi] 占类规则库加载失败，本次不作象义判读：', e.message); _rulesReady = false; }
+    }
+    // 应期规则库同样单独计：它缺席只减 TIMING，应期仍由 yingqi 块承载
+    if (_kbReady && TM && !_timingReady) {
+      try { _timingReady = TM.load(await get('knowledge/timing-rules.json')); }
+      catch (e) { console.warn('[timing] 应期规则库加载失败，本次不排应期时间线：', e.message); _timingReady = false; }
     }
     return _kbReady;
   }
@@ -261,7 +268,11 @@
     // 权重决定详略；"规则未建"不等于"盘上无碍"——这三处一旦被模型误读，本层反成噪音。
     'E10. READING 是本占类下的象义判读（已注明依据），凡涉及其所断元素，须优先采用其读法，不得改用与占类无关的泛化解释；其 [助]/[阻] 只表倾向，**不是成败断语**，成败仍须结合引擎吉凶与全盘旺衰自行推断，不得以"助多于阻"直接下结论。',
     'E11. 【关注点与权重】的 ★ 决定着墨详略：★★★★★ 者须逐条展开，★★ 者点到为止，不要平均用力。标为「盘上未见」者按未见论。',
-    'E12. 若证据包声明本占类「规则未建」，那是应用尚未收录该占类规则，**不等于盘上没有阻碍**；此时按《解断方法纲要》正常推断，不得以"未见判读"为由声称一切顺遂。'
+    'E12. 若证据包声明本占类「规则未建」，那是应用尚未收录该占类规则，**不等于盘上没有阻碍**；此时按《解断方法纲要》正常推断，不得以"未见判读"为由声称一切顺遂。',
+    // Phase 4：应期锚点。要点是"只在候选里选"与"位次不是天数"——这两处一旦被误读，应期就会重新开始瞎猜。
+    'E13. 断应期只许在 TIMING 所列锚点中选取，不得自造日辰；其干支与上方 yingqi 同源，二者不是两套推算，不要并列陈述或相互印证。填实/冲实/冲墓/马星只能是**地支日**，宫干定日只能是**天干日**，两者不可互换。',
+    'E14. TIMING 的"距今位次"只表同一循环内的先到后到，**不是"几天后"**，不得换算成具体天数或日期。断日/断月/断年须按问事远近自行判定（近事看日时、中事看月、远事看年），并说明所据。',
+    'E15. TIMING 的 [★强]/[★中]/[★参考] 表示该机制与本占用神的关系强弱，不是应验概率；不得写成"某日必应"，应表述为"应期多在…"或"须待…方应"。'
   ].join('\n');
   // 转盘断局补充：日干(求测人)/时干(所占之事)天盘落宫。
   // 引擎序列化只给四柱与九宫干，不点明二者落宫；此处算好喂给 AI，
@@ -354,14 +365,31 @@
               });
             } catch (xe) { console.warn('[xiangyi] 判读失败，本次不含 READING：', xe.message); xiangyi = null; }
           }
+          // 应期时间线（Phase 4）：把 yingqi 已算好的干支按「与本占用神的关系」筛选、定强弱、排先后。
+          // 干支一律取自上面同一份 yingqi 计算，绝不重算——两处若各推一套，模型必然选错日子。
+          let timing = null;
+          if (_timingReady && TM) {
+            try {
+              const ysGongsForTiming = (xiangyi && xiangyi.applicable)
+                ? xiangyi.focus.map(f => f.gong)
+                : ysGongs;   // 飞盘/象义层停用时退回引擎自算的用神宫
+              timing = TM.analyze({
+                chart: pan,
+                yingqi: window.YingQi.analyze(pan, { yongShenGongs: ysGongsForTiming }),
+                xiangyi, wangshuai: (window.WangShuai && window.WangShuai.analyze) ? window.WangShuai.analyze(pan) : null,
+                options: { domain, school: school === 'feipan' ? 'feipan' : 'zhuanpan', yongShenGongs: ysGongsForTiming }
+              });
+            } catch (te) { console.warn('[timing] 排应期失败，本次不含 TIMING：', te.message); timing = null; }
+          }
           // 不传 shanxiang：山向背景与阳宅断法要求仍由 sxBlock 原样承载（那段含解读指引而不止事实），
           // 若再进证据包会造成同一内容重复入提示词。
           const evidence = EV.build({
-            question: q, domain, chart: pan, yongshen, xiangyi,
+            question: q, domain, chart: pan, yongshen, xiangyi, timing,
             wangshuai: wsBlock, yingqi: yqBlock
           });
           window._evidence = evidence;                 // 便于在控制台核对喂给模型的内容
           window._xiangyi = xiangyi;                   // 同上：逐条核对判读命中了哪些规则
+          window._timing = timing;                     // 同上：核对应期锚点与其机制
           evBlock = EV.toPromptBlock(evidence);
           if (evBlock) sysExtra = '\n' + EVIDENCE_DISCIPLINE;
         } catch (ee) {
