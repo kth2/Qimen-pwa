@@ -13,11 +13,17 @@ var YS = require('./yongshen.js');
 var EV = require('./evidence.js');
 var WS = require('./wangshuai.js');
 var YQ = require('./yingqi.js');
+var XY = require('./xiangyi.js');
+var TM = require('./timing.js');
 var DOMAINS = require('../knowledge/domains.json');
 var SYMBOLS = require('../knowledge/symbols.json');
+var RULES = require('../knowledge/domain-rules.json');
+var TIMING_RULES = require('../knowledge/timing-rules.json');
 
 YS.load(DOMAINS);
 EV.load(SYMBOLS);
+XY.load(RULES);
+TM.load(TIMING_RULES);
 
 var pass = 0, fail = 0;
 function t(name, fn) {
@@ -178,6 +184,187 @@ t('无 domain 时回落 general', function () {
 t('toPromptBlock 收到坏数据返回空串，不阻断解读', function () {
   assert.strictEqual(EV.toPromptBlock(null), '');
   assert.strictEqual(EV.toPromptBlock({}), '');
+});
+
+console.log('== Phase 2：占类象义判读(READING)集成 ==');
+var XYRES = XY.analyze({ domain: 'wealth', chart: CHART, wangshuai: WS.analyze(CHART) });
+function buildWithXy(extra) {
+  var arg = { question: '今年求财如何？', domain: 'wealth', chart: CHART, yongshen: YONG, xiangyi: XYRES };
+  for (var k in (extra || {})) arg[k] = extra[k];
+  return EV.build(arg);
+}
+t('不传 xiangyi 时无 READING 条目（Phase 1 行为原样不变）', function () {
+  var ev = build();
+  assert.strictEqual(typesOf(ev, 'READING').length, 0);
+  assert.strictEqual(ev.xiangyi, null);
+  assert.ok(EV.toPromptBlock(ev).indexOf('READING') < 0);
+});
+t('传入 xiangyi 时产出 READING 条目，三种 scope 齐备', function () {
+  var ev = buildWithXy();
+  var reads = typesOf(ev, 'READING');
+  assert.ok(reads.length > 0, '应有 READING');
+  var scopes = {};
+  reads.forEach(function (r) { scopes[r.scope] = (scopes[r.scope] || 0) + 1; });
+  assert.ok(scopes.condition > 0, '应有单象判读');
+  assert.ok(scopes.combination > 0, '应有组合判读');
+  assert.ok(scopes.relation > 0, '应有宫际关系判读');
+});
+t('每条 READING 都可回查规则库，且注明出处与触发条件', function () {
+  var byId = {};
+  Object.keys(RULES.domains).forEach(function (dm) {
+    ['conditions', 'combinations', 'relations'].forEach(function (k) {
+      (RULES.domains[dm][k] || []).forEach(function (r) { byId[r.id] = r; });
+    });
+  });
+  typesOf(buildWithXy(), 'READING').forEach(function (r) {
+    assert.ok(byId[r.id], '证据包出现了规则库中没有的判读：' + r.id);
+    assert.strictEqual(r.source, 'knowledge/domain-rules.json');
+    assert.ok(r.basis && r.basis.length > 4, r.id + ' 缺出处');
+    assert.ok(r.trigger && r.trigger.length > 0, r.id + ' 缺触发条件——只给结论不给"因何而得"，模型无从核验');
+    assert.ok(['+', '-', '0'].indexOf(r.polarity) >= 0, r.id + ' polarity 非法');
+  });
+});
+t('READING 与 SYMBOL 分列，不得混为一谈', function () {
+  var ev = buildWithXy();
+  typesOf(ev, 'SYMBOL').forEach(function (s) { assert.strictEqual(s.source, 'knowledge/symbols.json'); });
+  typesOf(ev, 'READING').forEach(function (r) { assert.strictEqual(r.source, 'knowledge/domain-rules.json'); });
+  var txt = EV.toPromptBlock(ev);
+  assert.ok(txt.indexOf('SYMBOL（知识库通用象义') >= 0, '须说明 SYMBOL 是与占类无关的原料');
+  assert.ok(txt.indexOf('READING（占类象义判读') >= 0, '须说明 READING 是本占类下的读法');
+});
+t('提示块声明判读非吉凶断语', function () {
+  var txt = EV.toPromptBlock(buildWithXy());
+  assert.ok(txt.indexOf('不是成败断语') >= 0);
+  assert.ok(/倾向计数.*非结论/.test(txt), '倾向计数须明标非结论');
+});
+t('SYMBOL 按占类权重优先（Phase 2.2：重点用神不被截断挤掉）', function () {
+  var ev = buildWithXy();
+  var els = typesOf(ev, 'SYMBOL').map(function (s) { return s.element; });
+  var iSheng = els.indexOf('生门'), iLiu = els.indexOf('六合');
+  assert.ok(iSheng >= 0, '★5 的生门必须在列');
+  if (iLiu >= 0) assert.ok(iSheng < iLiu, '★5 的生门应排在 ★3 的六合之前，实得 ' + els.join('>'));
+});
+t('关注点与权重写进提示块，且未见者如实标注', function () {
+  var txt = EV.toPromptBlock(buildWithXy());
+  assert.ok(txt.indexOf('本占类关注点与权重') >= 0);
+  assert.ok(txt.indexOf('★★★★★ 生门＝财源') >= 0, '★5 的财源须明标：\n' + txt.slice(0, 400));
+});
+t('规则未建的占类：提示块明说是"规则未建"而非"盘上无碍"', function () {
+  // 五类既已建成，库中无 pending 者；以合成规则库验证该机制仍在（日后新增占类必经此态）
+  XY.load({
+    appliesTo: ['zhuanpan'], defaultWeights: RULES.defaultWeights, relationKinds: RULES.relationKinds,
+    domains: { fixture_pending: { label: '待建占类', status: 'pending', roles: {}, conditions: [], combinations: [], relations: [] } }
+  });
+  var xy = XY.analyze({ domain: 'fixture_pending', chart: CHART, wangshuai: WS.analyze(CHART) });
+  var ev = EV.build({ question: 'q', domain: 'fixture_pending', chart: CHART, yongshen: YS.resolve({ chart: CHART }), xiangyi: xy });
+  assert.strictEqual(typesOf(ev, 'READING').length, 0);
+  assert.ok(EV.toPromptBlock(ev).indexOf('规则未建') >= 0);
+  XY.load(RULES);
+});
+t('飞盘：象义层停用，证据包不得混入转盘判读', function () {
+  var xy = XY.analyze({ domain: 'wealth', chart: CHART, wangshuai: WS.analyze(CHART), options: { school: 'feipan' } });
+  var ev = EV.build({ question: 'q', domain: 'wealth', chart: CHART, yongshen: YONG, xiangyi: xy });
+  assert.strictEqual(typesOf(ev, 'READING').length, 0, '零串味：飞盘不得出现转盘判读');
+  assert.strictEqual(ev.xiangyi.applicable, false);
+});
+t('含判读的证据包仍受体积约束', function () {
+  var ev = buildWithXy({
+    wangshuai: WS.toPromptBlock(CHART, { JIU_GONG: QM.JIU_GONG }),
+    yingqi: YQ.toPromptBlock(CHART, { JIU_GONG: QM.JIU_GONG, yongShenGongs: ['2'] })
+  });
+  assert.ok(typesOf(ev, 'READING').length <= 32, 'READING 条目过多：' + typesOf(ev, 'READING').length);
+  var txt = EV.toPromptBlock(ev);
+  assert.ok(txt.length < 12000, '提示块过长会稀释注意力：' + txt.length);
+});
+t('五个新占类都能产出 READING 并进入证据包', function () {
+  var ws = WS.analyze(CHART), got = {};
+  ['career', 'relationship', 'health', 'lawsuit', 'lost_item'].forEach(function (dm) {
+    var xy = XY.analyze({ domain: dm, chart: CHART, wangshuai: ws });
+    var ev = EV.build({ question: 'q', domain: dm, chart: CHART, yongshen: YS.resolve({ domain: dm, chart: CHART }), xiangyi: xy });
+    var reads = typesOf(ev, 'READING');
+    assert.strictEqual(ev.xiangyi.applicable, true, dm + ' 规则应已建成并生效');
+    assert.ok(reads.length > 0, dm + ' 应产出 READING，实得 0');
+    reads.forEach(function (r) {
+      assert.strictEqual(r.source, 'knowledge/domain-rules.json');
+      assert.ok(/纲要|symbols\.json|domains\.json/.test(r.basis), dm + ' 的 ' + r.id + ' 出处不合规');
+    });
+    got[dm] = reads.length;
+  });
+  assert.ok(Object.keys(got).length === 5, JSON.stringify(got));
+});
+t('健康占：安全边界进入证据包与提示块', function () {
+  var xy = XY.analyze({ domain: 'health', chart: CHART, wangshuai: WS.analyze(CHART) });
+  var ev = EV.build({ question: '身体如何', domain: 'health', chart: CHART, yongshen: YS.resolve({ domain: 'health', chart: CHART }), xiangyi: xy });
+  assert.ok(/不得作为医学诊断/.test(ev.xiangyi.safetyNote), '证据包须带健康边界');
+  var txt = EV.toPromptBlock(ev);
+  assert.ok(txt.indexOf('本占类边界') >= 0 && txt.indexOf('不得作为医学诊断') >= 0, '提示块须显式声明健康边界');
+  assert.ok(txt.indexOf('咨询合格医疗专业人士') >= 0, '须提示就医');
+});
+t('五个新占类在飞盘上均不得混入转盘判读', function () {
+  ['career', 'relationship', 'health', 'lawsuit', 'lost_item'].forEach(function (dm) {
+    var xy = XY.analyze({ domain: dm, chart: CHART, wangshuai: WS.analyze(CHART), options: { school: 'feipan' } });
+    var ev = EV.build({ question: 'q', domain: dm, chart: CHART, yongshen: YS.resolve({ domain: dm, chart: CHART }), xiangyi: xy });
+    assert.strictEqual(typesOf(ev, 'READING').length, 0, dm + ' 零串味失守');
+    assert.strictEqual(ev.xiangyi.applicable, false);
+  });
+});
+console.log('== Phase 4：应期锚点(TIMING)集成 ==');
+function buildWithTiming() {
+  var ws = WS.analyze(CHART);
+  var xy = XY.analyze({ domain: 'wealth', chart: CHART, wangshuai: ws });
+  var yq = YQ.analyze(CHART, { yongShenGongs: xy.focus.map(function (f) { return f.gong; }) });
+  var tm = TM.analyze({ chart: CHART, yingqi: yq, xiangyi: xy, wangshuai: ws, options: { domain: 'wealth' } });
+  return EV.build({ question: '何时可得？', domain: 'wealth', chart: CHART, yongshen: YONG, xiangyi: xy, timing: tm });
+}
+t('不传 timing 时无 TIMING 条目（Phase 1/2 行为原样不变）', function () {
+  var ev = build();
+  assert.strictEqual(typesOf(ev, 'TIMING').length, 0);
+  assert.strictEqual(ev.timing, null);
+  assert.ok(EV.toPromptBlock(ev).indexOf('TIMING') < 0);
+});
+t('传入 timing 时产出 TIMING 条目，且各带机制与出处', function () {
+  var ev = buildWithTiming();
+  var ts = typesOf(ev, 'TIMING');
+  assert.ok(ts.length > 0, '应有 TIMING 条目');
+  ts.forEach(function (x) {
+    assert.ok(TIMING_RULES.mechanisms[x.mechanism], '出现了规则库中没有的机制：' + x.mechanism);
+    assert.ok(/纲要/.test(x.basis), x.id + ' 缺纲要出处');
+    assert.ok(['high', 'medium', 'low'].indexOf(x.strength) >= 0, x.id + ' 强弱非法');
+    assert.ok(x.content.length > 0);
+  });
+});
+t('TIMING 与 READING/SYMBOL 分列，来源各自标明', function () {
+  var ev = buildWithTiming();
+  typesOf(ev, 'TIMING').forEach(function (x) { assert.ok(/timing\.js/.test(x.source), 'TIMING 来源须标明'); });
+  typesOf(ev, 'READING').forEach(function (x) { assert.strictEqual(x.source, 'knowledge/domain-rules.json'); });
+  var txt = EV.toPromptBlock(ev);
+  assert.ok(txt.indexOf('TIMING（应期锚点') >= 0);
+  assert.ok(txt.indexOf('READING（占类象义判读') >= 0);
+});
+t('提示块声明应期与 yingqi 同源，并禁止自造日辰', function () {
+  var txt = EV.toPromptBlock(buildWithTiming());
+  assert.ok(/取自上方 yingqi 同一组计算/.test(txt), '须声明同源，避免被当成两套推算');
+  assert.ok(/不得自造日辰/.test(txt));
+  assert.ok(/仅表先到后到/.test(txt), '位次不得被读成"几天后"');
+  assert.ok(/严禁改用天干或无关地支充数/.test(txt), '机制禁令须带出');
+});
+t('证据包保留时间线次序、迟速与用神宫河图数', function () {
+  var ev = buildWithTiming();
+  assert.ok(ev.timing.timeline.length > 0, '应保留时间线');
+  for (var i = 1; i < ev.timing.timeline.length; i++) {
+    assert.ok(ev.timing.timeline[i - 1].offset <= ev.timing.timeline[i].offset, '时间线须按位次升序');
+  }
+  assert.ok(ev.timing.numbers.length > 0, '应保留用神宫河图数');
+  assert.ok(ev.timing.horizon && /近事看日时/.test(ev.timing.horizon.basis), '应保留断日/月/年之据');
+});
+t('含应期的证据包仍受体积约束', function () {
+  var ev = buildWithTiming();
+  assert.ok(typesOf(ev, 'TIMING').length <= 12, 'TIMING 条目过多');
+  assert.ok(EV.toPromptBlock(ev).length < 12000, '提示块过长会稀释注意力');
+});
+t('含判读的证据包可 JSON 序列化且确定性', function () {
+  assert.doesNotThrow(function () { JSON.parse(JSON.stringify(buildWithXy())); });
+  assert.deepStrictEqual(buildWithXy(), buildWithXy());
 });
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');

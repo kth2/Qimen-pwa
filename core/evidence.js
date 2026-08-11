@@ -4,16 +4,22 @@
  * 解决的问题：原先喂给 AI 的是一大段自然语言盘面文本，模型难以分辨「哪些是算出来的事实、
  * 哪些是应用给的规则、哪些是传统象义」，于是常把三者混为一谈，甚至自行补一套象义。
  * 本模块把送进提示词的内容拆成三类可核验的条目：
- *   FACT   —— 由排盘引擎算得的盘面事实（落宫、空亡、驿马等），模型不得改写。
- *   RULE   —— 应用内确定性分析（引擎吉凶/格局、wangshuai 旺衰、yingqi 应期、shanxiang 宅盘）。
- *   SYMBOL —— 取自 knowledge/symbols.json 的结构化象义，模型应优先采用而非自行发挥。
+ *   FACT    —— 由排盘引擎算得的盘面事实（落宫、空亡、驿马等），模型不得改写。
+ *   RULE    —— 应用内确定性分析（引擎吉凶/格局、wangshuai 旺衰、yingqi 应期、shanxiang 宅盘）。
+ *   SYMBOL  —— 取自 knowledge/symbols.json 的**与占类无关**的通用象义，模型应优先采用而非自行发挥。
+ *   READING —— 【Phase 2】取自 core/xiangyi.js 的**占类相关**象义判读：同一个「生门旺」，
+ *              在求财是「财源有力」，在别的占类未必；SYMBOL 给原料，READING 给该占类下的读法。
+ *   TIMING  —— 【Phase 4】取自 core/timing.js 的应期锚点：哪个日子、凭什么机制、对应哪个用神、
+ *              先后如何。干支本身仍出自 yingqi，本项只是筛过、定过强弱、排过序的那一份。
  *
  * 关键边界：
  *   ① **只收录用神相关元素**的象义，绝不把整个知识库倾倒进提示词（有单测把关体积与条目数）。
  *   ② 不产出吉凶结论——证据是给模型推理用的材料，判断仍归模型 + 引擎既有判定。
- *   ③ 未传入的分析结果一律缺席，不凭空补条目（宁缺勿造）。
+ *      READING 的 polarity 只表示该条对本占类是助力/阻力，不是成败断语。
+ *   ③ 未传入的分析结果一律缺席，不凭空补条目（宁缺勿造）。未传 xiangyi 时行为与 Phase 1 完全一致。
  *
- * 数据来源：knowledge/symbols.json（须先 load() 注入）。
+ * 数据来源：knowledge/symbols.json（须先 load() 注入）；READING 由调用方传入 xiangyi 结果，
+ * 本模块不自行求值，以免与 xiangyi.js 产生两套规则。
  */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
@@ -22,10 +28,12 @@
   'use strict';
 
   var KB = null;
-  var VERSION = '1.0.0';
+  var VERSION = '2.0.0';
   // 每个元素最多送几条象义。过多会稀释提示词、挤占盘面事实的注意力。
   var MAX_WORDS_PER_ELEMENT = 12;
   var MAX_SYMBOL_ITEMS = 24;
+  var MAX_READING_ITEMS = 32;
+  var MAX_TIMING_ITEMS = 12;
   // 元素类别 → 知识库分类
   var KIND_TO_CAT = { men: 'bamen', xing: 'jiuxing', shen: 'bashen', gan: 'tiangan', gong: 'jiugong' };
 
@@ -49,6 +57,7 @@
     for (i = 0; i < arr.length; i++) if (arr[i] && out.indexOf(arr[i]) < 0) out.push(arr[i]);
     return out;
   }
+  function repeat(s, n) { var out = ''; for (var i = 0; i < n; i++) out += s; return out; }
 
   /**
    * 从一条象义记录中挑选送进提示词的词条。
@@ -92,6 +101,23 @@
     return o;
   }
   function rule(source, content) { return { type: 'RULE', source: source, content: content }; }
+  /** 占类象义判读条目。scope 区分 单象/组合/宫际，basis 必带出处，polarity 只表助/阻。 */
+  function reading(r, scope) {
+    return {
+      type: 'READING', source: 'knowledge/domain-rules.json',
+      id: r.id, scope: scope,
+      element: scope === 'combination' ? (r.elements || []).join('+')
+        : scope === 'relation' ? (r.fromLabel + '→' + r.toLabel) : r.on,
+      // 关系条目的 element 已含双方角色名，再补 aspect 会重复
+      aspect: scope === 'relation' ? '' : (r.aspect || ''),
+      trigger: r.trigger || '',
+      gong: r.gong || (r.fromGong ? r.fromGong + '→' + r.toGong : ''),
+      weight: r.weight || 0,
+      polarity: r.polarity || '0',
+      content: (r.concept || []).slice(),
+      basis: r.basis || ''
+    };
+  }
   function symbol(element, category, content, label, fields) {
     return {
       type: 'SYMBOL', source: 'knowledge/symbols.json',
@@ -126,6 +152,20 @@
    * 轻量象义组合：把用神落宫的「宫 + 门/星/神」几组关键词并成一份去重列表。
    * 刻意保持简单——不做符号图谱、不做语义检索，只给模型一个可直接引用的关键词池。
    */
+  /**
+   * 按占类权重给用神清单排序（Phase 2.2）。权重取自 xiangyi.focus；未登记者排在其后，
+   * 相同权重保持 examine 原序（稳定排序）。截断 SYMBOL 时才不会先砍掉最该看的那个。
+   * 未传 xiangyi 时原样返回，行为与 Phase 1 一致。
+   */
+  function orderByWeight(examine, xy) {
+    if (!xy || !xy.focus || !xy.focus.length) return examine;
+    var w = {};
+    xy.focus.forEach(function (f) { w[f.name] = f.weight; });
+    return examine.map(function (m, i) { return { m: m, i: i, w: w[m.name] || 0 }; })
+      .sort(function (a, b) { return b.w !== a.w ? b.w - a.w : a.i - b.i; })
+      .map(function (x) { return x.m; });
+  }
+
   function combine(examine, domain) {
     var out = [];
     examine.slice(0, 4).forEach(function (m) {
@@ -149,8 +189,12 @@
     args = args || {};
     var chart = args.chart || null;
     var ys = args.yongshen || null;
+    var xy = (args.xiangyi && args.xiangyi.version) ? args.xiangyi : null;
+    var tm = (args.timing && args.timing.version) ? args.timing : null;
     var domain = args.domain || (ys && ys.domain) || 'general';
     var items = [];
+    // 用神清单按占类权重重排：SYMBOL 与关键词池皆据此取用，截断时先保重点
+    var examineOrdered = (ys && ys.examine) ? orderByWeight(ys.examine, xy) : [];
 
     /* ---------- FACT：盘面事实 ---------- */
     if (chart) {
@@ -236,15 +280,13 @@
       seen[key] = true;
       items.push(symbol(name, cat, picked.words, sym.name || name, picked.fields));
     }
-    if (ys && ys.examine) {
-      ys.examine.forEach(function (m) {
-        // 用神元素本身
-        var cat = KIND_TO_CAT[m.kind];
-        if (cat) addSymbol(cat, m.resolved && cat === 'tiangan' ? m.resolved : m.name);
-        // 其所落之宫（方位/场所之象，失物与风水尤需）
-        addSymbol('jiugong', m.gong);
-      });
-    }
+    examineOrdered.forEach(function (m) {
+      // 用神元素本身
+      var cat = KIND_TO_CAT[m.kind];
+      if (cat) addSymbol(cat, m.resolved && cat === 'tiangan' ? m.resolved : m.name);
+      // 其所落之宫（方位/场所之象，失物与风水尤需）
+      addSymbol('jiugong', m.gong);
+    });
 
     var symCount = items.filter(function (x) { return x.type === 'SYMBOL'; }).length;
     if (symCount > MAX_SYMBOL_ITEMS) {
@@ -253,6 +295,31 @@
         if (x.type !== 'SYMBOL') return true;
         kept++; return kept <= MAX_SYMBOL_ITEMS;
       });
+    }
+
+    /* ---------- TIMING：应期锚点（Phase 4） ---------- */
+    if (tm && tm.applicable) {
+      (tm.anchors || []).slice(0, MAX_TIMING_ITEMS).forEach(function (a) {
+        items.push({
+          type: 'TIMING', source: 'core/timing.js（干支取自 core/yingqi.js，未另推）',
+          id: a.id, mechanism: a.mechanism, label: a.label,
+          value: a.value, kind: a.kind, gong: a.gong,
+          strength: a.strength, weight: a.weight, offset: a.offset,
+          targets: (a.targets || []).map(function (t) { return t.name; }),
+          content: [a.display + (a.note ? '（' + a.note + '）' : '')],
+          basis: a.basis, caution: a.caution || ''
+        });
+      });
+    }
+
+    /* ---------- READING：占类象义判读（Phase 2） ---------- */
+    if (xy && xy.applicable) {
+      var reads = []
+        .concat((xy.readings || []).map(function (r) { return reading(r, 'condition'); }))
+        .concat((xy.combinations || []).map(function (r) { return reading(r, 'combination'); }))
+        .concat((xy.relations || []).map(function (r) { return reading(r, 'relation'); }));
+      // 已在 xiangyi 内按权重排序，此处只做总量兜底
+      items = items.concat(reads.slice(0, MAX_READING_ITEMS));
     }
 
     return {
@@ -272,19 +339,48 @@
         actors: ys.actors,
         source: ys.source
       } : null,
+      // 占类象义层的元信息。判读条目本身在 items(READING) 中，此处只记「本层是否生效、为何」，
+      // 便于在界面/控制台核对，也让"规则未建"与"盘上无碍"不至于被混为一谈。
+      xiangyi: xy ? {
+        version: xy.version, applicable: xy.applicable, status: xy.status, reason: xy.reason,
+        safetyNote: xy.safetyNote || '',
+        focus: xy.focus, absent: xy.absent, tally: xy.tally, degraded: xy.degraded, notes: xy.notes
+      } : null,
+      // 应期层元信息。锚点本身在 items(TIMING) 中，此处记时间线次序、迟速与数字。
+      timing: tm ? {
+        version: tm.version, applicable: tm.applicable, reason: tm.reason,
+        dayZhi: tm.dayZhi, dayGan: tm.dayGan, targetSource: tm.targetSource,
+        timeline: (tm.timeline || []).map(function (a) {
+          return { value: a.value, mechanism: a.mechanism, offset: a.offset, strength: a.strength };
+        }),
+        pace: tm.pace, horizon: tm.horizon, numbers: tm.numbers, notes: tm.notes
+      } : null,
       items: items,
-      combined: ys && ys.examine ? combine(ys.examine, domain) : []
+      combined: combine(examineOrdered, domain)
     };
   }
 
   /** 证据包 → 提示词文本块。坏数据返回空串，绝不阻断解读流程。 */
   function toPromptBlock(ev) {
     if (!ev || !ev.items || !ev.items.length) return '';
-    var L = [], facts = [], rules = [], syms = [];
+    var L = [], facts = [], rules = [], syms = [], times = [], reads = { condition: [], combination: [], relation: [] };
+    var POL = { '+': '助', '-': '阻', '0': '中' };
+    var STR = { high: '★强', medium: '★中', low: '★参考' };
     ev.items.forEach(function (x) {
       if (x.type === 'FACT') facts.push('  - ' + x.content);
       else if (x.type === 'RULE') rules.push('  - [' + x.source + '] ' + x.content);
       else if (x.type === 'SYMBOL') syms.push('  - ' + (x.label || x.element) + '：' + x.content.join('、'));
+      else if (x.type === 'TIMING') {
+        times.push('  - [' + (STR[x.strength] || '') + '] ' + x.label + '：' + x.content.join('') +
+          (x.gong ? '　(' + x.gong + '宫)' : '') +
+          (x.targets.length ? '　用神：' + x.targets.join('、') : '　（非用神宫）'));
+      }
+      else if (x.type === 'READING' && reads[x.scope]) {
+        reads[x.scope].push('  - [' + (POL[x.polarity] || '中') + '] ' + x.element +
+          (x.aspect ? '(' + x.aspect + ')' : '') + (x.gong ? '·' + x.gong + '宫' : '') +
+          (x.trigger ? ' ' + x.trigger : '') +
+          '：' + x.content.join('、') + '　（依据：' + x.basis + '）');
+      }
     });
     L.push('');
     L.push('【结构化证据包 Evidence v' + ev.version + '　占类：' + ev.domain + (ev.label ? '(' + ev.label + ')' : '') + '】');
@@ -319,9 +415,67 @@
         }
       }
     }
+    // 占类关注点（权重）须排在 FACT 之前：先告诉模型"这一占该重点看谁"，再给材料
+    var xy = ev.xiangyi;
+    // 安全边界紧贴判读呈现（不止依赖提示词末尾的通用纪律），且本层停用时照样送达
+    if (xy && xy.safetyNote) L.push('· ⚠ 本占类边界：' + xy.safetyNote);
+    if (xy && xy.applicable && xy.focus && xy.focus.length) {
+      L.push('· 本占类关注点与权重（★越多越应重点着墨，勿平均用力）：');
+      xy.focus.forEach(function (f) {
+        var marks = [];
+        if (f.state) marks.push(f.state);
+        (f.flags || []).forEach(function (k) { marks.push(k + ((f.flagWhy && f.flagWhy[k]) ? '(' + f.flagWhy[k] + ')' : '')); });
+        L.push('  - ' + repeat('★', f.weight) + ' ' + f.name + (f.resolved ? '(' + f.resolved + ')' : '') +
+          '＝' + (f.aspect || '?') + '：' + f.gong + '宫' + (f.gongName ? '(' + f.gongName + ')' : '') +
+          (marks.length ? '　[' + marks.join('　') + ']' : ''));
+      });
+      if (xy.absent && xy.absent.length) {
+        L.push('  （盘上未见，须按"未见"论：' + xy.absent.map(function (a) {
+          return a.name + '(' + (a.aspect || '?') + ')';
+        }).join('、') + '）');
+      }
+    } else if (xy && !xy.applicable && xy.status === 'pending') {
+      L.push('· 本占类的象义规则尚未建成，无判读条目——这是「规则未建」而非「盘上无碍」，不得据此认定无阻。');
+    }
     if (facts.length) { L.push('· FACT（引擎算得的盘面事实，不得改写）：'); L = L.concat(facts); }
     if (rules.length) { L.push('· RULE（应用确定性分析，优先于模型自身判断）：'); L = L.concat(rules); }
-    if (syms.length) { L.push('· SYMBOL（知识库象义，优先采用；可组合，不可替换为自创象义）：'); L = L.concat(syms); }
+    if (syms.length) { L.push('· SYMBOL（知识库通用象义，与占类无关的原料；优先采用，可组合，不可替换为自创象义）：'); L = L.concat(syms); }
+    if (reads.condition.length || reads.combination.length || reads.relation.length) {
+      L.push('· READING（占类象义判读：本占类下这些符号该怎么读。已注明依据；[助]/[阻] 只表倾向，**不是成败断语**）：');
+      if (reads.condition.length) { L.push('  单象（用神 × 旺衰/四害）：'); L = L.concat(reads.condition); }
+      if (reads.combination.length) { L.push('  组合（同宫相遇，其义不等于两象相加）：'); L = L.concat(reads.combination); }
+      if (reads.relation.length) { L.push('  宫际生克（定成败向背）：'); L = L.concat(reads.relation); }
+      if (xy && xy.tally) {
+        L.push('  倾向计数（**非结论**，只供权衡详略）：助 ' + xy.tally.support + ' 条／阻 ' +
+          xy.tally.obstruct + ' 条／中性 ' + xy.tally.neutral + ' 条。');
+      }
+      if (xy && xy.notes && xy.notes.length) xy.notes.forEach(function (n) { L.push('  说明：' + n); });
+    }
+    if (times.length) {
+      var tmi = ev.timing || {};
+      L.push('· TIMING（应期锚点：干支取自上方 yingqi 同一组计算，此处只是筛过、定过强弱、排过序的那一份。' +
+        '取期只在这些候选中选，不得自造日辰）：');
+      L = L.concat(times);
+      if (tmi.timeline && tmi.timeline.length) {
+        L.push('  先后次序（同一循环内距今位次，仅表先到后到，非"几天后"之断言）：' +
+          tmi.timeline.map(function (a) { return a.value + '日(' + a.mechanism + (a.offset == null ? '' : '·第' + a.offset + '位') + ')'; }).join(' → '));
+      }
+      if (tmi.pace) {
+        L.push('  迟速：以 ' + tmi.pace.from + ' 落 ' + tmi.pace.gong + '宫' + tmi.pace.state +
+          ' 论，应期偏「' + tmi.pace.speed + '」——' + tmi.pace.note);
+      }
+      if (tmi.numbers && tmi.numbers.length) {
+        L.push('  用神宫河图数（定数量/号码优先取此）：' + tmi.numbers.map(function (n) {
+          return n.gong + '宫天' + n.tianGan + '=' + n.tianNum + '、地' + n.diGan + '=' + n.diNum;
+        }).join('；'));
+      }
+      if (tmi.horizon) L.push('  断日/断月/断年：' + tmi.horizon.guidance);
+      var cau = [];
+      ev.items.forEach(function (x) {
+        if (x.type === 'TIMING' && x.caution && cau.indexOf(x.caution) < 0) cau.push(x.caution);
+      });
+      if (cau.length) L.push('  注意：' + cau.join(' '));
+    }
     if (ev.combined && ev.combined.length) L.push('· 组合关键词池（供衍象取用）：' + ev.combined.join('、'));
     return L.join('\n');
   }
