@@ -128,7 +128,31 @@
         <span class="muted" id="aiStatus"></span>
       </div>
       <div id="aiAnswer"></div>
+      <div id="caseSaveBar" style="margin-top:8px;display:none;">
+        <button class="btn" id="caseSaveBtn">📝 存为案例（供日后回填结果）</button>
+        <span class="muted" id="caseSaveTag"></span>
+      </div>
     </div>
+  </div>
+
+  <!-- 案例本：本机记录 + 对轨反馈 + 校准统计 -->
+  <div class="panel">
+    <h3>案例本　<span class="muted" id="caseCountTag"></span></h3>
+    <p class="muted" style="margin:0 0 8px;">
+      案例只存在这台设备上，不上传、不同步。要备份或换机，请用下面的导出。
+    </p>
+    <div style="margin-bottom:8px;">
+      <span class="seg" id="caseTabSeg">
+        <button data-tab="list" class="on">案例列表</button>
+        <button data-tab="stats">校准统计</button>
+      </span>
+      <button class="btn" id="caseExportBtn" style="background:#666;">导出</button>
+      <label class="btn" style="background:#666;cursor:pointer;">导入
+        <input type="file" id="caseImportInput" accept="application/json,.json" style="display:none;">
+      </label>
+    </div>
+    <div id="caseListView"></div>
+    <div id="caseStatsView" style="display:none;"></div>
   </div>
 
   <p class="muted" style="text-align:center;">排盘/解断离线可用 · AI 需所选 provider 可达 · Key 仅存于本机</p>
@@ -142,6 +166,9 @@
   <script src="core/xiangyi.js"></script>
   <script src="core/timing.js"></script>
   <script src="core/evidence.js"></script>
+  <!-- 案例本：经验层。与教义层(knowledge/*.json)严格分离，反馈永不改写规则 -->
+  <script src="core/casebook.js"></script>
+  <script src="core/casestore.js"></script>
   <script src="llm.js"></script>
   <script src="app.js"></script>
   <script>

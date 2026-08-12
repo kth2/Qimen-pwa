@@ -5,6 +5,8 @@
   const YS = window.YongShen;   // 结构化用神层（可缺失：缺则退回原有流程）
   const XY = window.XiangYi;    // 占类象义推理层（Phase 2；缺则证据包不含 READING，其余照旧）
   const TM = window.Timing;     // 应期时间线层（Phase 4；缺则不含 TIMING，yingqi 块照常承载应期）
+  const CB = window.Casebook;   // 案例本·经验层（Phase 5；只统计与建议，绝不改写教义规则）
+  const CSTORE = window.CaseStore;
   const EV = window.Evidence;   // 结构化证据层（同上）
   const $ = (id) => document.getElementById(id);
   let school = 'zhuanpan';
@@ -383,8 +385,17 @@
           }
           // 不传 shanxiang：山向背景与阳宅断法要求仍由 sxBlock 原样承载（那段含解读指引而不止事实），
           // 若再进证据包会造成同一内容重复入提示词。
+          // 经验层（Phase 5）：把本机历史反馈里已达样本门槛的规则附一条说明。
+          // 只是附注——不参与规则求值，故规则层的确定性与跨设备可复现不受影响。
+          let calibration = [];
+          if (store && CB && xiangyi) {
+            try {
+              const overlay = await store.getOverlay();
+              calibration = CB.calibrationFor(overlay, xiangyi);
+            } catch (ce) { console.warn('[casebook] 读取经验层失败，本次不附经验：', ce.message); }
+          }
           const evidence = EV.build({
-            question: q, domain, chart: pan, yongshen, xiangyi, timing,
+            question: q, domain, chart: pan, yongshen, xiangyi, timing, calibration,
             wangshuai: wsBlock, yingqi: yqBlock
           });
           window._evidence = evidence;                 // 便于在控制台核对喂给模型的内容
@@ -407,8 +418,157 @@
       if (!streamed || !answer) $('aiAnswer').textContent = head + (answer || '(无内容)');
       else $('aiAnswer').textContent = head + answer; // 收尾用清理后的完整文本(去 <think> 等)
       $('aiStatus').textContent = '完成';
+      // 备好「存为案例」的素材。答案截断到 8000 字：全文可能极长，手机存储不该被单条撑爆
+      if (store && CB) {
+        _lastReading = {
+          question: q, domain: YS ? YS.normalizeDomain((prompt.context && prompt.context.category) || fallbackCategory) : '',
+          school, mode, chart: pan, dateISO: $('inDate').value + ' ' + $('inTime').value,
+          xiangyi: window._xiangyi || null, timing: window._timing || null,
+          answer: String(answer || '').slice(0, 8000)
+        };
+        $('caseSaveBar').style.display = 'block';
+        $('caseSaveTag').textContent = '';
+      }
     } catch (e) { $('aiStatus').textContent = '出错：' + (e.message || e); }
     finally { btn.disabled = false; }
+  }
+
+  /* ---------- 案例本（Phase 5·经验层） ----------
+   * 边界：本层只记录、统计、建议。反馈**永不改写** knowledge/*.json——
+   * 那会让每条规则的 basis 变成假话，并使「同盘同占类必得同一结果」不再成立
+   * （各机权重不同则跨设备无法复现）。经验以 CALIBRATION 条目单独送达模型。 */
+  const store = (CSTORE && CSTORE.create) ? CSTORE.create() : null;
+  let _lastReading = null;      // 最近一次解读的素材，供「存为案例」取用
+  let _caseTab = 'list';
+
+  async function refreshCaseCount() {
+    if (!store) return;
+    try {
+      const rows = await store.list();
+      const graded = rows.filter(r => CB && CB.graded(r)).length;
+      $('caseCountTag').textContent = `共 ${rows.length} 例，已回填 ${graded} 例`
+        + (store.persistent ? '' : '　⚠ 本设备无法持久化，关闭即丢失');
+    } catch (e) { $('caseCountTag').textContent = '读取失败：' + e.message; }
+  }
+
+  async function saveCurrentCase() {
+    if (!store || !CB || !_lastReading) return;
+    const btn = $('caseSaveBtn'); btn.disabled = true;
+    try {
+      const rec = CB.makeCase(Object.assign({ id: store.newId(), now: new Date().toISOString() }, _lastReading));
+      await store.save(rec);
+      $('caseSaveTag').textContent = '已存档，事后可在「案例本」回填实际结果';
+      await refreshCaseCount(); await renderCases();
+    } catch (e) {
+      $('caseSaveTag').textContent = '保存失败：' + e.message;
+    } finally { btn.disabled = false; }
+  }
+
+  const OUTCOME_BTNS = [
+    ['happened', '完全应验'], ['partial', '部分应验'],
+    ['not_happened', '未应验'], ['opposite', '结果相反']
+  ];
+
+  async function renderCases() {
+    if (!store || !CB) return;
+    const host = $('caseListView');
+    let rows;
+    try { rows = await store.list(); } catch (e) { host.innerHTML = `<span class="muted">读取失败：${esc(e.message)}</span>`; return; }
+    if (!rows.length) {
+      host.innerHTML = '<span class="muted">还没有案例。解读之后点「存为案例」，等事情有了结果再回来回填——积累到一定数量才谈得上统计。</span>';
+      return;
+    }
+    host.innerHTML = rows.map(r => {
+      const fb = r.feedback;
+      const tag = fb
+        ? `<b style="color:${fb.outcome === 'happened' ? '#3c763d' : fb.outcome === 'opposite' ? '#a94442' : '#8a6d3b'}">${esc(fb.label)}</b>`
+        : '<span class="muted">待回填</span>';
+      const btns = fb ? '' : OUTCOME_BTNS.map(([k, label]) =>
+        `<button class="btn" style="background:#777;padding:3px 8px;font-size:12px;" data-fb="${k}" data-id="${esc(r.id)}">${label}</button>`).join(' ');
+      return `<div style="border-bottom:1px solid #eee;padding:6px 0;font-size:13px;">
+        <div><b>${esc(r.question || '(未填问题)')}</b> <span class="muted">${esc(r.domain || '')}　${esc(r.chartRef.siZhu || '')}</span></div>
+        <div class="muted">${esc((r.createdAt || '').slice(0, 10))}　触发规则 ${r.fired.rules.length} 条　应期锚点 ${r.fired.anchors.length} 个　${tag}</div>
+        <div style="margin-top:4px;">${btns}
+          <button class="btn" style="background:#a94442;padding:3px 8px;font-size:12px;" data-del="${esc(r.id)}">删除</button></div>
+      </div>`;
+    }).join('');
+  }
+
+  async function recordFeedback(id, outcome) {
+    if (!store || !CB) return;
+    const rec = await store.get(id);
+    if (!rec) return;
+    // 逐条标注留待后续版本；此处先支持整案归因，统计侧已如实标明其粗糙
+    await store.save(CB.applyFeedback(rec, { outcome, now: new Date().toISOString() }));
+    await refreshCaseCount(); await renderCases(); await rebuildOverlay();
+  }
+
+  /** 由已达门槛的统计重建经验层 overlay。只产出附注，不改任何规则。 */
+  async function rebuildOverlay() {
+    if (!store || !CB) return null;
+    try {
+      const rows = await store.list();
+      const cal = CB.calibrate(rows);
+      const overlay = CB.buildOverlay(CB.proposals(cal), cal);
+      await store.setOverlay(overlay);
+      return overlay;
+    } catch (e) { console.warn('[casebook] 重建经验层失败：', e.message); return null; }
+  }
+
+  async function renderStats() {
+    if (!store || !CB) return;
+    const host = $('caseStatsView');
+    const rows = await store.list();
+    const cal = CB.calibrate(rows);
+    const ps = CB.proposals(cal);
+    if (!cal.totals.graded) {
+      host.innerHTML = `<span class="muted">已存 ${cal.totals.cases} 例，但还没有回填过结果。<br>
+        统计需要已回填的案例；单条规则要满 ${cal.minSamples} 例才会给出符合率——样本太少的百分比会误导人，故不显示。</span>`;
+      return;
+    }
+    const domHtml = cal.domains.map(d =>
+      `<div>${esc(d.domain)}：${esc(d.display)}${d.opposite ? `　<span style="color:#a94442">相反 ${d.opposite} 例</span>` : ''}</div>`).join('');
+    const ruleHtml = cal.rules.slice(0, 30).map(r =>
+      `<div style="font-size:12px;border-bottom:1px solid #f0f0f0;padding:2px 0;">
+        <code>${esc(r.ruleId)}</code>　${esc(r.display)}${r.opposite ? `　<span style="color:#a94442">相反 ${r.opposite}</span>` : ''}
+      </div>`).join('');
+    const psHtml = ps.length ? ps.map(p =>
+      `<div style="border-left:3px solid ${p.severity === 'high' ? '#a94442' : '#8a6d3b'};padding:4px 8px;margin:6px 0;background:#fafafa;font-size:12px;">
+        <b>${esc(p.title)}</b>${p.ruleId ? `　<code>${esc(p.ruleId)}</code>` : ''}<br>
+        <span class="muted">${esc(p.detail)}</span>
+      </div>`).join('') : '<span class="muted">暂无建议（需满足更高的样本门槛）。</span>';
+    host.innerHTML = `
+      <div style="font-size:13px;">
+        <div><b>总计</b>：${cal.totals.cases} 例，已回填 ${cal.totals.graded} 例</div>
+        <div style="margin-top:6px;"><b>按占类</b></div>${domHtml}
+        <div style="margin-top:8px;"><b>按规则</b>（符合率低者在前，便于复核；不足 ${cal.minSamples} 例不给百分比）</div>
+        <div style="max-height:240px;overflow:auto;margin-top:4px;">${ruleHtml}</div>
+        <div style="margin-top:10px;"><b>校订建议</b>
+          <span class="muted">——建议而已，不会自动改规则。规则库是按纲要写的，要改请改 knowledge/domain-rules.json 并补出处。</span>
+        </div>${psHtml}
+      </div>`;
+  }
+
+  async function exportCases() {
+    if (!store) return;
+    const dump = await store.exportAll(new Date().toISOString());
+    const blob = new Blob([JSON.stringify(dump, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `qimen-casebook-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  }
+
+  async function importCases(file) {
+    if (!store || !file) return;
+    try {
+      const data = JSON.parse(await file.text());
+      const r = await store.importAll(data);          // 默认合并，不覆盖本机较新的记录
+      $('caseCountTag').textContent = `导入完成：新增 ${r.added}、更新 ${r.updated}、跳过 ${r.skipped}`;
+      await renderCases(); await rebuildOverlay();
+      if (_caseTab === 'stats') await renderStats();
+    } catch (e) { $('caseCountTag').textContent = '导入失败：' + e.message; }
   }
 
   /* ---------- init ---------- */
@@ -465,6 +625,35 @@
         if (busy) { $('aiStatus').textContent = '发现新版本，下次打开自动生效'; return; }
         reloaded = true; location.reload();
       });
+    }
+    // 案例本
+    if (store && CB) {
+      $('caseSaveBtn').addEventListener('click', saveCurrentCase);
+      $('caseExportBtn').addEventListener('click', exportCases);
+      $('caseImportInput').addEventListener('change', (e) => {
+        const f = e.target.files && e.target.files[0];
+        if (f) importCases(f);
+        e.target.value = '';                       // 允许连续导入同一文件
+      });
+      $('caseTabSeg').addEventListener('click', async (e) => {
+        const b = e.target.closest('button[data-tab]'); if (!b) return;
+        _caseTab = b.dataset.tab;
+        [...$('caseTabSeg').children].forEach(x => x.classList.toggle('on', x === b));
+        $('caseListView').style.display = _caseTab === 'list' ? 'block' : 'none';
+        $('caseStatsView').style.display = _caseTab === 'stats' ? 'block' : 'none';
+        if (_caseTab === 'stats') await renderStats();
+      });
+      // 反馈与删除用事件委托：列表是动态重绘的，逐个绑定会在重绘后失效
+      $('caseListView').addEventListener('click', async (e) => {
+        const fb = e.target.closest('button[data-fb]');
+        if (fb) { await recordFeedback(fb.dataset.id, fb.dataset.fb); return; }
+        const del = e.target.closest('button[data-del]');
+        if (del && confirm('删除这条案例？删除后它不再计入统计。')) {
+          await store.remove(del.dataset.del);
+          await refreshCaseCount(); await renderCases(); await rebuildOverlay();
+        }
+      });
+      refreshCaseCount(); renderCases();
     }
     loadCfgForm();
     cast();

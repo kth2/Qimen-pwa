@@ -11,6 +11,9 @@
  *              在求财是「财源有力」，在别的占类未必；SYMBOL 给原料，READING 给该占类下的读法。
  *   TIMING  —— 【Phase 4】取自 core/timing.js 的应期锚点：哪个日子、凭什么机制、对应哪个用神、
  *              先后如何。干支本身仍出自 yingqi，本项只是筛过、定过强弱、排过序的那一份。
+ *   CALIBRATION —— 【Phase 5】本机案例统计出的经验。**与 READING 严格分列**：READING 是
+ *              纲要怎么说（教义），CALIBRATION 是这台设备上历史反馈怎么显示（经验）。
+ *              经验永不改写教义，只作为一条附注供模型权衡详略；样本量必须随条呈现。
  *
  * 关键边界：
  *   ① **只收录用神相关元素**的象义，绝不把整个知识库倾倒进提示词（有单测把关体积与条目数）。
@@ -34,6 +37,7 @@
   var MAX_SYMBOL_ITEMS = 24;
   var MAX_READING_ITEMS = 32;
   var MAX_TIMING_ITEMS = 12;
+  var MAX_CALIBRATION_ITEMS = 10;
   // 元素类别 → 知识库分类
   var KIND_TO_CAT = { men: 'bamen', xing: 'jiuxing', shen: 'bashen', gan: 'tiangan', gong: 'jiugong' };
 
@@ -297,6 +301,17 @@
       });
     }
 
+    /* ---------- CALIBRATION：本机经验（Phase 5，不改教义、只作附注） ---------- */
+    if (Array.isArray(args.calibration) && args.calibration.length) {
+      args.calibration.slice(0, MAX_CALIBRATION_ITEMS).forEach(function (c) {
+        items.push({
+          type: 'CALIBRATION', source: '本机案例记录（非纲要，仅供权衡详略）',
+          ruleId: c.ruleId, n: c.n, rate: c.rate, attribution: c.attribution,
+          content: [c.note]
+        });
+      });
+    }
+
     /* ---------- TIMING：应期锚点（Phase 4） ---------- */
     if (tm && tm.applicable) {
       (tm.anchors || []).slice(0, MAX_TIMING_ITEMS).forEach(function (a) {
@@ -363,13 +378,16 @@
   /** 证据包 → 提示词文本块。坏数据返回空串，绝不阻断解读流程。 */
   function toPromptBlock(ev) {
     if (!ev || !ev.items || !ev.items.length) return '';
-    var L = [], facts = [], rules = [], syms = [], times = [], reads = { condition: [], combination: [], relation: [] };
+    var L = [], facts = [], rules = [], syms = [], times = [], cals = [], reads = { condition: [], combination: [], relation: [] };
     var POL = { '+': '助', '-': '阻', '0': '中' };
     var STR = { high: '★强', medium: '★中', low: '★参考' };
     ev.items.forEach(function (x) {
       if (x.type === 'FACT') facts.push('  - ' + x.content);
       else if (x.type === 'RULE') rules.push('  - [' + x.source + '] ' + x.content);
       else if (x.type === 'SYMBOL') syms.push('  - ' + (x.label || x.element) + '：' + x.content.join('、'));
+      else if (x.type === 'CALIBRATION') {
+        cals.push('  - ' + x.ruleId + '：' + x.content.join('') );
+      }
       else if (x.type === 'TIMING') {
         times.push('  - [' + (STR[x.strength] || '') + '] ' + x.label + '：' + x.content.join('') +
           (x.gong ? '　(' + x.gong + '宫)' : '') +
@@ -475,6 +493,12 @@
         if (x.type === 'TIMING' && x.caution && cau.indexOf(x.caution) < 0) cau.push(x.caution);
       });
       if (cau.length) L.push('  注意：' + cau.join(' '));
+    }
+    if (cals.length) {
+      L.push('· CALIBRATION（**本机历史反馈统计，不是纲要**。它只说明这些规则在这台设备的既往记录中' +
+        '符合得如何，可用于权衡着墨详略；**不得据此推翻 READING 的取用或倾向**，更不得当作断语依据。' +
+        '样本量已随条标出，样本少则参考价值有限）：');
+      L = L.concat(cals);
     }
     if (ev.combined && ev.combined.length) L.push('· 组合关键词池（供衍象取用）：' + ev.combined.join('、'));
     return L.join('\n');

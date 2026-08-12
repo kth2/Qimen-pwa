@@ -22,6 +22,9 @@ GitHub Pages 静态托管。支持 **时家奇门**（转盘 / 飞盘）与 **�
 | `core/xiangyi.test.js` | 象义推理单元测试（`node core/xiangyi.test.js`） |
 | `core/timing.js` | **应期时间线核心（纯函数、可移植）**，见「应期时间线」 |
 | `core/timing.test.js` | 应期时间线单元测试（`node core/timing.test.js`） |
+| `core/casebook.js` | **案例本与校准核心（纯函数、可移植）**，见「案例本与校准」 |
+| `core/casestore.js` | **案例本机存储（IndexedDB，可注入后端）**，同上 |
+| `core/casebook.test.js` | 案例本与存储单元测试（`node core/casebook.test.js`） |
 | `core/evidence.js` | **证据包核心（纯函数、可移植）**，见「结构化推理层」 |
 | `core/evidence.test.js` | 证据包单元测试（`node core/evidence.test.js`） |
 | `core/reconciliation.test.js` | 用神归属与两派隔离回归测试（`node core/reconciliation.test.js`） |
@@ -281,6 +284,7 @@ python3 -m http.server 8000   # 然后访问 http://localhost:8000
 | `SYMBOL` | 取自 `symbols.json` 的传统象义，**与占类无关的原料** | 优先采用，可组合，不可替换为自创象义 |
 | `READING` | 取自 `domain-rules.json` 的**占类象义判读**（Phase 2） | 涉及其所断元素时优先采用其读法；`[助]/[阻]` 只表倾向，非成败断语 |
 | `TIMING` | 取自 `core/timing.js` 的**应期锚点**（Phase 4） | 断应期只在其列出的候选中选，不得自造日辰；`[★强]` 表机制与用神的关系，非应验概率 |
+| `CALIBRATION` | 取自**本机案例记录**的经验统计（Phase 5） | 这不是纲要；只供权衡着墨详略，**不得据此推翻 READING**；样本量随条呈现 |
 
 「证据优先」而非「只许用证据」：模型仍可组合象义、推演情境、说明关系、表达不确定；
 但不得另立用神体系、不得虚构盘面元素、不得推翻确定性计算。
@@ -327,7 +331,7 @@ YongShen.resolve({ domain, chart, options }); // → { domain, roles, priority, 
 ```js
 Evidence.load(symbolsJson);
 Evidence.getSymbol('bamen', '生门');
-Evidence.build({ question, domain, chart, yongshen, xiangyi, timing, wangshuai, yingqi, shanxiang });
+Evidence.build({ question, domain, chart, yongshen, xiangyi, timing, calibration, wangshuai, yingqi, shanxiang });
 Evidence.toPromptBlock(evidence);
 ```
 
@@ -656,3 +660,88 @@ Timing.toPromptBlock(result);
 ```bash
 node core/timing.test.js      # 35 项：干支同源、强弱语义、位次与排序、机制级隔离、缺件降级
 ```
+
+---
+
+## 案例本与校准（Phase 5 · Casebook）
+
+### 要解决的事
+
+前四期把「按纲要该怎么断」做成了确定性的、可溯源的证据。但**纲要说的在你身上准不准**，
+应用一无所知——每次解读完，结果就丢了。本期把「预测 → 对轨现实 → 校准」这条回路补上：
+案例存在手机里，事后回填实际结果，应用统计每条规则的符合率并给出校订建议。
+
+### 最要紧的一条：经验层与教义层严格分离
+
+**用户反馈永不改写 `knowledge/*.json`。** 这不是偷懒，是因为自动回写会一次性毁掉
+前四期真正的资产：
+
+| 若让反馈直接改规则 | 后果 |
+|---|---|
+| 规则被反馈改过 | `basis` 立刻变成假话——规则不再是纲要说的。可审计性与两派隔离(零串味)一并失效 |
+| 各人各机权重不同 | 「同盘同占类必得同一结果」不再成立，同一张盘在两台手机上结果不同 |
+| 样本量 10–50 | 一条规则命中 3 次、符合 2 次，算出的 67% 没有任何统计意义 |
+
+所以做成两层：
+
+```
+教义层  knowledge/*.json + core/xiangyi.js   ← 只读，按纲要写，永不被反馈触碰
+   │
+经验层  core/casebook.js + 本机 IndexedDB     ← 记录、统计、建议
+   │
+   └→ CALIBRATION 条目（与 READING 分列送进提示词，明标「这不是纲要」）
+```
+
+经验层**不参与规则求值**，只给证据包附一条说明。规则层的确定性与跨设备可复现因此完好——
+有单测直接钉住：灌 30 条「结果相反」的反馈后，`XiangYi.analyze()` 的输出必须逐字不变。
+
+### 不给假精度
+
+- 单条规则**满 8 例**才给符合率；不足则显示「样本不足 n/8」。小样本的百分比会被当成精度，
+  害处大于好处。
+- 生成校订建议的门槛更严（**12 例**）——建议会驱动人去改东西。
+- **归因如实标注**：默认把整案对错记到当次触发的每条规则头上，这是**粗归因**（断错未必是
+  某条规则错，也可能是综合时错），故每条统计都标 `整案归因`；用户逐条标注过的才标
+  `逐条标注`，并优先采用。整案归因占比过高时，应用会主动提醒这一点。
+- 「结果相反」单独计数——它比「没应验」更重，是断反了。
+
+### 不生成「翻转极性」类建议
+
+建议只有三种：`review`（复核）、`confirm`（表现稳定）、`method`（方法学提醒）。
+刻意**没有**「把这条规则的助/阻反过来」——那等于让应用自创断法、越过纲要。复核建议直接
+写明：若确属误收，请改 `knowledge/domain-rules.json` 并补出处，不要靠反馈去覆盖它。
+
+### 隐私
+
+案例里是用户问的私事（病、官司、感情）。**只存在这台设备上**，不上传、不同步、
+不经过任何服务器——`core/casestore.js` 中不存在任何网络调用（有单测扫描源码禁止
+`fetch`/`XMLHttpRequest`/`sendBeacon`/`WebSocket`）。要备份或换机，只有一条路：
+用户自己点导出，拿到一份 JSON。导入默认**合并**，同 id 取较新者，一次误操作不会抹掉历史。
+
+### API
+
+```js
+// 纯函数层
+Casebook.makeCase({ id, now, question, domain, chart, xiangyi, timing, answer });
+Casebook.applyFeedback(rec, { outcome, happenedAt, note, now, ruleVerdicts });
+Casebook.calibrate(records);              // → { totals, rules[], domains[] }（含样本量门槛）
+Casebook.proposals(cal);                  // → 建议数组（只建议，不执行）
+Casebook.buildOverlay(accepted, cal);     // → 经验层附注
+Casebook.calibrationFor(overlay, xiangyi);// → 本次触发规则对应的经验条目
+
+// 存储层（后端可注入：浏览器 IndexedDB / 测试内存）
+const store = CaseStore.create();         // store.persistent=false 表示未落盘，界面须告警
+store.save(rec); store.list(); store.remove(id);
+store.exportAll(now); store.importAll(data, { replace:false });
+```
+
+### 运行测试
+
+```bash
+node core/casebook.test.js   # 31 项：样本门槛、归因诚实、不改教义、存储往返与合并、隐私扫描
+```
+
+### 界面
+
+解读完成后出现「存为案例」；「案例本」面板可回填结果（完全应验／部分／未应验／相反）、
+查看按占类与按规则的统计、以及校订建议，并可导出/导入。
