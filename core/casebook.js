@@ -68,15 +68,225 @@
     if (xiangyi && xiangyi.applicable) {
       (xiangyi.readings || []).concat(xiangyi.combinations || [], xiangyi.relations || [])
         .forEach(function (r) {
-          rules.push({ id: r.id, kind: r.kind, polarity: r.polarity, weight: r.weight || 0 });
+          // label/concept 必须一并存下：日后逐条标注时，用户面对的是「生门(财源) 旺 → 财源有力」，
+          // 而不是一串规则 id。没有这两项，逐条标注根本无从下手。
+          var label = r.kind === 'combination' ? (r.elements || []).join('+')
+            : r.kind === 'relation' ? (r.fromLabel + '→' + r.toLabel)
+              : (r.on + (r.aspect ? '(' + r.aspect + ')' : ''));
+          rules.push({
+            id: r.id, kind: r.kind, polarity: r.polarity, weight: r.weight || 0,
+            label: label + (r.trigger ? ' ' + r.trigger : ''),
+            concept: (r.concept || []).join('、').slice(0, 60)
+          });
         });
     }
     if (timing && timing.applicable) {
       (timing.anchors || []).forEach(function (a) {
-        anchors.push({ mechanism: a.mechanism, value: a.value, kind: a.kind, strength: a.strength, gong: a.gong });
+        anchors.push({
+          mechanism: a.mechanism, value: a.value, kind: a.kind,
+          strength: a.strength, gong: a.gong, offset: a.offset
+        });
       });
     }
     return { rules: rules, anchors: anchors };
+  }
+
+  /* ================= 反推（复盘）：由实际结果回头对当时的盘 ================= */
+
+  /**
+   * 应期反推——**完全确定性**，不含任何猜测。
+   * 用户给出事情实际发生的日期，由调用方用排盘引擎算出那天的四柱，本函数只做比对：
+   * 当时排的哪几个锚点命中了？命中在日、在月、还是在年？
+   *
+   * 为什么同时比对日/月/年：纲要·三节应期5「近事看日时、中事看月、远事看年」——
+   * 同一个支，近事读作某日、远事读作某年，故三层都要看，并如实标明命中在哪一层。
+   *
+   * @param {object} rec 案例记录
+   * @param {object} actualSiZhu 实际发生日的四柱 {year,month,day}（由引擎算得）
+   * @returns {object} { hits:[], missed:[], levels:{}, chance:number }
+   */
+  function deriveTimingHits(rec, actualSiZhu) {
+    var anchors = (rec && rec.fired && rec.fired.anchors) || [];
+    if (!anchors.length || !actualSiZhu || !actualSiZhu.day) {
+      return { hits: [], missed: anchors.slice(), levels: {}, chance: null };
+    }
+    // 三层的干与支
+    var L = {
+      '日': { gan: String(actualSiZhu.day || '').charAt(0), zhi: String(actualSiZhu.day || '').charAt(1) },
+      '月': { gan: String(actualSiZhu.month || '').charAt(0), zhi: String(actualSiZhu.month || '').charAt(1) },
+      '年': { gan: String(actualSiZhu.year || '').charAt(0), zhi: String(actualSiZhu.year || '').charAt(1) }
+    };
+    var hits = [], missed = [], levels = {};
+    anchors.forEach(function (a) {
+      var matchedAt = null;
+      ['日', '月', '年'].forEach(function (lv) {
+        if (matchedAt) return;
+        var v = a.kind === 'gan' ? L[lv].gan : L[lv].zhi;
+        if (v && v === a.value) matchedAt = lv;
+      });
+      if (matchedAt) {
+        hits.push({ mechanism: a.mechanism, value: a.value, kind: a.kind, strength: a.strength, gong: a.gong, level: matchedAt });
+        levels[matchedAt] = (levels[matchedAt] || 0) + 1;
+      } else {
+        missed.push(a);
+      }
+    });
+    // 随机基准：候选越多，蒙中的概率越高。不给这个数，用户会把"命中"当成灵验。
+    // 取去重后的候选数 / 周期长度，日/月/年三层按独立近似合成。
+    function baselineOf(list) {
+      var dz = {}, dg = {};
+      list.forEach(function (a) { (a.kind === 'gan' ? dg : dz)[a.value] = 1; });
+      var pz = Math.min(1, Object.keys(dz).length / 12);
+      var pg = Math.min(1, Object.keys(dg).length / 10);
+      var per = 1 - (1 - pz) * (1 - pg);
+      return round(Math.min(1, 1 - Math.pow(1 - per, 3)));
+    }
+    // 全量锚点的基准往往逼近 1（十来个候选 × 三层，几乎必中），那样的"命中"没有信息量。
+    // 故另算一份**只看 ★强锚点**的：它们数量少、且是纲要明言「须待此时方应」者，
+    // 命中率与基准的差距才真正说明问题。
+    var highAnchors = anchors.filter(function (a) { return a.strength === 'high'; });
+    var highHits = hits.filter(function (h) { return h.strength === 'high'; });
+    return {
+      hits: hits, missed: missed, levels: levels,
+      chance: baselineOf(anchors),
+      high: {
+        total: highAnchors.length, hit: highHits.length,
+        chance: highAnchors.length ? baselineOf(highAnchors) : null
+      }
+    };
+  }
+
+  /** 把反推结果并入记录（纯函数，返回新对象）。 */
+  function applyTimingDerivation(rec, derivation) {
+    if (!rec) return rec;
+    var out = {};
+    for (var k in rec) out[k] = rec[k];
+    out.timingHits = derivation || null;
+    return out;
+  }
+
+  /**
+   * 应期机制的本机命中率。
+   * **务必连随机基准一起看**：宫干定日一次给十来个候选，蒙中概率本就高；
+   * 若命中率与基准相当，说明这条机制在你这儿并没有提供额外信息。
+   */
+  function timingCalibration(records, opts) {
+    opts = opts || {};
+    var minShow = opts.minSamples || MIN_SAMPLES_SHOW;
+    var byMech = {}, cases = 0, chanceSum = 0;
+    var highCases = 0, highHitCases = 0, highChanceSum = 0;
+    (records || []).forEach(function (rec) {
+      if (!rec || !rec.timingHits) return;
+      cases++;
+      if (typeof rec.timingHits.chance === 'number') chanceSum += rec.timingHits.chance;
+      // ★强锚点单列：全量基准常逼近 1，唯有强锚点的命中率与基准之差才有信息量
+      var h = rec.timingHits.high;
+      if (h && h.total > 0) {
+        highCases++;
+        if (h.hit > 0) highHitCases++;
+        if (typeof h.chance === 'number') highChanceSum += h.chance;
+      }
+      var seen = {};
+      (rec.fired.anchors || []).forEach(function (a) {
+        if (!byMech[a.mechanism]) byMech[a.mechanism] = { mechanism: a.mechanism, n: 0, hit: 0 };
+        if (!seen[a.mechanism]) { byMech[a.mechanism].n++; seen[a.mechanism] = 1; }  // 每案每机制只计一次
+      });
+      var hitSeen = {};
+      (rec.timingHits.hits || []).forEach(function (h) {
+        if (byMech[h.mechanism] && !hitSeen[h.mechanism]) { byMech[h.mechanism].hit++; hitSeen[h.mechanism] = 1; }
+      });
+    });
+    var rows = Object.keys(byMech).map(function (m) {
+      var s = byMech[m];
+      var enough = s.n >= minShow;
+      return {
+        mechanism: m, n: s.n, hit: s.hit,
+        rate: enough ? round(s.hit / s.n) : null, enough: enough,
+        display: enough ? (Math.round((s.hit / s.n) * 100) + '%（' + s.hit + '/' + s.n + '）')
+          : ('样本不足 ' + s.n + '/' + minShow)
+      };
+    }).sort(function (a, b) {
+      if (a.enough !== b.enough) return a.enough ? -1 : 1;
+      return (b.rate || 0) - (a.rate || 0);
+    });
+    return {
+      cases: cases, mechanisms: rows, minSamples: minShow,
+      // ★强锚点子集：n 为有强锚点的案例数，rate 为其中至少命中一条的比例
+      high: {
+        n: highCases, hit: highHitCases,
+        rate: highCases >= minShow ? round(highHitCases / highCases) : null,
+        baseline: highCases ? round(highChanceSum / highCases) : null,
+        enough: highCases >= minShow,
+        display: highCases >= minShow
+          ? (Math.round((highHitCases / highCases) * 100) + '%（' + highHitCases + '/' + highCases + '）')
+          : ('样本不足 ' + highCases + '/' + minShow)
+      },
+      baseline: cases ? round(chanceSum / cases) : null,
+      baselineNote: '随机基准＝当时的候选日在日/月/年三层中任意命中的概率。' +
+        '命中率若与基准相当，说明该机制未提供额外信息，不宜据此认为"应期很准"。'
+    };
+  }
+
+  /* ================= AI 复盘：把实况映射回当时的判读 ================= */
+
+  /**
+   * 生成交给模型的复盘提示。**只让它做映射与标注，不让它改规则、不让它重新断卦**。
+   * 输出强制为 JSON，便于解析；解析失败时上层照常降级（见 parseReview）。
+   */
+  function reviewPrompt(rec, actualText) {
+    var rules = (rec && rec.fired && rec.fired.rules) || [];
+    var lines = rules.map(function (r) {
+      return '- ' + r.id + ' ｜ ' + (r.label || '') + ' → ' + (r.concept || '') +
+        ' ｜ 当时倾向：' + (r.polarity === '+' ? '助' : r.polarity === '-' ? '阻' : '中');
+    });
+    return [
+      '你在做奇门占例的**复盘**，不是重新断卦。',
+      '下面是当时这一卦触发的确定性判读条目，以及事后用户填写的实际发生情况。',
+      '你的任务只有一个：逐条判断**该条判读是否与实际情况相符**。',
+      '',
+      '【当时的判读条目】',
+      lines.join('\n'),
+      '',
+      '【实际发生的情况（用户填写）】',
+      actualText || '（未填写）',
+      '',
+      '【要求】',
+      '1. 只对上面列出的条目作判断，不得新增条目、不得改写其内容、不得提出新的断法。',
+      '2. 每条给出四档之一：happened(相符) / partial(部分相符) / not_happened(不相符) / opposite(与实际相反)。',
+      '3. 实际情况里没有涉及到的条目，**不要勉强判断**——直接省略该条，宁缺勿猜。',
+      '4. 另可给出 0-3 条「观察」：实际情况中出现、但当时判读未提到的现象，供人工参考。观察不是结论。',
+      '5. 只输出 JSON，不要任何解释文字或代码块标记：',
+      '{"verdicts":{"规则id":"happened",...},"observations":["...",...]}'
+    ].join('\n');
+  }
+
+  /**
+   * 解析模型的复盘输出。**严格校验**：未知规则 id、非法档位一律丢弃——
+   * 模型可能编出不存在的 id 或自造档位，放进统计就等于污染数据。
+   */
+  function parseReview(text, rec) {
+    var known = {};
+    ((rec && rec.fired && rec.fired.rules) || []).forEach(function (r) { known[r.id] = 1; });
+    var raw = String(text || '').trim();
+    // 容忍模型裹上代码块或前后废话：取第一个 { 到最后一个 }
+    var s = raw.indexOf('{'), e = raw.lastIndexOf('}');
+    if (s < 0 || e <= s) return { ok: false, verdicts: {}, observations: [], dropped: [], error: '未找到 JSON' };
+    var obj;
+    try { obj = JSON.parse(raw.slice(s, e + 1)); }
+    catch (err) { return { ok: false, verdicts: {}, observations: [], dropped: [], error: 'JSON 解析失败' }; }
+    var verdicts = {}, dropped = [];
+    var vs = (obj && obj.verdicts) || {};
+    Object.keys(vs).forEach(function (id) {
+      if (!known[id]) { dropped.push({ id: id, why: '本案未触发此规则' }); return; }
+      if (!isOutcome(vs[id])) { dropped.push({ id: id, why: '档位非法：' + vs[id] }); return; }
+      verdicts[id] = vs[id];
+    });
+    var obs = [];
+    if (Array.isArray(obj && obj.observations)) {
+      obs = obj.observations.filter(function (x) { return typeof x === 'string' && x.trim(); })
+        .slice(0, 3).map(function (x) { return String(x).slice(0, 200); });
+    }
+    return { ok: true, verdicts: verdicts, observations: obs, dropped: dropped, error: '' };
   }
 
   /**
@@ -136,9 +346,14 @@
       outcome: fb.outcome,
       label: outcomeLabel(fb.outcome),
       happenedAt: fb.happenedAt || '',
+      // actual＝用户用自己的话写下的实际发生情况。四档太粗，真正能拿来反推的是这段文字。
+      actual: fb.actual || fb.note || '',
       note: fb.note || '',
       recordedAt: fb.now || '',
-      ruleVerdicts: verdicts
+      ruleVerdicts: verdicts,
+      // 逐条标注的来源：manual(用户手标) / ai(AI 复盘建议经用户确认)。统计时可据此分辨可信度。
+      verdictSource: fb.verdictSource || (Object.keys(verdicts).length ? 'manual' : ''),
+      observations: Array.isArray(fb.observations) ? fb.observations.slice(0, 3) : []
     };
     return out;
   }
@@ -322,6 +537,9 @@
     firedRules: firedRules,
     makeCase: makeCase, applyFeedback: applyFeedback, graded: graded,
     calibrate: calibrate, proposals: proposals,
+    deriveTimingHits: deriveTimingHits, applyTimingDerivation: applyTimingDerivation,
+    timingCalibration: timingCalibration,
+    reviewPrompt: reviewPrompt, parseReview: parseReview,
     buildOverlay: buildOverlay, calibrationFor: calibrationFor
   };
 });

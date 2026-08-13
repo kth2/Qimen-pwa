@@ -483,24 +483,148 @@
       const tag = fb
         ? `<b style="color:${fb.outcome === 'happened' ? '#3c763d' : fb.outcome === 'opposite' ? '#a94442' : '#8a6d3b'}">${esc(fb.label)}</b>`
         : '<span class="muted">待回填</span>';
-      const btns = fb ? '' : OUTCOME_BTNS.map(([k, label]) =>
-        `<button class="btn" style="background:#777;padding:3px 8px;font-size:12px;" data-fb="${k}" data-id="${esc(r.id)}">${label}</button>`).join(' ');
+      const hit = r.timingHits && r.timingHits.hits.length
+        ? `　<span style="color:#3c763d">应期命中 ${r.timingHits.hits.length} 条</span>` : '';
+      const actual = fb && fb.actual ? `<div class="muted" style="margin-top:2px;">实况：${esc(fb.actual.slice(0, 80))}</div>` : '';
+      const marked = fb ? Object.keys(fb.ruleVerdicts || {}).length : 0;
       return `<div style="border-bottom:1px solid #eee;padding:6px 0;font-size:13px;">
         <div><b>${esc(r.question || '(未填问题)')}</b> <span class="muted">${esc(r.domain || '')}　${esc(r.chartRef.siZhu || '')}</span></div>
-        <div class="muted">${esc((r.createdAt || '').slice(0, 10))}　触发规则 ${r.fired.rules.length} 条　应期锚点 ${r.fired.anchors.length} 个　${tag}</div>
-        <div style="margin-top:4px;">${btns}
+        <div class="muted">${esc((r.createdAt || '').slice(0, 10))}　判读 ${r.fired.rules.length} 条　锚点 ${r.fired.anchors.length} 个　${tag}${marked ? `　已逐条标注 ${marked} 条` : ''}${hit}</div>
+        ${actual}
+        <div style="margin-top:4px;">
+          <button class="btn" style="background:#3c763d;padding:3px 8px;font-size:12px;" data-open="${esc(r.id)}">${fb ? '查看/修改复盘' : '📝 填写实况并复盘'}</button>
           <button class="btn" style="background:#a94442;padding:3px 8px;font-size:12px;" data-del="${esc(r.id)}">删除</button></div>
       </div>`;
     }).join('');
   }
 
-  async function recordFeedback(id, outcome) {
+  /* ---------- 复盘表单：实况文本 + 实际日期 + 逐条标注 + AI 复盘 ---------- */
+  let _reviewRec = null;
+
+  const VERDICT_OPTS = [['', '未标注'], ['happened', '相符'], ['partial', '部分'], ['not_happened', '不符'], ['opposite', '相反']];
+
+  async function openReview(id) {
     if (!store || !CB) return;
     const rec = await store.get(id);
     if (!rec) return;
-    // 逐条标注留待后续版本；此处先支持整案归因，统计侧已如实标明其粗糙
-    await store.save(CB.applyFeedback(rec, { outcome, now: new Date().toISOString() }));
-    await refreshCaseCount(); await renderCases(); await rebuildOverlay();
+    _reviewRec = rec;
+    const fb = rec.feedback || {};
+    const vs = fb.ruleVerdicts || {};
+    const rulesHtml = rec.fired.rules.map(r => `
+      <div style="border-bottom:1px solid #f2f2f2;padding:4px 0;font-size:12px;">
+        <div>${esc(r.label || r.id)} <span class="muted">→ ${esc(r.concept || '')}</span>
+          <span class="muted">[${r.polarity === '+' ? '助' : r.polarity === '-' ? '阻' : '中'}]</span></div>
+        <select data-verdict="${esc(r.id)}" style="font-size:12px;margin-top:2px;">
+          ${VERDICT_OPTS.map(([v, label]) => `<option value="${v}"${vs[r.id] === v || (!vs[r.id] && !v) ? ' selected' : ''}>${label}</option>`).join('')}
+        </select>
+      </div>`).join('');
+    $('reviewBody').innerHTML = `
+      <div style="font-size:13px;">
+        <div><b>${esc(rec.question || '')}</b> <span class="muted">${esc(rec.chartRef.siZhu || '')}</span></div>
+        <div style="margin-top:6px;">
+          <div class="muted">① 实际发生了什么？（用你自己的话写，越具体越有用）</div>
+          <textarea id="reviewActual" rows="3" style="width:100%;">${esc(fb.actual || '')}</textarea>
+        </div>
+        <div style="margin-top:6px;">
+          <span class="muted">② 实际发生日期</span>
+          <input type="date" id="reviewDate" value="${esc(fb.happenedAt || '')}">
+          <span class="muted" id="reviewHitTag"></span>
+        </div>
+        <div style="margin-top:6px;">
+          <span class="muted">③ 整体判断</span>
+          ${OUTCOME_BTNS.map(([k, label]) =>
+            `<label style="margin-right:8px;font-size:12px;"><input type="radio" name="reviewOutcome" value="${k}"${fb.outcome === k ? ' checked' : ''}>${label}</label>`).join('')}
+        </div>
+        <div style="margin-top:8px;">
+          <span class="muted">④ 逐条标注（这一步做了，统计才谈得上可信——否则只能按"整案归因"粗算）</span>
+          <button class="btn" id="reviewAiBtn" style="background:#666;padding:3px 8px;font-size:12px;">🤖 让 AI 依实况给出建议</button>
+          <span class="muted" id="reviewAiTag"></span>
+          <div style="max-height:260px;overflow:auto;margin-top:4px;">${rulesHtml}</div>
+        </div>
+        <div id="reviewObs" class="muted" style="margin-top:6px;"></div>
+        <div style="margin-top:8px;">
+          <button class="btn" id="reviewSaveBtn">保存复盘</button>
+          <button class="btn" id="reviewCancelBtn" style="background:#999;">关闭</button>
+          <span class="muted" id="reviewSaveTag"></span>
+        </div>
+      </div>`;
+    $('reviewPanel').style.display = 'block';
+    $('reviewDate').addEventListener('change', previewTimingHits);
+    $('reviewAiBtn').addEventListener('click', aiReview);
+    $('reviewSaveBtn').addEventListener('click', saveReview);
+    $('reviewCancelBtn').addEventListener('click', () => { $('reviewPanel').style.display = 'none'; _reviewRec = null; });
+    previewTimingHits();
+  }
+
+  /** 应期反推：确定性比对，实时显示命中了哪条机制。 */
+  function previewTimingHits() {
+    if (!_reviewRec || !CB) return;
+    const d = $('reviewDate').value;
+    if (!d) { $('reviewHitTag').textContent = ''; return; }
+    const sz = QM.qimen.calculate(new Date(d + 'T12:00:00'), { type: '四柱', method: '时家', purpose: '综合' }).siZhu;
+    const der = CB.deriveTimingHits(_reviewRec, sz);
+    $('reviewHitTag').innerHTML = der.hits.length
+      ? `　<span style="color:#3c763d">${esc(sz.day)}日 — 命中：${der.hits.map(h => esc(h.mechanism + '·' + h.value + '(' + h.level + ')')).join('、')}</span>
+         <span class="muted">（随机基准 ${Math.round(der.chance * 100)}%，命中率与基准相当即不算准）</span>`
+      : `　<span class="muted">${esc(sz.day)}日 — 当时的锚点无一命中（随机基准 ${Math.round(der.chance * 100)}%）</span>`;
+  }
+
+  /** AI 复盘：只让模型把实况映射到当时的判读上，输出经严格校验后填进表单，由用户过目再存。 */
+  async function aiReview() {
+    if (!_reviewRec || !CB) return;
+    const actual = $('reviewActual').value.trim();
+    if (!actual) { $('reviewAiTag').textContent = '请先填写实际情况'; return; }
+    const btn = $('reviewAiBtn'); btn.disabled = true; $('reviewAiTag').textContent = 'AI 复盘中…';
+    try {
+      const sys = '你是奇门占例复盘助手。只做判读与实况的比对标注，不重新断卦、不新增断法。只输出 JSON。';
+      const out = await LLM.chat(sys, CB.reviewPrompt(_reviewRec, actual), null);
+      const parsed = CB.parseReview(out, _reviewRec);
+      if (!parsed.ok) { $('reviewAiTag').textContent = '解析失败：' + parsed.error + '（可手动标注）'; return; }
+      let n = 0;
+      Object.keys(parsed.verdicts).forEach(id => {
+        const sel = document.querySelector(`select[data-verdict="${CSS.escape(id)}"]`);
+        if (sel) { sel.value = parsed.verdicts[id]; n++; }
+      });
+      _reviewRec._aiObservations = parsed.observations;
+      $('reviewObs').innerHTML = parsed.observations.length
+        ? '观察（供参考，非结论）：<br>' + parsed.observations.map(o => '· ' + esc(o)).join('<br>') : '';
+      $('reviewAiTag').textContent = `已填入 ${n} 条建议${parsed.dropped.length ? `，丢弃 ${parsed.dropped.length} 条无效项` : ''}——请过目后再保存`;
+    } catch (e) {
+      $('reviewAiTag').textContent = 'AI 复盘失败：' + (e.message || e);
+    } finally { btn.disabled = false; }
+  }
+
+  async function saveReview() {
+    if (!_reviewRec || !store || !CB) return;
+    const picked = document.querySelector('input[name="reviewOutcome"]:checked');
+    if (!picked) { $('reviewSaveTag').textContent = '请先选择整体判断'; return; }
+    const verdicts = {};
+    let anyManual = false;
+    document.querySelectorAll('select[data-verdict]').forEach(sel => {
+      if (sel.value) { verdicts[sel.dataset.verdict] = sel.value; anyManual = true; }
+    });
+    const happenedAt = $('reviewDate').value;
+    try {
+      let rec = CB.applyFeedback(_reviewRec, {
+        outcome: picked.value,
+        actual: $('reviewActual').value.trim(),
+        happenedAt,
+        ruleVerdicts: verdicts,
+        // 用户在界面上过目并可改动过，故一律记为 manual；AI 只是预填
+        verdictSource: anyManual ? 'manual' : '',
+        observations: _reviewRec._aiObservations || [],
+        now: new Date().toISOString()
+      });
+      if (happenedAt) {
+        const sz = QM.qimen.calculate(new Date(happenedAt + 'T12:00:00'), { type: '四柱', method: '时家', purpose: '综合' }).siZhu;
+        rec = CB.applyTimingDerivation(rec, CB.deriveTimingHits(rec, sz));
+      }
+      delete rec._aiObservations;
+      await store.save(rec);
+      $('reviewSaveTag').textContent = '已保存';
+      $('reviewPanel').style.display = 'none'; _reviewRec = null;
+      await refreshCaseCount(); await renderCases(); await rebuildOverlay();
+    } catch (e) { $('reviewSaveTag').textContent = '保存失败：' + e.message; }
   }
 
   /** 由已达门槛的统计重建经验层 overlay。只产出附注，不改任何规则。 */
@@ -532,6 +656,26 @@
       `<div style="font-size:12px;border-bottom:1px solid #f0f0f0;padding:2px 0;">
         <code>${esc(r.ruleId)}</code>　${esc(r.display)}${r.opposite ? `　<span style="color:#a94442">相反 ${r.opposite}</span>` : ''}
       </div>`).join('');
+    // 应期机制命中率：必须连随机基准一起显示，否则「命中」会被当成灵验
+    const tc = CB.timingCalibration(rows);
+    const hi = tc.high || {};
+    const hiHtml = tc.cases
+      ? `<div style="margin:4px 0;padding:4px 8px;background:#fafafa;font-size:12px;">
+           <b>★强锚点</b>（纲要明言「须待此时方应」者，数量少、才有信息量）：${esc(hi.display || '—')}
+           ${hi.baseline != null ? `　随机基准 ${Math.round(hi.baseline * 100)}%` : ''}
+           ${hi.enough && hi.baseline != null ? (hi.rate > hi.baseline
+             ? '　<span style="color:#3c763d">高于基准，这条线有效</span>'
+             : '　<span style="color:#a94442">未高于基准——应期在你这儿暂无证据说准</span>') : ''}
+         </div>` : '';
+    const tcHtml = tc.cases
+      ? `<div style="margin-top:8px;"><b>应期机制命中率</b>
+           <span class="muted">（已反推 ${tc.cases} 例；全量锚点随机基准 ${Math.round((tc.baseline || 0) * 100)}%——候选一多几乎必中，故须看下面的★强子集）</span></div>`
+        + hiHtml
+        + tc.mechanisms.map(m => {
+          const better = m.enough && tc.baseline != null && m.rate > tc.baseline;
+          return `<div style="font-size:12px;">${esc(m.mechanism)}：${esc(m.display)}${m.enough ? (better ? '　<span style="color:#3c763d">高于基准</span>' : '　<span class="muted">未高于基准</span>') : ''}</div>`;
+        }).join('')
+      : '<div class="muted" style="margin-top:8px;">还没有填过实际发生日期，无法反推应期。</div>';
     const psHtml = ps.length ? ps.map(p =>
       `<div style="border-left:3px solid ${p.severity === 'high' ? '#a94442' : '#8a6d3b'};padding:4px 8px;margin:6px 0;background:#fafafa;font-size:12px;">
         <b>${esc(p.title)}</b>${p.ruleId ? `　<code>${esc(p.ruleId)}</code>` : ''}<br>
@@ -543,6 +687,7 @@
         <div style="margin-top:6px;"><b>按占类</b></div>${domHtml}
         <div style="margin-top:8px;"><b>按规则</b>（符合率低者在前，便于复核；不足 ${cal.minSamples} 例不给百分比）</div>
         <div style="max-height:240px;overflow:auto;margin-top:4px;">${ruleHtml}</div>
+        ${tcHtml}
         <div style="margin-top:10px;"><b>校订建议</b>
           <span class="muted">——建议而已，不会自动改规则。规则库是按纲要写的，要改请改 knowledge/domain-rules.json 并补出处。</span>
         </div>${psHtml}
@@ -645,8 +790,8 @@
       });
       // 反馈与删除用事件委托：列表是动态重绘的，逐个绑定会在重绘后失效
       $('caseListView').addEventListener('click', async (e) => {
-        const fb = e.target.closest('button[data-fb]');
-        if (fb) { await recordFeedback(fb.dataset.id, fb.dataset.fb); return; }
+        const open = e.target.closest('button[data-open]');
+        if (open) { await openReview(open.dataset.open); return; }
         const del = e.target.closest('button[data-del]');
         if (del && confirm('删除这条案例？删除后它不再计入统计。')) {
           await store.remove(del.dataset.del);

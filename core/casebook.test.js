@@ -278,6 +278,195 @@ t('不传 calibration 时证据包无 CALIBRATION（Phase 4 行为原样不变�
   assert.ok(EV.toPromptBlock(ev).indexOf('CALIBRATION') < 0);
 });
 
+console.log('== 实况录入 ==');
+t('applyFeedback 收下实况文本与实际日期', function () {
+  var rec = CB.applyFeedback(mkCase(1), {
+    outcome: 'partial', actual: '5月中旬收到一笔款，但比预期少一半，且是合伙人转来的',
+    happenedAt: '2024-05-12', now: '2024-05-20T00:00:00Z'
+  });
+  assert.strictEqual(rec.feedback.actual.indexOf('合伙人') >= 0, true);
+  assert.strictEqual(rec.feedback.happenedAt, '2024-05-12');
+});
+t('逐条标注带来源标记，便于分辨可信度', function () {
+  var id = XYR.readings[0].id, v = {}; v[id] = 'happened';
+  var manual = CB.applyFeedback(mkCase(1), { outcome: 'partial', ruleVerdicts: v });
+  assert.strictEqual(manual.feedback.verdictSource, 'manual');
+  var ai = CB.applyFeedback(mkCase(1), { outcome: 'partial', ruleVerdicts: v, verdictSource: 'ai' });
+  assert.strictEqual(ai.feedback.verdictSource, 'ai');
+});
+t('makeCase 存下判读的可读文字（否则逐条标注无从下手）', function () {
+  var rec = mkCase(1);
+  rec.fired.rules.forEach(function (r) {
+    assert.ok(r.label && r.label.length > 0, r.id + ' 缺可读标签');
+    assert.ok(typeof r.concept === 'string', r.id + ' 缺判读文字');
+    assert.ok(r.concept.length <= 60, '判读文字须截断，避免撑爆手机存储');
+  });
+});
+
+console.log('== 应期反推：完全确定性 ==');
+function siZhuOf(iso) {
+  return QM.qimen.calculate(new Date(iso), { type: '四柱', method: '时家', purpose: '综合' }).siZhu;
+}
+t('给出实际日期即可判定命中了哪条锚点，命中值必与那天干支一致', function () {
+  var rec = mkCase(1);
+  var sz = siZhuOf('2024-05-12T12:00:00');     // 丙子日
+  var d = CB.deriveTimingHits(rec, sz);
+  assert.ok(d.hits.length + d.missed.length === rec.fired.anchors.length, '每个锚点非命中即未中');
+  d.hits.forEach(function (h) {
+    var lv = h.level === '日' ? sz.day : h.level === '月' ? sz.month : sz.year;
+    var expect = h.kind === 'gan' ? lv.charAt(0) : lv.charAt(1);
+    assert.strictEqual(h.value, expect, h.mechanism + ' 声称命中 ' + h.level + '，但那天是 ' + lv);
+  });
+});
+t('日/月/年三层都比对，并如实标明命中在哪一层', function () {
+  var rec = mkCase(1);
+  var seen = {};
+  ['2024-05-12', '2024-07-03', '2024-11-20', '2025-02-14', '2024-04-18'].forEach(function (day) {
+    CB.deriveTimingHits(rec, siZhuOf(day + 'T12:00:00')).hits.forEach(function (h) {
+      assert.ok(['日', '月', '年'].indexOf(h.level) >= 0);
+      seen[h.level] = 1;
+    });
+  });
+  assert.ok(Object.keys(seen).length >= 1, '样本中应至少命中一层');
+});
+t('未给日期时不臆断，全部记为未中', function () {
+  var rec = mkCase(1);
+  var d = CB.deriveTimingHits(rec, null);
+  assert.strictEqual(d.hits.length, 0);
+  assert.strictEqual(d.missed.length, rec.fired.anchors.length);
+  assert.strictEqual(d.chance, null, '无从计算基准时不得编一个数出来');
+});
+t('随机基准算得出且落在 0-1，候选越多基准越高', function () {
+  var rec = mkCase(1);
+  var d = CB.deriveTimingHits(rec, siZhuOf('2024-05-12T12:00:00'));
+  assert.ok(d.chance > 0 && d.chance <= 1, '基准应为概率：' + d.chance);
+  // 人工构造：候选极少 → 基准应明显更低
+  var few = JSON.parse(JSON.stringify(rec));
+  few.fired.anchors = [{ mechanism: '填实', value: '子', kind: 'zhi', strength: 'high', gong: '1' }];
+  var d2 = CB.deriveTimingHits(few, siZhuOf('2024-05-12T12:00:00'));
+  assert.ok(d2.chance < d.chance, '候选少则蒙中概率低：' + d2.chance + ' vs ' + d.chance);
+});
+t('反推结果并入记录时不改原对象', function () {
+  var rec = mkCase(1);
+  var d = CB.deriveTimingHits(rec, siZhuOf('2024-05-12T12:00:00'));
+  var out = CB.applyTimingDerivation(rec, d);
+  assert.strictEqual(rec.timingHits, undefined);
+  assert.ok(out.timingHits.hits);
+});
+
+console.log('== 应期机制命中率：必须连随机基准一起给 ==');
+t('按机制统计命中率，每案每机制只计一次', function () {
+  var recs = [];
+  for (var i = 0; i < 10; i++) {
+    var r = mkCase(i, 'happened');
+    recs.push(CB.applyTimingDerivation(r, CB.deriveTimingHits(r, siZhuOf('2024-05-1' + (i % 10) + 'T12:00:00'))));
+  }
+  var tc = CB.timingCalibration(recs);
+  assert.strictEqual(tc.cases, 10);
+  tc.mechanisms.forEach(function (m) {
+    assert.ok(m.n <= 10, m.mechanism + ' 每案每机制只应计一次，实得 n=' + m.n);
+    assert.ok(m.hit <= m.n, m.mechanism + ' 命中数不得超过样本数');
+  });
+});
+t('★强锚点单列统计：全量基准逼近 1 时，唯有强子集有信息量', function () {
+  var rec = mkCase(1);
+  var d = CB.deriveTimingHits(rec, siZhuOf('2024-05-12T12:00:00'));
+  assert.ok(d.high && typeof d.high.total === 'number', '须给出强锚点子集');
+  assert.ok(d.high.total <= rec.fired.anchors.length);
+  assert.ok(d.high.hit <= d.high.total);
+  if (d.high.total > 0) {
+    assert.ok(d.high.chance <= d.chance + 1e-9,
+      '强子集候选更少，基准不应高于全量：' + d.high.chance + ' vs ' + d.chance);
+  }
+  var recs = [];
+  for (var i = 0; i < 10; i++) {
+    var r = mkCase(i, 'happened');
+    recs.push(CB.applyTimingDerivation(r, CB.deriveTimingHits(r, siZhuOf('2024-0' + (5 + i % 4) + '-1' + (i % 9) + 'T12:00:00'))));
+  }
+  var tc = CB.timingCalibration(recs);
+  assert.ok(tc.high && typeof tc.high.n === 'number', '统计须含强子集');
+  assert.ok(tc.high.n <= tc.cases);
+  if (tc.high.enough) {
+    assert.ok(tc.high.rate >= 0 && tc.high.rate <= 1);
+    assert.ok(tc.high.baseline >= 0 && tc.high.baseline <= 1);
+  }
+});
+t('输出必带随机基准与其说明（防止把蒙中当灵验）', function () {
+  var recs = [];
+  for (var i = 0; i < 10; i++) {
+    var r = mkCase(i, 'happened');
+    recs.push(CB.applyTimingDerivation(r, CB.deriveTimingHits(r, siZhuOf('2024-06-0' + (i % 10) + 'T12:00:00'))));
+  }
+  var tc = CB.timingCalibration(recs);
+  assert.ok(typeof tc.baseline === 'number' && tc.baseline > 0, '须给出随机基准');
+  assert.ok(/随机基准/.test(tc.baselineNote) && /未提供额外信息/.test(tc.baselineNote),
+    '须说明命中率与基准相当时并不代表准');
+});
+t('未反推过的案例不进入应期统计', function () {
+  var recs = [mkCase(1, 'happened'), mkCase(2, 'happened')];
+  assert.strictEqual(CB.timingCalibration(recs).cases, 0);
+});
+
+console.log('== AI 复盘：只做映射，且输出严格校验 ==');
+t('复盘提示只让模型标注、不让它改规则或重断', function () {
+  var p = CB.reviewPrompt(mkCase(1), '五月中旬收到款，但比预期少');
+  assert.ok(/复盘/.test(p) && /不是重新断卦/.test(p));
+  assert.ok(/不得新增条目/.test(p) && /不得改写其内容/.test(p) && /不得提出新的断法/.test(p));
+  assert.ok(/宁缺勿猜/.test(p), '未涉及的条目须允许省略，不得逼模型硬判');
+  assert.ok(p.indexOf(XYR.readings[0].id) >= 0, '须把待判条目连同 id 列出');
+});
+t('解析：合法输出被接受', function () {
+  var rec = mkCase(1);
+  var id = rec.fired.rules[0].id;
+  var r = CB.parseReview('{"verdicts":{"' + id + '":"partial"},"observations":["提到合伙人"]}', rec);
+  assert.strictEqual(r.ok, true);
+  assert.strictEqual(r.verdicts[id], 'partial');
+  assert.strictEqual(r.observations[0], '提到合伙人');
+});
+t('解析：编造的规则 id 与非法档位一律丢弃', function () {
+  var rec = mkCase(1);
+  var id = rec.fired.rules[0].id;
+  var r = CB.parseReview('{"verdicts":{"' + id + '":"happened","wealth.伪造.规则":"happened","x":"乱写"}}', rec);
+  assert.strictEqual(Object.keys(r.verdicts).length, 1, '只应保留本案真正触发过的合法条目');
+  assert.strictEqual(r.dropped.length, 2);
+  assert.ok(r.dropped.some(function (d) { return /本案未触发/.test(d.why); }));
+});
+t('解析：容忍代码块包裹与前后废话', function () {
+  var rec = mkCase(1);
+  var id = rec.fired.rules[0].id;
+  var r = CB.parseReview('好的，结果如下：\n```json\n{"verdicts":{"' + id + '":"happened"}}\n```\n希望有帮助', rec);
+  assert.strictEqual(r.ok, true);
+  assert.strictEqual(r.verdicts[id], 'happened');
+});
+t('解析：坏输出不抛异常，如实返回失败', function () {
+  var rec = mkCase(1);
+  [null, '', '完全不是 JSON', '{坏的', '[]'].forEach(function (bad) {
+    var r = CB.parseReview(bad, rec);
+    assert.ok(!r.ok || Object.keys(r.verdicts).length === 0);
+    assert.deepStrictEqual(r.observations, []);
+  });
+});
+t('观察最多 3 条且逐条截断（防模型长篇灌入）', function () {
+  var rec = mkCase(1);
+  var long = new Array(500).join('啊');
+  var r = CB.parseReview(JSON.stringify({ verdicts: {}, observations: [long, long, long, long, long] }), rec);
+  assert.strictEqual(r.observations.length, 3);
+  r.observations.forEach(function (o) { assert.ok(o.length <= 200); });
+});
+t('AI 复盘的标注进入统计后，仍以「逐条标注」计而非整案归因', function () {
+  var recs = [], id = XYR.readings[0].id;
+  for (var i = 0; i < 8; i++) {
+    var v = {}; v[id] = 'happened';
+    recs.push(CB.applyFeedback(mkCase(i), {
+      outcome: 'not_happened', ruleVerdicts: v, verdictSource: 'ai', now: '2024-05-01'
+    }));
+  }
+  var cal = CB.calibrate(recs);
+  var target = cal.rules.filter(function (r) { return r.ruleId === id; })[0];
+  assert.strictEqual(target.attribution, 'rule');
+  assert.strictEqual(target.rate, 1);
+});
+
 console.log('== 存储：只在本机、导入不覆盖 ==');
 ta('保存/读取/列表/删除', function () {
   var s = CS.create(CS.memoryBackend());
