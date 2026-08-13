@@ -159,6 +159,10 @@
     if (pan.error) { $('analysis').innerHTML = `<div class="panel">排盘出错：${esc(pan.message)}</div>`; return; }
     if (!pan.jiuGongAnalysis) pan.jiuGongAnalysis = {};
     window._pan = pan;
+    // 换了盘就作废上一次解读的存档素材：否则「存为案例」还挂在旧盘上，
+    // 存下来的是另一张盘的象义
+    _lastReading = null;
+    if ($('caseSaveBar')) { $('caseSaveBar').style.display = 'none'; $('caseSaveTag').textContent = ''; }
     renderBasicInfo(pan); renderChart(pan); renderAnalysis(pan);
   }
 
@@ -340,6 +344,11 @@
       // 结构化推理层：占类 → 用神 → 证据包。复用上面已算好的分析结果，不重复排盘、不二次调用引擎。
       // 证据包接管 wangshuai/yingqi 的呈现，故二者不再单独拼接，避免同一内容进两次提示词；山向段另行保留。
       let evBlock = '', sysExtra = '';
+      // 按次作用域收集本轮的结构化产物。**不能靠 window._xiangyi 之类的全局量**：
+      // 知识库加载失败或证据构建抛错时那些全局量不会被更新，仍留着上一次解读的值，
+      // 存案例就会把「别的盘」的象义记进这一条里——统计从此全错。
+      const runOut = { yongshen: null, xiangyi: null, timing: null, evidence: null, domain: '' };
+      window._evidence = window._xiangyi = window._timing = null;   // 先清干净，宁可为空也不串盘
       if (await loadKnowledge()) {
         try {
           // 占类优先取引擎按问句识别的结果（比下拉框更贴合实际所问），识别不出再回落界面「目的」
@@ -398,6 +407,8 @@
             question: q, domain, chart: pan, yongshen, xiangyi, timing, calibration,
             wangshuai: wsBlock, yingqi: yqBlock
           });
+          runOut.yongshen = yongshen; runOut.xiangyi = xiangyi;
+          runOut.timing = timing; runOut.evidence = evidence; runOut.domain = domain;
           window._evidence = evidence;                 // 便于在控制台核对喂给模型的内容
           window._xiangyi = xiangyi;                   // 同上：逐条核对判读命中了哪些规则
           window._timing = timing;                     // 同上：核对应期锚点与其机制
@@ -420,10 +431,12 @@
       $('aiStatus').textContent = '完成';
       // 备好「存为案例」的素材。答案截断到 8000 字：全文可能极长，手机存储不该被单条撑爆
       if (store && CB) {
+        // 一律取本轮的 runOut，不读全局量——见上文「不能靠 window._xiangyi」的说明
         _lastReading = {
-          question: q, domain: YS ? YS.normalizeDomain((prompt.context && prompt.context.category) || fallbackCategory) : '',
+          question: q, domain: runOut.domain,
           school, mode, chart: pan, dateISO: $('inDate').value + ' ' + $('inTime').value,
-          xiangyi: window._xiangyi || null, timing: window._timing || null,
+          yongshen: runOut.yongshen, xiangyi: runOut.xiangyi,
+          timing: runOut.timing, evidence: runOut.evidence,
           answer: String(answer || '').slice(0, 8000)
         };
         $('caseSaveBar').style.display = 'block';
@@ -455,6 +468,7 @@
     if (!store || !CB || !_lastReading) return;
     const btn = $('caseSaveBtn'); btn.disabled = true;
     try {
+      // 传 yongshen/evidence 进去，makeCase 才抽得出「盘面象义」那一段
       const rec = CB.makeCase(Object.assign({ id: store.newId(), now: new Date().toISOString() }, _lastReading));
       await store.save(rec);
       $('caseSaveTag').textContent = '已存档，事后可在「案例本」回填实际结果';
@@ -486,7 +500,7 @@
       const hit = r.timingHits && r.timingHits.hits.length
         ? `　<span style="color:#3c763d">应期命中 ${r.timingHits.hits.length} 条</span>` : '';
       const actual = fb && fb.actual ? `<div class="muted" style="margin-top:2px;">实况：${esc(fb.actual.slice(0, 80))}</div>` : '';
-      const marked = fb ? Object.keys(fb.ruleVerdicts || {}).length : 0;
+      const marked = fb ? (Object.keys(fb.ruleVerdicts || {}).length + Object.keys(fb.symbolVerdicts || {}).length) : 0;
       return `<div style="border-bottom:1px solid #eee;padding:6px 0;font-size:13px;">
         <div><b>${esc(r.question || '(未填问题)')}</b> <span class="muted">${esc(r.domain || '')}　${esc(r.chartRef.siZhu || '')}</span></div>
         <div class="muted">${esc((r.createdAt || '').slice(0, 10))}　判读 ${r.fired.rules.length} 条　锚点 ${r.fired.anchors.length} 个　${tag}${marked ? `　已逐条标注 ${marked} 条` : ''}${hit}</div>
@@ -510,14 +524,26 @@
     _reviewRec = rec;
     const fb = rec.feedback || {};
     const vs = fb.ruleVerdicts || {};
-    const rulesHtml = rec.fired.rules.map(r => `
+    const svs = fb.symbolVerdicts || {};
+    const sel = (attr, key, cur) => `<select data-${attr}="${esc(key)}" style="font-size:12px;margin-top:2px;">
+      ${VERDICT_OPTS.map(([v, label]) => `<option value="${v}"${cur === v || (!cur && !v) ? ' selected' : ''}>${label}</option>`).join('')}
+    </select>`;
+    // ① 盘面象义：用神落宫与同宫之象。各盘别、各占类都有，是「当时这盘说了什么」的原始层
+    const symsHtml = (rec.fired.symbols || []).map(s => `
+      <div style="border-bottom:1px solid #f2f2f2;padding:4px 0;font-size:12px;">
+        <div><b>${esc(s.label)}</b></div>
+        <div class="muted">同宫：${esc(s.withEls.join('/'))}</div>
+        <div class="muted">象义：${esc(s.words.join('、'))}</div>
+        ${sel('symverdict', s.key, svs[s.key])}
+      </div>`).join('');
+    // ② 规则判读：domain-rules.json 命中项，有出处、可回查、可驱动校准
+    const rulesHtml = rec.fired.rules.length ? rec.fired.rules.map(r => `
       <div style="border-bottom:1px solid #f2f2f2;padding:4px 0;font-size:12px;">
         <div>${esc(r.label || r.id)} <span class="muted">→ ${esc(r.concept || '')}</span>
           <span class="muted">[${r.polarity === '+' ? '助' : r.polarity === '-' ? '阻' : '中'}]</span></div>
-        <select data-verdict="${esc(r.id)}" style="font-size:12px;margin-top:2px;">
-          ${VERDICT_OPTS.map(([v, label]) => `<option value="${v}"${vs[r.id] === v || (!vs[r.id] && !v) ? ' selected' : ''}>${label}</option>`).join('')}
-        </select>
-      </div>`).join('');
+        ${sel('verdict', r.id, vs[r.id])}
+      </div>`).join('')
+      : '<div class="muted" style="font-size:12px;padding:4px 0;">本占类的规则库尚未覆盖（如综合占类、或飞盘），故无规则判读条目——这不代表盘上无象，上面的盘面象义照常可标。</div>';
     $('reviewBody').innerHTML = `
       <div style="font-size:13px;">
         <div><b>${esc(rec.question || '')}</b> <span class="muted">${esc(rec.chartRef.siZhu || '')}</span></div>
@@ -539,7 +565,12 @@
           <span class="muted">④ 逐条标注（这一步做了，统计才谈得上可信——否则只能按"整案归因"粗算）</span>
           <button class="btn" id="reviewAiBtn" style="background:#666;padding:3px 8px;font-size:12px;">🤖 让 AI 依实况给出建议</button>
           <span class="muted" id="reviewAiTag"></span>
-          <div style="max-height:260px;overflow:auto;margin-top:4px;">${rulesHtml}</div>
+          <div style="max-height:420px;overflow:auto;margin-top:4px;">
+            <div style="margin:4px 0;font-weight:bold;">盘面象义（当时这盘的用神落宫与同宫之象）</div>
+            ${symsHtml}
+            <div style="margin:10px 0 4px;font-weight:bold;">规则判读（按纲要命中的条目，有出处）</div>
+            ${rulesHtml}
+          </div>
         </div>
         <div id="reviewObs" class="muted" style="margin-top:6px;"></div>
         <div style="margin-top:8px;">
@@ -582,8 +613,12 @@
       if (!parsed.ok) { $('reviewAiTag').textContent = '解析失败：' + parsed.error + '（可手动标注）'; return; }
       let n = 0;
       Object.keys(parsed.verdicts).forEach(id => {
-        const sel = document.querySelector(`select[data-verdict="${CSS.escape(id)}"]`);
-        if (sel) { sel.value = parsed.verdicts[id]; n++; }
+        const el = document.querySelector(`select[data-verdict="${CSS.escape(id)}"]`);
+        if (el) { el.value = parsed.verdicts[id]; n++; }
+      });
+      Object.keys(parsed.symbolVerdicts || {}).forEach(k => {
+        const el = document.querySelector(`select[data-symverdict="${CSS.escape(k)}"]`);
+        if (el) { el.value = parsed.symbolVerdicts[k]; n++; }
       });
       _reviewRec._aiObservations = parsed.observations;
       $('reviewObs').innerHTML = parsed.observations.length
@@ -598,10 +633,13 @@
     if (!_reviewRec || !store || !CB) return;
     const picked = document.querySelector('input[name="reviewOutcome"]:checked');
     if (!picked) { $('reviewSaveTag').textContent = '请先选择整体判断'; return; }
-    const verdicts = {};
+    const verdicts = {}, symbolVerdicts = {};
     let anyManual = false;
     document.querySelectorAll('select[data-verdict]').forEach(sel => {
       if (sel.value) { verdicts[sel.dataset.verdict] = sel.value; anyManual = true; }
+    });
+    document.querySelectorAll('select[data-symverdict]').forEach(sel => {
+      if (sel.value) { symbolVerdicts[sel.dataset.symverdict] = sel.value; anyManual = true; }
     });
     const happenedAt = $('reviewDate').value;
     try {
@@ -610,6 +648,7 @@
         actual: $('reviewActual').value.trim(),
         happenedAt,
         ruleVerdicts: verdicts,
+        symbolVerdicts,
         // 用户在界面上过目并可改动过，故一律记为 manual；AI 只是预填
         verdictSource: anyManual ? 'manual' : '',
         observations: _reviewRec._aiObservations || [],
@@ -676,6 +715,12 @@
           return `<div style="font-size:12px;">${esc(m.mechanism)}：${esc(m.display)}${m.enough ? (better ? '　<span style="color:#3c763d">高于基准</span>' : '　<span class="muted">未高于基准</span>') : ''}</div>`;
         }).join('')
       : '<div class="muted" style="margin-top:8px;">还没有填过实际发生日期，无法反推应期。</div>';
+    const symStatHtml = (cal.symbols || []).length
+      ? cal.symbols.slice(0, 30).map(s =>
+        `<div style="font-size:12px;border-bottom:1px solid #f0f0f0;padding:2px 0;">
+          ${esc(s.label || s.key)}　${esc(s.display)}${s.opposite ? `　<span style="color:#a94442">相反 ${s.opposite}</span>` : ''}
+        </div>`).join('')
+      : '<span class="muted">暂无</span>';
     const psHtml = ps.length ? ps.map(p =>
       `<div style="border-left:3px solid ${p.severity === 'high' ? '#a94442' : '#8a6d3b'};padding:4px 8px;margin:6px 0;background:#fafafa;font-size:12px;">
         <b>${esc(p.title)}</b>${p.ruleId ? `　<code>${esc(p.ruleId)}</code>` : ''}<br>
@@ -685,8 +730,11 @@
       <div style="font-size:13px;">
         <div><b>总计</b>：${cal.totals.cases} 例，已回填 ${cal.totals.graded} 例</div>
         <div style="margin-top:6px;"><b>按占类</b></div>${domHtml}
+        <div style="margin-top:8px;"><b>按盘面象义</b>
+          <span class="muted">（键为「元素@宫」，如 生门@2＝生门临坤二。这是象的配置统计，不是纲要规则）</span></div>
+        <div style="max-height:200px;overflow:auto;margin-top:4px;">${symStatHtml}</div>
         <div style="margin-top:8px;"><b>按规则</b>（符合率低者在前，便于复核；不足 ${cal.minSamples} 例不给百分比）</div>
-        <div style="max-height:240px;overflow:auto;margin-top:4px;">${ruleHtml}</div>
+        <div style="max-height:200px;overflow:auto;margin-top:4px;">${ruleHtml}</div>
         ${tcHtml}
         <div style="margin-top:10px;"><b>校订建议</b>
           <span class="muted">——建议而已，不会自动改规则。规则库是按纲要写的，要改请改 knowledge/domain-rules.json 并补出处。</span>

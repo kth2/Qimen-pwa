@@ -303,6 +303,124 @@ t('makeCase 存下判读的可读文字（否则逐条标注无从下手）', fu
   });
 });
 
+console.log('== 盘面象义条目（用户报的 bug：标注清单不是本盘象义） ==');
+function fullCase(domain, opts) {
+  opts = opts || {};
+  var ys = YS.resolve({ domain: domain, chart: CHART, options: opts.school ? { school: opts.school } : {} });
+  var xy = XY.analyze({ domain: domain, chart: CHART, wangshuai: WSR, options: opts.school ? { school: opts.school } : {} });
+  var ev = EV.build({ domain: domain, chart: CHART, yongshen: ys, xiangyi: xy });
+  return CB.makeCase({ id: 'f', domain: domain, chart: CHART, yongshen: ys, xiangyi: xy, evidence: ev });
+}
+t('规则库未覆盖的占类（综合）仍有象义可标——这正是原 bug', function () {
+  var rec = fullCase('general');
+  assert.ok(rec.fired.rules.length <= 1, '前提：综合占类规则库近乎空白');
+  assert.ok(rec.fired.symbols.length >= 3,
+    '综合占类也须给出盘面象义，实得 ' + rec.fired.symbols.length + ' 条——否则标注清单名不副实');
+});
+t('飞盘（象义层整层停用）同样有象义可标', function () {
+  // 真实调用中 app.js 必传 engineYong（引擎自算的用神）；零串味会排除转盘占类取用，
+  // 但引擎用神照常保留——象义即由它而来。此处照实模拟该路径。
+  var engineYong = { matched: true, category: '求财', note: '引擎取用', located: [{ name: '生门' }, { name: '值符' }] };
+  var ys = YS.resolve({ domain: 'wealth', chart: CHART, options: { school: 'feipan', engineYong: engineYong } });
+  var xy = XY.analyze({ domain: 'wealth', chart: CHART, wangshuai: WSR, options: { school: 'feipan' } });
+  var ev = EV.build({ domain: 'wealth', chart: CHART, yongshen: ys, xiangyi: xy });
+  var rec = CB.makeCase({ id: 'fp', domain: 'wealth', chart: CHART, yongshen: ys, xiangyi: xy, evidence: ev });
+  assert.strictEqual(rec.fired.rules.length, 0, '前提：飞盘下规则层停用');
+  assert.ok(rec.fired.symbols.length > 0, '飞盘也须给出盘面象义，实得 ' + rec.fired.symbols.length);
+  // 零串味：排除掉的转盘占类取用不得混进象义条目
+  var excluded = ys.resolution.excluded.map(function (x) { return x.name; });
+  rec.fired.symbols.forEach(function (s) {
+    assert.ok(excluded.indexOf(s.name) < 0, '飞盘下不得出现被隔离的转盘取用：' + s.name);
+  });
+});
+t('用神清单为空时象义段为空，不编造条目', function () {
+  var rec = CB.makeCase({ id: 'e', domain: 'wealth', chart: CHART, yongshen: { examine: [] } });
+  assert.deepStrictEqual(rec.fired.symbols, []);
+});
+t('象义条目确与盘面一致：落宫、同宫元素逐项核对', function () {
+  var rec = fullCase('wealth');
+  assert.ok(rec.fired.symbols.length > 0);
+  rec.fired.symbols.forEach(function (s) {
+    assert.ok(/^[1-9]$/.test(s.gong), s.key + ' 落宫非法');
+    // 同宫元素必须真在那一宫
+    var atG = [CHART.jiuXing[s.gong], CHART.baMen[s.gong], CHART.baShen[s.gong],
+      CHART.tianPan[s.gong], CHART.diPan[s.gong], (CHART.anGan || {})[s.gong]];
+    s.withEls.forEach(function (w) {
+      var bare = w.replace(/^(星|门|神|天盘|地盘|暗干)/, '');
+      assert.ok(atG.indexOf(bare) >= 0, s.key + ' 声称同宫有 ' + bare + '，但 ' + s.gong + ' 宫实为 ' + atG.join('/'));
+    });
+  });
+});
+t('象义词确出自 symbols.json，且元素象与宫象各留配额', function () {
+  var rec = fullCase('wealth');
+  var sm = rec.fired.symbols.filter(function (s) { return s.name === '生门'; })[0];
+  assert.ok(sm, '求财须含生门');
+  var men = EV.getSymbol('bamen', '生门');
+  var gong = EV.getSymbol('jiugong', sm.gong);
+  var fromMen = sm.words.filter(function (w) { return JSON.stringify(men).indexOf('"' + w + '"') >= 0; });
+  var fromGong = sm.words.filter(function (w) { return JSON.stringify(gong).indexOf('"' + w + '"') >= 0; });
+  assert.ok(fromMen.length > 0, '须含门之象');
+  assert.ok(fromGong.length > 0, '须含宫之象——宫象不得被干/门象整段挤掉（方位类象全靠它）');
+  sm.words.forEach(function (w) {
+    var inKb = JSON.stringify(men).indexOf('"' + w + '"') >= 0 || JSON.stringify(gong).indexOf('"' + w + '"') >= 0;
+    assert.ok(inKb, '象义须出自知识库，不得杜撰：' + w);
+  });
+});
+t('日干为甲时，甲的象义不再漏失（既存 bug 回归）', function () {
+  assert.strictEqual(CHART.siZhu.day.charAt(0), '甲', '前提：本测试盘日干为甲');
+  var ys = YS.resolve({ domain: 'wealth', chart: CHART });
+  var jia = ys.examine.filter(function (m) { return m.name === '日干'; })[0];
+  assert.strictEqual(jia.resolved, '甲', 'resolved 须为纯干，否则查 symbols.json 必落空');
+  assert.ok(/遁于旬首/.test(jia.via || ''), '「遁于旬首」的说明应由 via 承载');
+  var ev = EV.build({ domain: 'wealth', chart: CHART, yongshen: ys });
+  var els = ev.items.filter(function (x) { return x.type === 'SYMBOL'; }).map(function (x) { return x.element; });
+  assert.ok(els.indexOf('甲') >= 0, '甲日求测人自身的象义必须进证据包');
+});
+t('象义 key 为「元素@宫」，跨案例可累计', function () {
+  var a = fullCase('wealth'), b = fullCase('wealth');
+  assert.deepStrictEqual(a.fired.symbols.map(function (s) { return s.key; }),
+    b.fired.symbols.map(function (s) { return s.key; }), '同盘同占类须得同一批 key');
+  a.fired.symbols.forEach(function (s) {
+    assert.ok(/^sym:.+@[1-9]$/.test(s.key), 'key 格式应为 sym:元素@宫，实为 ' + s.key);
+  });
+});
+t('象义标注与规则标注分开统计，互不冒充', function () {
+  var recs = [];
+  var proto = fullCase('wealth');
+  var symKey = proto.fired.symbols[0].key;
+  for (var i = 0; i < 8; i++) {
+    var r = fullCase('wealth'); r.id = 's' + i;
+    var sv = {}; sv[symKey] = 'happened';
+    recs.push(CB.applyFeedback(r, { outcome: 'not_happened', symbolVerdicts: sv, now: '2024-05-01' }));
+  }
+  var cal = CB.calibrate(recs);
+  assert.ok(Array.isArray(cal.symbols) && cal.symbols.length > 0, '统计须含象义段');
+  var target = cal.symbols.filter(function (s) { return s.key === symKey; })[0];
+  assert.strictEqual(target.attribution, 'symbol');
+  assert.strictEqual(target.rate, 1, '逐条标注应压过整案结果');
+  // 规则段不得被象义标注污染
+  cal.rules.forEach(function (r) {
+    assert.strictEqual(r.attribution, 'case', '未标注规则者应仍按整案归因，不得挪用象义标注');
+  });
+});
+t('AI 复盘可给象义标注，且编造的 key 一律丢弃', function () {
+  var rec = fullCase('wealth');
+  var key = rec.fired.symbols[0].key;
+  var r = CB.parseReview(JSON.stringify({
+    verdicts: {}, symbolVerdicts: { [key]: 'partial', 'sym:伪造@9': 'happened' }
+  }), rec);
+  assert.strictEqual(r.symbolVerdicts[key], 'partial');
+  assert.ok(!('sym:伪造@9' in r.symbolVerdicts));
+  assert.ok(r.dropped.some(function (d) { return /本案无此象义条目/.test(d.why); }));
+});
+t('复盘提示同时列出盘面象义与规则判读', function () {
+  var rec = fullCase('general');
+  var p = CB.reviewPrompt(rec, '实际发生了某事');
+  assert.ok(/盘面象义/.test(p), '提示须含象义段');
+  assert.ok(p.indexOf(rec.fired.symbols[0].key) >= 0, '须把象义 key 列出，模型才标得回来');
+  assert.ok(/symbolVerdicts/.test(p), '须说明象义标注的字段名');
+});
+
 console.log('== 应期反推：完全确定性 ==');
 function siZhuOf(iso) {
   return QM.qimen.calculate(new Date(iso), { type: '四柱', method: '时家', purpose: '综合' }).siZhu;
