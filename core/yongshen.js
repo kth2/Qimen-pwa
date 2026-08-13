@@ -145,8 +145,11 @@
         g = String(chart.zhiFuLuoGong || chart.zhiFuGong || '');
         if (!g) return null;
         var m0 = gongMeta(g, chart);
-        m0.name = name; m0.kind = kind; m0.resolved = '甲(遁旬首)';
-        m0.via = '甲不上天盘，以值符落宫论';
+        // resolved 必须是**纯干**：它要用来查 symbols.json。写成「甲(遁旬首)」会查不到，
+        // 导致日干为甲时（约 1/10 的日子）求测人自身的象义整个漏出提示词。
+        // 「遁于旬首」的说明由 via 承载，二者各司其职。
+        m0.name = name; m0.kind = kind; m0.resolved = '甲';
+        m0.via = '甲不上天盘，遁于旬首，以值符落宫论';
         return m0;
       }
       g = findIn(v.tianGan, gan) || findIn(v.diGan, gan) || findIn(v.anGan, gan);

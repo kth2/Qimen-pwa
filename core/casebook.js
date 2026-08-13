@@ -91,6 +91,90 @@
     return { rules: rules, anchors: anchors };
   }
 
+  /**
+   * 抽出**本盘实际的象义条目**——用神落在哪一宫、同宫有哪些星门神干、其传统象义是什么。
+   *
+   * 为什么必须单列这一层：rules 只是 domain-rules.json **命中的规则**。综合占类规则库近乎空白
+   * （只有一条宫际关系）、飞盘更是整层停用，此时 rules 为 0-1 条——而盘还是那张盘，
+   * 象义一条不少。若标注清单只给 rules，用户看到 AI 大谈「生门临坤、白虎同宫」，
+   * 回头却只有一行可标，那清单就名不副实了。
+   *
+   * 取自 yongshen.examine（**各盘别、各占类都有**，是"最终要看哪些元素"的权威清单），
+   * 再用 xiangyi.focus 补角色与旺衰四害、用 evidence 的 SYMBOL 条目补象义词。
+   *
+   * key 取「元素@宫」而非把同宫元素也编进去：那样每条都独一无二，跨案例永远累计不起来。
+   * 「生门@2」这种配置会反复出现，才统计得出「生门临坤二在你这儿准不准」。
+   */
+  function chartSymbols(args) {
+    args = args || {};
+    var ys = args.yongshen, xy = args.xiangyi, ev = args.evidence, chart = args.chart || {};
+    var examine = (ys && ys.examine) || [];
+    if (!examine.length) return [];
+
+    // xiangyi.focus → 角色/权重/旺衰四害（象义层停用时这些就没有，如实留空）
+    var focus = {};
+    if (xy && xy.applicable) (xy.focus || []).forEach(function (f) { focus[f.name] = f; });
+
+    // evidence 的 SYMBOL 条目 → 象义词（按 element 索引；九宫以宫号为 element）
+    var symWords = {};
+    if (ev && ev.items) {
+      ev.items.forEach(function (it) {
+        if (it.type === 'SYMBOL') symWords[it.category + ':' + it.element] = it.content || [];
+      });
+    }
+    var CAT = { men: 'bamen', xing: 'jiuxing', shen: 'bashen', gan: 'tiangan' };
+
+    var out = [], seen = {};
+    examine.forEach(function (m) {
+      var key = 'sym:' + m.name + '@' + m.gong;
+      if (seen[key]) return;
+      seen[key] = 1;
+      var f = focus[m.name];
+      // 同宫元素：这正是「象与象相遇」之处，也是用户在解读里看到的东西
+      var withEls = [];
+      if (m.xing) withEls.push('星' + m.xing);
+      if (m.men) withEls.push('门' + m.men);
+      if (m.shen) withEls.push('神' + m.shen);
+      if (m.tianGan) withEls.push('天盘' + m.tianGan);
+      if (m.diGan) withEls.push('地盘' + m.diGan);
+      if (m.anGan) withEls.push('暗干' + m.anGan);
+
+      var marks = [];
+      if (f && f.state) marks.push(f.state);
+      if (f && f.flags) f.flags.forEach(function (x) { marks.push(x); });
+      if (!f) {   // 象义层停用时，空亡/驿马仍可直接由盘面读出，不必臆造
+        if (m.kongWang) marks.push('空亡');
+        if (m.yiMa) marks.push('驿马');
+      }
+
+      // 元素象与宫象**各留配额**：直接拼接再截断，会让干象把宫象整段挤掉，
+      // 而宫象正是方位/场所之所本（失物、风水尤依赖它）。
+      var cat = CAT[m.kind];
+      var elWords = cat ? (symWords[cat + ':' + (m.resolved || m.name)] || symWords[cat + ':' + m.name] || []) : [];
+      var gongWords = symWords['jiugong:' + m.gong] || [];
+      var words = dedupe(elWords.slice(0, 6)).concat(dedupe(gongWords.slice(0, 4)));
+
+      out.push({
+        key: key,
+        name: m.name, resolved: (m.resolved && m.resolved !== m.name) ? m.resolved : '',
+        kind: m.kind, gong: m.gong, gongName: m.gongName || '', direction: m.direction || '',
+        aspect: f ? (f.aspect || '') : '', weight: f ? (f.weight || 0) : 0,
+        origin: m.origin || '', marks: marks, withEls: withEls,
+        words: dedupe(words),
+        label: m.name + (m.resolved && m.resolved !== m.name ? '(' + m.resolved + ')' : '') +
+          (f && f.aspect ? '·' + f.aspect : '') +
+          ' 落' + m.gong + '宫' + (m.gongName ? '(' + m.gongName + ')' : '') +
+          (marks.length ? ' [' + marks.join('·') + ']' : '')
+      });
+    });
+    // 有角色权重的排前（那是本占最该看的），其余按宫号稳定排序
+    out.sort(function (a, b) {
+      if (a.weight !== b.weight) return b.weight - a.weight;
+      return a.key < b.key ? -1 : 1;
+    });
+    return out;
+  }
+
   /* ================= 反推（复盘）：由实际结果回头对当时的盘 ================= */
 
   /**
@@ -235,17 +319,26 @@
    */
   function reviewPrompt(rec, actualText) {
     var rules = (rec && rec.fired && rec.fired.rules) || [];
+    var syms = (rec && rec.fired && rec.fired.symbols) || [];
     var lines = rules.map(function (r) {
       return '- ' + r.id + ' ｜ ' + (r.label || '') + ' → ' + (r.concept || '') +
         ' ｜ 当时倾向：' + (r.polarity === '+' ? '助' : r.polarity === '-' ? '阻' : '中');
+    });
+    var symLines = syms.map(function (s) {
+      return '- ' + s.key + ' ｜ ' + s.label +
+        (s.withEls.length ? ' ｜ 同宫：' + s.withEls.join('/') : '') +
+        (s.words.length ? ' ｜ 象义：' + s.words.join('、') : '');
     });
     return [
       '你在做奇门占例的**复盘**，不是重新断卦。',
       '下面是当时这一卦触发的确定性判读条目，以及事后用户填写的实际发生情况。',
       '你的任务只有一个：逐条判断**该条判读是否与实际情况相符**。',
       '',
-      '【当时的判读条目】',
-      lines.join('\n'),
+      '【当时的判读条目（规则层，有出处）】',
+      lines.length ? lines.join('\n') : '（本占类规则库未覆盖，无判读条目）',
+      '',
+      '【当时的盘面象义（用神落宫与同宫之象）】',
+      symLines.length ? symLines.join('\n') : '（无）',
       '',
       '【实际发生的情况（用户填写）】',
       actualText || '（未填写）',
@@ -255,8 +348,9 @@
       '2. 每条给出四档之一：happened(相符) / partial(部分相符) / not_happened(不相符) / opposite(与实际相反)。',
       '3. 实际情况里没有涉及到的条目，**不要勉强判断**——直接省略该条，宁缺勿猜。',
       '4. 另可给出 0-3 条「观察」：实际情况中出现、但当时判读未提到的现象，供人工参考。观察不是结论。',
-      '5. 只输出 JSON，不要任何解释文字或代码块标记：',
-      '{"verdicts":{"规则id":"happened",...},"observations":["...",...]}'
+      '5. 只输出 JSON，不要任何解释文字或代码块标记。verdicts 用判读条目的 id，',
+      '   symbolVerdicts 用盘面象义的 key（形如 sym:生门@2）：',
+      '{"verdicts":{"规则id":"happened"},"symbolVerdicts":{"sym:生门@2":"partial"},"observations":["..."]}'
     ].join('\n');
   }
 
@@ -265,15 +359,16 @@
    * 模型可能编出不存在的 id 或自造档位，放进统计就等于污染数据。
    */
   function parseReview(text, rec) {
-    var known = {};
+    var known = {}, knownSym = {};
     ((rec && rec.fired && rec.fired.rules) || []).forEach(function (r) { known[r.id] = 1; });
+    ((rec && rec.fired && rec.fired.symbols) || []).forEach(function (s) { knownSym[s.key] = 1; });
     var raw = String(text || '').trim();
     // 容忍模型裹上代码块或前后废话：取第一个 { 到最后一个 }
     var s = raw.indexOf('{'), e = raw.lastIndexOf('}');
-    if (s < 0 || e <= s) return { ok: false, verdicts: {}, observations: [], dropped: [], error: '未找到 JSON' };
+    if (s < 0 || e <= s) return { ok: false, verdicts: {}, symbolVerdicts: {}, observations: [], dropped: [], error: '未找到 JSON' };
     var obj;
     try { obj = JSON.parse(raw.slice(s, e + 1)); }
-    catch (err) { return { ok: false, verdicts: {}, observations: [], dropped: [], error: 'JSON 解析失败' }; }
+    catch (err) { return { ok: false, verdicts: {}, symbolVerdicts: {}, observations: [], dropped: [], error: 'JSON 解析失败' }; }
     var verdicts = {}, dropped = [];
     var vs = (obj && obj.verdicts) || {};
     Object.keys(vs).forEach(function (id) {
@@ -281,12 +376,19 @@
       if (!isOutcome(vs[id])) { dropped.push({ id: id, why: '档位非法：' + vs[id] }); return; }
       verdicts[id] = vs[id];
     });
+    var symVerdicts = {};
+    var svs = (obj && obj.symbolVerdicts) || {};
+    Object.keys(svs).forEach(function (k) {
+      if (!knownSym[k]) { dropped.push({ id: k, why: '本案无此象义条目' }); return; }
+      if (!isOutcome(svs[k])) { dropped.push({ id: k, why: '档位非法：' + svs[k] }); return; }
+      symVerdicts[k] = svs[k];
+    });
     var obs = [];
     if (Array.isArray(obj && obj.observations)) {
       obs = obj.observations.filter(function (x) { return typeof x === 'string' && x.trim(); })
         .slice(0, 3).map(function (x) { return String(x).slice(0, 200); });
     }
-    return { ok: true, verdicts: verdicts, observations: obs, dropped: dropped, error: '' };
+    return { ok: true, verdicts: verdicts, symbolVerdicts: symVerdicts, observations: obs, dropped: dropped, error: '' };
   }
 
   /**
@@ -299,6 +401,10 @@
     var chart = a.chart || {};
     var sz = chart.siZhu || {};
     var fired = firedRules(a.xiangyi, a.timing);
+    // 盘面象义：各盘别、各占类都有，故标注清单不会因规则库未覆盖而落空
+    fired.symbols = chartSymbols({
+      yongshen: a.yongshen, xiangyi: a.xiangyi, evidence: a.evidence, chart: chart
+    });
     return {
       schema: VERSION,
       id: a.id || '',
@@ -340,6 +446,11 @@
     Object.keys(vs).forEach(function (k) {
       if (isOutcome(vs[k])) verdicts[k] = vs[k];   // 非法档位静默丢弃，不污染统计
     });
+    var symVerdicts = {};
+    var sv = fb.symbolVerdicts || {};
+    Object.keys(sv).forEach(function (k) {
+      if (isOutcome(sv[k])) symVerdicts[k] = sv[k];
+    });
     var out = {};
     for (var k in rec) out[k] = rec[k];
     out.feedback = {
@@ -351,8 +462,10 @@
       note: fb.note || '',
       recordedAt: fb.now || '',
       ruleVerdicts: verdicts,
+      // 盘面象义的逐条标注，与规则判读分开统计——前者无 basis，不可混为规则的符合率
+      symbolVerdicts: symVerdicts,
       // 逐条标注的来源：manual(用户手标) / ai(AI 复盘建议经用户确认)。统计时可据此分辨可信度。
-      verdictSource: fb.verdictSource || (Object.keys(verdicts).length ? 'manual' : ''),
+      verdictSource: fb.verdictSource || ((Object.keys(verdicts).length + Object.keys(symVerdicts).length) ? 'manual' : ''),
       observations: Array.isArray(fb.observations) ? fb.observations.slice(0, 3) : []
     };
     return out;
@@ -433,6 +546,51 @@
       return b.n !== a.n ? b.n - a.n : (a.ruleId < b.ruleId ? -1 : 1);
     });
 
+    /* 盘面象义的统计：键为「元素@宫」，与规则符合率**分开呈现**。
+       二者性质不同——规则有 basis 可回查纲要，象义条目只是"这盘上有这么个配置"，
+       混在一张表里会让人以为象义也有出处。 */
+    var bySym = {};
+    (records || []).forEach(function (rec) {
+      if (!graded(rec)) return;
+      var caseOutcome = rec.feedback.outcome;
+      ((rec.fired && rec.fired.symbols) || []).forEach(function (s) {
+        if (!bySym[s.key]) {
+          bySym[s.key] = { key: s.key, label: s.label, name: s.name, gong: s.gong, aspect: s.aspect,
+            symN: 0, symScore: 0, symOpposite: 0, caseN: 0, caseScore: 0, caseOpposite: 0 };
+        }
+        var st = bySym[s.key];
+        var v = (rec.feedback.symbolVerdicts || {})[s.key];
+        if (v) {
+          st.symN++; st.symScore += OUTCOMES[v].score;
+          if (v === 'opposite') st.symOpposite++;
+        } else {
+          st.caseN++; st.caseScore += OUTCOMES[caseOutcome].score;
+          if (caseOutcome === 'opposite') st.caseOpposite++;
+        }
+      });
+    });
+    var symbols = Object.keys(bySym).map(function (k) {
+      var s = bySym[k];
+      var useSym = s.symN > 0;
+      var n = useSym ? s.symN : s.caseN;
+      var score = useSym ? s.symScore : s.caseScore;
+      var opposite = useSym ? s.symOpposite : s.caseOpposite;
+      var enough = n >= minShow;
+      return {
+        key: s.key, label: s.label, name: s.name, gong: s.gong, aspect: s.aspect,
+        attribution: useSym ? 'symbol' : 'case',
+        n: n, opposite: opposite, symN: s.symN, caseN: s.caseN,
+        rate: enough ? round(score / n) : null, enough: enough,
+        display: enough
+          ? (round((score / n) * 100, 0) + '%（' + n + ' 例' + (useSym ? '·逐条标注' : '·整案归因') + '）')
+          : ('样本不足 ' + n + '/' + minShow)
+      };
+    }).sort(function (a, b) {
+      if (a.enough !== b.enough) return a.enough ? -1 : 1;
+      if (a.enough && a.rate !== b.rate) return a.rate - b.rate;
+      return b.n !== a.n ? b.n - a.n : (a.key < b.key ? -1 : 1);
+    });
+
     var domains = Object.keys(byDomain).map(function (d) {
       var s = byDomain[d];
       var enough = s.n >= minShow;
@@ -443,7 +601,7 @@
       };
     }).sort(function (a, b) { return b.n - a.n; });
 
-    return { version: VERSION, totals: totals, rules: rules, domains: domains, minSamples: minShow };
+    return { version: VERSION, totals: totals, rules: rules, symbols: symbols, domains: domains, minSamples: minShow };
   }
 
   /**
@@ -534,7 +692,7 @@
     OUTCOMES: OUTCOMES, OUTCOME_KEYS: OUTCOME_KEYS,
     MIN_SAMPLES_SHOW: MIN_SAMPLES_SHOW, MIN_SAMPLES_PROPOSE: MIN_SAMPLES_PROPOSE,
     isOutcome: isOutcome, outcomeLabel: outcomeLabel,
-    firedRules: firedRules,
+    firedRules: firedRules, chartSymbols: chartSymbols,
     makeCase: makeCase, applyFeedback: applyFeedback, graded: graded,
     calibrate: calibrate, proposals: proposals,
     deriveTimingHits: deriveTimingHits, applyTimingDerivation: applyTimingDerivation,
