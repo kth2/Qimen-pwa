@@ -111,6 +111,28 @@
         <div class="prov prov-custom"><label>端点 URL</label><input id="cfgCustomUrl" placeholder="https://api.groq.com/openai/v1"></div>
         <div class="prov prov-custom"><label>API Key</label><input id="cfgCustomKey" type="password" placeholder="Bearer key"></div>
         <div class="prov prov-custom"><label>模型</label><input id="cfgCustomModel" placeholder="llama-3.1-8b-instant"></div>
+        <div class="prov prov-gemini"><label>备用模型</label><input id="cfgGeminiFallbackModel" placeholder="留空=不启用。主模型 503 繁忙时自动接力"></div>
+        <div class="prov prov-custom"><label>备用模型</label><input id="cfgCustomFallbackModel" placeholder="留空=不启用。主模型失败时自动接力"></div>
+        <details style="margin-top:6px;">
+          <summary>超时与重试（默认值一般够用；出现「生成超时」或「503 繁忙」时才需调）</summary>
+          <div style="margin-top:6px;">
+            <div><label>空闲超时(秒)</label><input id="cfgIdleTimeout" type="number" min="10" placeholder="90">
+              <span class="muted">多久<b>没有新内容</b>才算卡死。流式下这才是真超时——只要还在吐字就不会中断</span></div>
+            <div><label>总时长上限(秒)</label><input id="cfgTotalTimeout" type="number" min="30" placeholder="600"></div>
+            <div><label>重试次数</label><input id="cfgMaxRetries" type="number" min="0" max="6" placeholder="3">
+              <span class="muted">遇 503/429/504 时按指数退避自动重试</span></div>
+            <div><label>maxTokens</label><input id="cfgMaxTokens" type="number" min="256" placeholder="16384">
+              <span class="muted">思考型模型「思考+回答」共用此额度，调太小会截断答案</span></div>
+            <div><label>备用 Provider</label>
+              <select id="cfgFallbackProvider">
+                <option value="none">不启用</option>
+                <option value="gemini">Gemini</option>
+                <option value="custom">自定义端点</option>
+                <option value="local">Local Ollama</option>
+              </select>
+              <span class="muted">主 provider 反复失败后自动接力（需已填好该 provider 的必填项）</span></div>
+          </div>
+        </details>
         <button class="btn" id="cfgSaveBtn" style="margin-top:6px;">保存设置</button>
         <span class="muted" id="cfgSavedTag"></span>
       </div>
