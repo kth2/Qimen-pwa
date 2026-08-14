@@ -302,6 +302,9 @@
     var id = args.domain || 'general';
     var school = options.school || detectSchool(chart);
     var ws = args.wangshuai && args.wangshuai.gongs ? args.wangshuai : null;
+    // 本机经验修订（Phase 6）：独立于纲要层，只能收窄/降权/停用，不能新造断法。
+    // 传了就参与求值，并逐条留痕；不传则行为与 Phase 2-5 逐字一致。
+    var revIdx = (args.revisions && args.revisions.byRule) ? args.revisions : null;
 
     var base = {
       version: VERSION, domain: id, label: '', school: school,
@@ -309,6 +312,9 @@
       // 占类安全边界（如健康类的"非医学诊断"）。随占类走、与判读同时送达，
       // 不能只靠提示词末尾的通用纪律——那一段离判读太远，容易被长上下文冲淡。
       safetyNote: '',
+      // 修订集元信息：确定性从「同盘同占类」变为「同盘 + 同占类 + 同修订集」，
+      // 故哈希与条数须随结果呈现，否则无从判断两次结果为何不同
+      revisions: { applied: [], hash: revIdx ? revIdx.hash : '', count: revIdx ? revIdx.count : 0 },
       focus: [], readings: [], combinations: [], relations: [], absent: [],
       tally: { support: 0, obstruct: 0, neutral: 0, weighted: 0, byAspect: {} },
       degraded: !ws, notes: []
@@ -417,8 +423,21 @@
     (d.conditions || []).forEach(function (rule) {
       var c = ctxOf(rule.on);
       if (!c) return;
+      var rev = revIdx ? revIdx.byRule[rule.id] : null;
+      if (rev && rev.op === 'mute') {
+        base.revisions.applied.push({ id: rev.id, ruleId: rule.id, op: 'mute', reasoning: rev.reasoning, effect: '已停用' });
+        return;
+      }
       var hit = matchWhen(rule.when, c);
       if (!hit) return;
+      // narrow：追加一个必须同时满足的条件。不满足则本条不再产出——这正是「收窄」之意。
+      if (rev && rev.op === 'narrow') {
+        var extra = matchWhen(rev.payload && rev.payload.when, c);
+        if (!extra) {
+          base.revisions.applied.push({ id: rev.id, ruleId: rule.id, op: 'narrow', reasoning: rev.reasoning, effect: '因收窄条件未满足而未产出' });
+          return;
+        }
+      }
       // 门/星/神的墓刑实为「所落之宫内有干墓刑」，须随判读写明，否则读作该门自身入墓即失真
       if (hit.flags) {
         hit.why = hit.flags.map(function (f) { return c.flagWhy[f] || ''; }).filter(Boolean);
@@ -430,9 +449,18 @@
       if (hit.flags) trig.push(hit.flags.join('·'));
       if (hit['with']) trig.push('同宫' + hit['with'].join('·'));
       if (hit.gong) trig.push('临' + hit.gong + '宫' + ((GONG_INFO[hit.gong] || {}).name || ''));
+      var wAdj = 0;
+      if (rev && rev.op === 'reweight') {
+        wAdj = Number((rev.payload || {}).delta) || 0;
+        base.revisions.applied.push({ id: rev.id, ruleId: rule.id, op: 'reweight', reasoning: rev.reasoning, effect: '权重 ' + (wAdj > 0 ? '+' : '') + wAdj });
+      } else if (rev && rev.op === 'narrow') {
+        base.revisions.applied.push({ id: rev.id, ruleId: rule.id, op: 'narrow', reasoning: rev.reasoning, effect: '收窄条件已满足，照常产出' });
+      }
       base.readings.push({
         id: rule.id, kind: 'condition', on: rule.on,
-        aspect: aspectFor(d, rule.on), weight: weightFor(d, rule.on),
+        aspect: aspectFor(d, rule.on),
+        weight: Math.max(1, Math.min(5, weightFor(d, rule.on) + wAdj)),
+        revised: rev ? rev.op : '',
         gong: c.gong, gongName: c.el.gongName,
         matched: hit,
         // 触发条件必须随判读一同呈现——只说结论不说"因何而得"，模型无从核验，也无从复述依据
@@ -459,11 +487,18 @@
         parts.push({ name: n, resolved: (c && c.el.resolved !== n) ? c.el.resolved : '' });
       });
       if (!ok || !shared || !shared.length) return;
+      var revC = revIdx ? revIdx.byRule[rule.id] : null;
+      if (revC && revC.op === 'mute') {
+        base.revisions.applied.push({ id: revC.id, ruleId: rule.id, op: 'mute', reasoning: revC.reasoning, effect: '已停用' });
+        return;
+      }
       var g = shared[0];
       var w = Math.max.apply(null, els.map(function (n) { return weightFor(d, n); }));
       base.combinations.push({
         id: rule.id, kind: 'combination', elements: els.slice(), parts: parts,
-        weight: w, gong: g, gongName: (GONG_INFO[g] || {}).name || '',
+        weight: Math.max(1, Math.min(5, w + ((revC && revC.op === 'reweight') ? (Number((revC.payload || {}).delta) || 0) : 0))),
+        revised: revC ? revC.op : '',
+        gong: g, gongName: (GONG_INFO[g] || {}).name || '',
         trigger: '同宫',
         concept: (rule.concept || []).slice(),
         polarity: rule.polarity || '0', basis: rule.basis || ''
@@ -490,6 +525,11 @@
             concept: (entry.concept || []).slice(),
             polarity: entry.polarity || '0', basis: rule.basis || ''
           });
+        }
+        var revR = revIdx ? revIdx.byRule[rule.id] : null;
+        if (revR && revR.op === 'mute') {
+          base.revisions.applied.push({ id: revR.id, ruleId: rule.id, op: 'mute', reasoning: revR.reasoning, effect: '已停用' });
+          return;
         }
         var kind = relationKind(a.gong, b.gong, ea, eb);
         var entry = kind && rule.map ? rule.map[kind] : null;

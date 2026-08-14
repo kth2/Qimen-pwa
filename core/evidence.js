@@ -115,6 +115,7 @@
       // 关系条目的 element 已含双方角色名，再补 aspect 会重复
       aspect: scope === 'relation' ? '' : (r.aspect || ''),
       trigger: r.trigger || '',
+      revised: r.revised || '',
       gong: r.gong || (r.fromGong ? r.fromGong + '→' + r.toGong : ''),
       weight: r.weight || 0,
       polarity: r.polarity || '0',
@@ -358,7 +359,7 @@
       // 便于在界面/控制台核对，也让"规则未建"与"盘上无碍"不至于被混为一谈。
       xiangyi: xy ? {
         version: xy.version, applicable: xy.applicable, status: xy.status, reason: xy.reason,
-        safetyNote: xy.safetyNote || '',
+        safetyNote: xy.safetyNote || '', revisions: xy.revisions || null,
         focus: xy.focus, absent: xy.absent, tally: xy.tally, degraded: xy.degraded, notes: xy.notes
       } : null,
       // 应期层元信息。锚点本身在 items(TIMING) 中，此处记时间线次序、迟速与数字。
@@ -394,7 +395,8 @@
           (x.targets.length ? '　用神：' + x.targets.join('、') : '　（非用神宫）'));
       }
       else if (x.type === 'READING' && reads[x.scope]) {
-        reads[x.scope].push('  - [' + (POL[x.polarity] || '中') + '] ' + x.element +
+        var revMark = x.revised ? '〔本机修订·' + (x.revised === 'mute' ? '停用' : x.revised === 'narrow' ? '已收窄' : '已调权') + '〕' : '';
+        reads[x.scope].push('  - [' + (POL[x.polarity] || '中') + '] ' + revMark + x.element +
           (x.aspect ? '(' + x.aspect + ')' : '') + (x.gong ? '·' + x.gong + '宫' : '') +
           (x.trigger ? ' ' + x.trigger : '') +
           '：' + x.content.join('、') + '　（依据：' + x.basis + '）');
@@ -466,6 +468,12 @@
       if (xy && xy.tally) {
         L.push('  倾向计数（**非结论**，只供权衡详略）：助 ' + xy.tally.support + ' 条／阻 ' +
           xy.tally.obstruct + ' 条／中性 ' + xy.tally.neutral + ' 条。');
+      }
+      // 本机修订须显式告知：标〔本机修订〕者已不是纯纲要判读，模型与用户都该知道
+      if (xy && xy.revisions && xy.revisions.count) {
+        L.push('  ⚠ 本次应用了 ' + xy.revisions.count + ' 条**本机经验修订**（修订集 ' + xy.revisions.hash +
+          '）。修订只会收窄或降权，不会新造断法；标〔本机修订〕者即受其影响。' +
+          '这些修订源自你自己的案例反推，**不是《解断方法纲要》**。');
       }
       if (xy && xy.notes && xy.notes.length) xy.notes.forEach(function (n) { L.push('  说明：' + n); });
     }
