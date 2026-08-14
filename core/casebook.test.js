@@ -585,6 +585,130 @@ t('AI 复盘的标注进入统计后，仍以「逐条标注」计而非整案�
   assert.strictEqual(target.rate, 1);
 });
 
+console.log('== 复盘须看得见当时的解读（用户报的缺口） ==');
+t('案例记录保存 AI 解读全文', function () {
+  var rec = CB.makeCase({ id: 'a', chart: CHART, xiangyi: XYR, answer: '结论：本月财运可期……' });
+  assert.ok(rec.answer && /财运可期/.test(rec.answer), '解读全文必须存下来');
+});
+t('复盘提示词带上当时的解读——否则 AI 是在盲判', function () {
+  var rec = CB.makeCase({ id: 'a', chart: CHART, xiangyi: XYR, answer: '结论：本月财运可期，生门临坤得令。' });
+  var p = CB.reviewPrompt(rec, '一分未进');
+  assert.ok(/当时实际给出的解读/.test(p), '须有解读段');
+  assert.ok(p.indexOf('本月财运可期') >= 0, '解读原文须进入提示词');
+});
+t('解读过长时截断并如实标注节选', function () {
+  var long = new Array(6000).join('长');
+  var p = CB.reviewPrompt(CB.makeCase({ id: 'a', chart: CHART, xiangyi: XYR, answer: long }), '实况');
+  assert.ok(/节选前 \d+ 字/.test(p), '截断须告知，不能让模型以为看到了全文');
+  assert.ok(p.length < long.length, '提示词不应原样塞入超长解读');
+});
+t('未记录解读时如实说明，不伪装成有', function () {
+  var p = CB.reviewPrompt(CB.makeCase({ id: 'a', chart: CHART, xiangyi: XYR }), '实况');
+  assert.ok(/未记录解读全文/.test(p));
+});
+t('提示词要求指出断错之处并指明所据条目', function () {
+  var rec = CB.makeCase({ id: 'a', chart: CHART, xiangyi: XYR, answer: '断言' });
+  var p = CB.reviewPrompt(rec, '实况');
+  assert.ok(/断错分析\(misreads\)/.test(p));
+  assert.ok(/照抄解读里的原句/.test(p), '须要求照抄原句，转述会让人无法核对');
+  assert.ok(/basedOn/.test(p) && /misreads/.test(p));
+});
+
+console.log('== 断错分析：严格校验，不许编造依据 ==');
+t('解析合法 misreads', function () {
+  var rec = CB.makeCase({ id: 'a', chart: CHART, xiangyi: XYR, answer: 'x' });
+  var id = rec.fired.rules[0].id;
+  var r = CB.parseReview(JSON.stringify({
+    verdicts: {}, misreads: [{ claim: '断言本月必进财', basedOn: id, actual: '一分未进' }]
+  }), rec);
+  assert.strictEqual(r.misreads.length, 1);
+  assert.strictEqual(r.misreads[0].basedOn, id);
+  assert.strictEqual(r.misreads[0].actual, '一分未进');
+});
+t('编造的 basedOn 被清空但断错本身保留（内容仍有价值）', function () {
+  var rec = CB.makeCase({ id: 'a', chart: CHART, xiangyi: XYR, answer: 'x' });
+  var r = CB.parseReview(JSON.stringify({
+    misreads: [{ claim: '某断言', basedOn: 'wealth.根本不存在.规则', actual: '实际' }]
+  }), rec);
+  assert.strictEqual(r.misreads.length, 1, '断错内容应保留');
+  assert.strictEqual(r.misreads[0].basedOn, '', '编造的依据须清空，否则污染被指错计数');
+  assert.ok(r.dropped.some(function (d) { return /断错分析引了本案不存在的条目/.test(d.why); }));
+});
+t('misreads 数量与长度受限', function () {
+  var rec = CB.makeCase({ id: 'a', chart: CHART, xiangyi: XYR, answer: 'x' });
+  var many = [];
+  for (var i = 0; i < 20; i++) many.push({ claim: new Array(400).join('长'), basedOn: '', actual: new Array(400).join('长') });
+  var r = CB.parseReview(JSON.stringify({ misreads: many }), rec);
+  assert.ok(r.misreads.length <= 5, '最多 5 条');
+  r.misreads.forEach(function (m) {
+    assert.ok(m.claim.length <= 200 && m.actual.length <= 200, '逐条截断');
+  });
+});
+t('无 claim 的条目被丢弃', function () {
+  var rec = CB.makeCase({ id: 'a', chart: CHART, xiangyi: XYR, answer: 'x' });
+  var r = CB.parseReview(JSON.stringify({ misreads: [{ basedOn: '', actual: 'x' }, { claim: '  ' }] }), rec);
+  assert.strictEqual(r.misreads.length, 0);
+});
+t('坏输出时 misreads 为空数组，不抛异常', function () {
+  var rec = CB.makeCase({ id: 'a', chart: CHART, xiangyi: XYR, answer: 'x' });
+  ['', '非 JSON', '{坏'].forEach(function (bad) {
+    assert.deepStrictEqual(CB.parseReview(bad, rec).misreads, []);
+  });
+});
+t('applyFeedback 收下 misreads', function () {
+  var rec = CB.applyFeedback(mkCase(1), {
+    outcome: 'not_happened',
+    misreads: [{ claim: 'a', basedOn: 'b', actual: 'c' }]
+  });
+  assert.strictEqual(rec.feedback.misreads.length, 1);
+});
+
+console.log('== 被指错次数：符合率之外的独立信号 ==');
+t('统计每条规则被指为断错依据的次数，并留例证', function () {
+  var recs = [], id = XYR.readings[0].id;
+  for (var i = 0; i < 10; i++) {
+    recs.push(CB.applyFeedback(mkCase(i), {
+      outcome: 'happened',    // 整案说应验
+      misreads: [{ claim: '断言必进财', basedOn: id, actual: '一分未进' }],
+      now: '2024-05-01'
+    }));
+  }
+  var cal = CB.calibrate(recs);
+  var target = cal.rules.filter(function (r) { return r.ruleId === id; })[0];
+  assert.strictEqual(target.misreadN, 10);
+  assert.ok(target.misreadExamples.length > 0 && target.misreadExamples.length <= 3, '留少量例证即可');
+  assert.strictEqual(target.rate, 1, '符合率仍为 1——这正说明两个信号各看各的');
+});
+t('符合率尚可但屡被指错者，仍会被建议复核', function () {
+  var recs = [], id = XYR.readings[0].id;
+  for (var i = 0; i < 12; i++) {
+    recs.push(CB.applyFeedback(mkCase(i), {
+      outcome: 'happened',
+      misreads: [{ claim: '断言必进财', basedOn: id, actual: '一分未进' }],
+      now: '2024-05-01'
+    }));
+  }
+  var ps = CB.proposals(CB.calibrate(recs));
+  var hit = ps.filter(function (p) { return /常被指为断错/.test(p.title) && p.ruleId === id; });
+  assert.strictEqual(hit.length, 1, '这是符合率看不出来的问题，必须单独提示');
+  assert.ok(/问题可能不在条目本身/.test(hit[0].detail), '须点明可能是用法而非条目本身之错');
+});
+t('指向象义 key 的断错不计入规则的被指错次数', function () {
+  var recs = [];
+  var proto = fullCase('wealth');
+  var symKey = proto.fired.symbols[0].key;
+  for (var i = 0; i < 10; i++) {
+    var r = fullCase('wealth'); r.id = 'm' + i;
+    recs.push(CB.applyFeedback(r, {
+      outcome: 'happened', misreads: [{ claim: 'x', basedOn: symKey, actual: 'y' }], now: '2024-05-01'
+    }));
+  }
+  var cal = CB.calibrate(recs);
+  cal.rules.forEach(function (x) {
+    assert.strictEqual(x.misreadN, 0, '象义 key 不应记到规则头上：' + x.ruleId);
+  });
+});
+
 console.log('== 存储：只在本机、导入不覆盖 ==');
 ta('保存/读取/列表/删除', function () {
   var s = CS.create(CS.memoryBackend());

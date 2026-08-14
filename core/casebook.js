@@ -317,6 +317,10 @@
    * 生成交给模型的复盘提示。**只让它做映射与标注，不让它改规则、不让它重新断卦**。
    * 输出强制为 JSON，便于解析；解析失败时上层照常降级（见 parseReview）。
    */
+  // 复盘提示词里 AI 原解读的截断长度。太长会挤掉判读条目本身；
+  // 取开头即可——结论与主要论断通常在前半段。
+  var REVIEW_ANSWER_CHARS = 4000;
+
   function reviewPrompt(rec, actualText) {
     var rules = (rec && rec.fired && rec.fired.rules) || [];
     var syms = (rec && rec.fired && rec.fired.symbols) || [];
@@ -329,16 +333,20 @@
         (s.withEls.length ? ' ｜ 同宫：' + s.withEls.join('/') : '') +
         (s.words.length ? ' ｜ 象义：' + s.words.join('、') : '');
     });
+    var answer = String(rec && rec.answer || '').slice(0, REVIEW_ANSWER_CHARS);
     return [
       '你在做奇门占例的**复盘**，不是重新断卦。',
-      '下面是当时这一卦触发的确定性判读条目，以及事后用户填写的实际发生情况。',
-      '你的任务只有一个：逐条判断**该条判读是否与实际情况相符**。',
+      '下面给出：当时这一卦触发的确定性条目、当时实际给出的解读全文、以及事后用户填写的实际发生情况。',
+      '你要做两件事：①逐条判断条目是否与实际相符；②指出解读中**具体断错的地方**及其所依据的条目。',
       '',
       '【当时的判读条目（规则层，有出处）】',
       lines.length ? lines.join('\n') : '（本占类规则库未覆盖，无判读条目）',
       '',
       '【当时的盘面象义（用神落宫与同宫之象）】',
       symLines.length ? symLines.join('\n') : '（无）',
+      '',
+      '【当时实际给出的解读' + (answer.length >= REVIEW_ANSWER_CHARS ? '（节选前 ' + REVIEW_ANSWER_CHARS + ' 字）' : '') + '】',
+      answer || '（未记录解读全文）',
       '',
       '【实际发生的情况（用户填写）】',
       actualText || '（未填写）',
@@ -347,10 +355,15 @@
       '1. 只对上面列出的条目作判断，不得新增条目、不得改写其内容、不得提出新的断法。',
       '2. 每条给出四档之一：happened(相符) / partial(部分相符) / not_happened(不相符) / opposite(与实际相反)。',
       '3. 实际情况里没有涉及到的条目，**不要勉强判断**——直接省略该条，宁缺勿猜。',
-      '4. 另可给出 0-3 条「观察」：实际情况中出现、但当时判读未提到的现象，供人工参考。观察不是结论。',
-      '5. 只输出 JSON，不要任何解释文字或代码块标记。verdicts 用判读条目的 id，',
+      '4. 断错分析(misreads)：从上面的解读全文中挑出**与实际明显不符**的具体论断，最多 5 条。每条给：',
+      '   claim=照抄解读里的原句(不要转述)、basedOn=它所依据的条目 id 或象义 key(对应不上就留空字符串)、',
+      '   actual=实际情况如何。断得对的地方不必列；解读没提到的事也不算断错(那属于观察)。',
+      '5. 另可给出 0-3 条「观察」：实际情况中出现、但当时解读未提到的现象，供人工参考。观察不是结论。',
+      '6. 只输出 JSON，不要任何解释文字或代码块标记。verdicts 用判读条目的 id，',
       '   symbolVerdicts 用盘面象义的 key（形如 sym:生门@2）：',
-      '{"verdicts":{"规则id":"happened"},"symbolVerdicts":{"sym:生门@2":"partial"},"observations":["..."]}'
+      '{"verdicts":{"规则id":"happened"},"symbolVerdicts":{"sym:生门@2":"partial"},',
+      ' "misreads":[{"claim":"解读原句","basedOn":"规则id或sym:key或空","actual":"实际如何"}],',
+      ' "observations":["..."]}'
     ].join('\n');
   }
 
@@ -365,10 +378,10 @@
     var raw = String(text || '').trim();
     // 容忍模型裹上代码块或前后废话：取第一个 { 到最后一个 }
     var s = raw.indexOf('{'), e = raw.lastIndexOf('}');
-    if (s < 0 || e <= s) return { ok: false, verdicts: {}, symbolVerdicts: {}, observations: [], dropped: [], error: '未找到 JSON' };
+    if (s < 0 || e <= s) return { ok: false, verdicts: {}, symbolVerdicts: {}, misreads: [], observations: [], dropped: [], error: '未找到 JSON' };
     var obj;
     try { obj = JSON.parse(raw.slice(s, e + 1)); }
-    catch (err) { return { ok: false, verdicts: {}, symbolVerdicts: {}, observations: [], dropped: [], error: 'JSON 解析失败' }; }
+    catch (err) { return { ok: false, verdicts: {}, symbolVerdicts: {}, misreads: [], observations: [], dropped: [], error: 'JSON 解析失败' }; }
     var verdicts = {}, dropped = [];
     var vs = (obj && obj.verdicts) || {};
     Object.keys(vs).forEach(function (id) {
@@ -383,12 +396,30 @@
       if (!isOutcome(svs[k])) { dropped.push({ id: k, why: '档位非法：' + svs[k] }); return; }
       symVerdicts[k] = svs[k];
     });
+    // 断错分析：claim/actual 为自由文本（截断即可）；basedOn 必须指向本案真实存在的条目，
+    // 否则清空——模型很会编一个看起来像 id 的东西，放着不管就会污染「被指错」计数。
+    var misreads = [];
+    if (Array.isArray(obj && obj.misreads)) {
+      obj.misreads.slice(0, 5).forEach(function (m) {
+        if (!m || typeof m.claim !== 'string' || !m.claim.trim()) return;
+        var basedOn = typeof m.basedOn === 'string' ? m.basedOn.trim() : '';
+        if (basedOn && !known[basedOn] && !knownSym[basedOn]) {
+          dropped.push({ id: basedOn, why: '断错分析引了本案不存在的条目，已清空其依据' });
+          basedOn = '';
+        }
+        misreads.push({
+          claim: String(m.claim).slice(0, 200),
+          basedOn: basedOn,
+          actual: typeof m.actual === 'string' ? String(m.actual).slice(0, 200) : ''
+        });
+      });
+    }
     var obs = [];
     if (Array.isArray(obj && obj.observations)) {
       obs = obj.observations.filter(function (x) { return typeof x === 'string' && x.trim(); })
         .slice(0, 3).map(function (x) { return String(x).slice(0, 200); });
     }
-    return { ok: true, verdicts: verdicts, symbolVerdicts: symVerdicts, observations: obs, dropped: dropped, error: '' };
+    return { ok: true, verdicts: verdicts, symbolVerdicts: symVerdicts, misreads: misreads, observations: obs, dropped: dropped, error: '' };
   }
 
   /**
@@ -466,7 +497,9 @@
       symbolVerdicts: symVerdicts,
       // 逐条标注的来源：manual(用户手标) / ai(AI 复盘建议经用户确认)。统计时可据此分辨可信度。
       verdictSource: fb.verdictSource || ((Object.keys(verdicts).length + Object.keys(symVerdicts).length) ? 'manual' : ''),
-      observations: Array.isArray(fb.observations) ? fb.observations.slice(0, 3) : []
+      observations: Array.isArray(fb.observations) ? fb.observations.slice(0, 3) : [],
+      // 断错分析：哪句断错了、依据哪条、实际如何。这是「规则错在哪」最直接的线索
+      misreads: Array.isArray(fb.misreads) ? fb.misreads.slice(0, 5) : []
     };
     return out;
   }
@@ -504,7 +537,8 @@
           byRule[r.id] = {
             ruleId: r.id, domain: d, polarity: r.polarity,
             ruleN: 0, ruleScore: 0, ruleOpposite: 0,
-            caseN: 0, caseScore: 0, caseOpposite: 0
+            caseN: 0, caseScore: 0, caseOpposite: 0,
+            misreadN: 0, misreadExamples: []
           };
         }
         var s = byRule[r.id];
@@ -515,6 +549,18 @@
         } else {
           s.caseN++; s.caseScore += OUTCOMES[caseOutcome].score;
           if (caseOutcome === 'opposite') s.caseOpposite++;
+        }
+      });
+
+      // 被复盘指为「断错所依据的条目」的次数。这与符合率是**两个不同的信号**：
+      // 符合率答「这条准不准」，被指错次数答「解读里出岔子时是不是它在背后」。
+      (rec.feedback.misreads || []).forEach(function (m) {
+        if (!m || !m.basedOn) return;
+        var s2 = byRule[m.basedOn];
+        if (!s2) return;                       // 象义 key 或已不在本案的条目，跳过
+        s2.misreadN++;
+        if (s2.misreadExamples.length < 3) {
+          s2.misreadExamples.push({ claim: m.claim, actual: m.actual });
         }
       });
     });
@@ -533,6 +579,7 @@
         n: n, opposite: opposite,
         ruleN: s.ruleN, caseN: s.caseN,
         rate: enough ? round(score / n) : null,
+        misreadN: s.misreadN, misreadExamples: s.misreadExamples,
         enough: enough, minSamples: minShow,
         // 供界面直接显示，避免各处各写一套措辞
         display: enough
@@ -543,6 +590,7 @@
     rules.sort(function (a, b) {
       if (a.enough !== b.enough) return a.enough ? -1 : 1;
       if (a.enough && a.rate !== b.rate) return a.rate - b.rate;   // 低符合率排前，便于复核
+      if (a.misreadN !== b.misreadN) return b.misreadN - a.misreadN;
       return b.n !== a.n ? b.n - a.n : (a.ruleId < b.ruleId ? -1 : 1);
     });
 
@@ -613,6 +661,19 @@
     var minN = opts.minSamples || MIN_SAMPLES_PROPOSE;
     var out = [];
     (cal && cal.rules ? cal.rules : []).forEach(function (r) {
+      // 被反复指为断错依据者，即便符合率尚可也值得复核——这是符合率看不出来的问题：
+      // 条目本身可能没错，错的是它在解读里被用成了那个论断的依据。
+      if (r.misreadN >= 3 && (!r.enough || r.rate > LOW_RATE)) {
+        out.push({
+          ruleId: r.ruleId, domain: r.domain, kind: 'review', severity: 'normal',
+          title: '复核：这条常被指为断错的依据',
+          detail: '复盘中有 ' + r.misreadN + ' 次把解读的失误归到此条' +
+            (r.misreadExamples.length ? '，例如「' + r.misreadExamples[0].claim + '」→ 实际：' + r.misreadExamples[0].actual : '') +
+            '。符合率' + (r.enough ? '为 ' + Math.round(r.rate * 100) + '%，尚可' : '样本尚不足') +
+            '——问题可能不在条目本身，而在它被用作该论断依据的方式。请对照纲要原文复核其适用边界。',
+          suggested: null
+        });
+      }
       if (!r.enough || r.n < minN) return;
       if (r.rate <= LOW_RATE) {
         out.push({
@@ -621,6 +682,7 @@
           title: '复核此规则',
           detail: '本机 ' + r.n + ' 例中符合率仅 ' + Math.round(r.rate * 100) + '%' +
             (r.opposite ? '，其中 ' + r.opposite + ' 例结果相反' : '') +
+            (r.misreadN ? '；另有 ' + r.misreadN + ' 次被复盘指为断错所依据' : '') +
             '（' + (r.attribution === 'rule' ? '逐条标注' : '整案归因，较粗') + '）。' +
             '建议对照纲要原文复核其取用与倾向；若确属误收，请改 knowledge/domain-rules.json 并补出处，' +
             '不要靠反馈去覆盖它。',

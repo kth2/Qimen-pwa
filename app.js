@@ -496,6 +496,8 @@
     } finally { btn.disabled = false; }
   }
 
+  const rec_hasAnswer = (r) => !!(r && r.answer && r.answer.length);
+
   const OUTCOME_BTNS = [
     ['happened', '完全应验'], ['partial', '部分应验'],
     ['not_happened', '未应验'], ['opposite', '结果相反']
@@ -518,10 +520,12 @@
       const hit = r.timingHits && r.timingHits.hits.length
         ? `　<span style="color:#3c763d">应期命中 ${r.timingHits.hits.length} 条</span>` : '';
       const actual = fb && fb.actual ? `<div class="muted" style="margin-top:2px;">实况：${esc(fb.actual.slice(0, 80))}</div>` : '';
+      const misTag = fb && (fb.misreads || []).length ? `　<span style="color:#a94442">断错分析 ${fb.misreads.length} 条</span>` : '';
+      const noAns = rec_hasAnswer(r) ? '' : '　<span class="muted">（未存解读全文）</span>';
       const marked = fb ? (Object.keys(fb.ruleVerdicts || {}).length + Object.keys(fb.symbolVerdicts || {}).length) : 0;
       return `<div style="border-bottom:1px solid #eee;padding:6px 0;font-size:13px;">
         <div><b>${esc(r.question || '(未填问题)')}</b> <span class="muted">${esc(r.domain || '')}　${esc(r.chartRef.siZhu || '')}</span></div>
-        <div class="muted">${esc((r.createdAt || '').slice(0, 10))}　判读 ${r.fired.rules.length} 条　锚点 ${r.fired.anchors.length} 个　${tag}${marked ? `　已逐条标注 ${marked} 条` : ''}${hit}</div>
+        <div class="muted">${esc((r.createdAt || '').slice(0, 10))}　判读 ${r.fired.rules.length} 条　锚点 ${r.fired.anchors.length} 个　${tag}${marked ? `　已逐条标注 ${marked} 条` : ''}${hit}${misTag}${noAns}</div>
         ${actual}
         <div style="margin-top:4px;">
           <button class="btn" style="background:#3c763d;padding:3px 8px;font-size:12px;" data-open="${esc(r.id)}">${fb ? '查看/修改复盘' : '📝 填写实况并复盘'}</button>
@@ -562,9 +566,13 @@
         ${sel('verdict', r.id, vs[r.id])}
       </div>`).join('')
       : '<div class="muted" style="font-size:12px;padding:4px 0;">本占类的规则库尚未覆盖（如综合占类、或飞盘），故无规则判读条目——这不代表盘上无象，上面的盘面象义照常可标。</div>';
+    const mis = (fb.misreads || []);
     $('reviewBody').innerHTML = `
       <div style="font-size:13px;">
         <div><b>${esc(rec.question || '')}</b> <span class="muted">${esc(rec.chartRef.siZhu || '')}</span></div>
+        ${rec.answer ? `<details style="margin-top:6px;"><summary>📄 当时的解读全文（打分前先对照一下）</summary>
+          <div style="white-space:pre-wrap;background:#f7f7f7;border-radius:6px;padding:8px;margin-top:4px;max-height:240px;overflow:auto;font-size:12px;">${esc(rec.answer)}</div>
+        </details>` : '<div class="muted" style="margin-top:6px;">（本条案例未记录解读全文——存档前的旧案例会这样）</div>'}
         <div style="margin-top:6px;">
           <div class="muted">① 实际发生了什么？（用你自己的话写，越具体越有用）</div>
           <textarea id="reviewActual" rows="3" style="width:100%;">${esc(fb.actual || '')}</textarea>
@@ -590,6 +598,7 @@
             ${rulesHtml}
           </div>
         </div>
+        <div id="reviewMisreads" style="margin-top:8px;">${mis.length ? renderMisreads(mis) : ''}</div>
         <div id="reviewObs" class="muted" style="margin-top:6px;"></div>
         <div style="margin-top:8px;">
           <button class="btn" id="reviewSaveBtn">保存复盘</button>
@@ -603,6 +612,19 @@
     $('reviewSaveBtn').addEventListener('click', saveReview);
     $('reviewCancelBtn').addEventListener('click', () => { $('reviewPanel').style.display = 'none'; _reviewRec = null; });
     previewTimingHits();
+  }
+
+  /** 断错分析：AI 指出的「哪句断错了、依据哪条、实际如何」。这是「规则错在哪」最直接的线索。 */
+  function renderMisreads(list) {
+    if (!list || !list.length) return '';
+    return `<div style="border:1px solid #e0c9c9;border-radius:6px;padding:6px;background:#fdf7f7;">
+      <b style="font-size:12px;">断错分析</b> <span class="muted">（AI 依实况指出，供你核对；basedOn 为其所依据的条目）</span>
+      ${list.map(m => `<div style="font-size:12px;margin-top:4px;">
+        · 断言：「${esc(m.claim)}」<br>
+        &nbsp;&nbsp;实际：${esc(m.actual || '—')}
+        ${m.basedOn ? `<br>&nbsp;&nbsp;<span class="muted">依据：<code>${esc(m.basedOn)}</code></span>` : ''}
+      </div>`).join('')}
+    </div>`;
   }
 
   /** 应期反推：确定性比对，实时显示命中了哪条机制。 */
@@ -639,9 +661,13 @@
         if (el) { el.value = parsed.symbolVerdicts[k]; n++; }
       });
       _reviewRec._aiObservations = parsed.observations;
+      _reviewRec._aiMisreads = parsed.misreads || [];
+      $('reviewMisreads').innerHTML = renderMisreads(_reviewRec._aiMisreads);
       $('reviewObs').innerHTML = parsed.observations.length
         ? '观察（供参考，非结论）：<br>' + parsed.observations.map(o => '· ' + esc(o)).join('<br>') : '';
-      $('reviewAiTag').textContent = `已填入 ${n} 条建议${parsed.dropped.length ? `，丢弃 ${parsed.dropped.length} 条无效项` : ''}——请过目后再保存`;
+      $('reviewAiTag').textContent = `已填入 ${n} 条标注建议`
+        + ((parsed.misreads || []).length ? `、${parsed.misreads.length} 条断错分析` : '')
+        + (parsed.dropped.length ? `，丢弃 ${parsed.dropped.length} 条无效项` : '') + '——请过目后再保存';
     } catch (e) {
       $('reviewAiTag').textContent = 'AI 复盘失败：' + (e.message || e);
     } finally { btn.disabled = false; }
@@ -670,13 +696,14 @@
         // 用户在界面上过目并可改动过，故一律记为 manual；AI 只是预填
         verdictSource: anyManual ? 'manual' : '',
         observations: _reviewRec._aiObservations || [],
+        misreads: _reviewRec._aiMisreads || (_reviewRec.feedback && _reviewRec.feedback.misreads) || [],
         now: new Date().toISOString()
       });
       if (happenedAt) {
         const sz = QM.qimen.calculate(new Date(happenedAt + 'T12:00:00'), { type: '四柱', method: '时家', purpose: '综合' }).siZhu;
         rec = CB.applyTimingDerivation(rec, CB.deriveTimingHits(rec, sz));
       }
-      delete rec._aiObservations;
+      delete rec._aiObservations; delete rec._aiMisreads;
       await store.save(rec);
       $('reviewSaveTag').textContent = '已保存';
       $('reviewPanel').style.display = 'none'; _reviewRec = null;
@@ -711,7 +738,7 @@
       `<div>${esc(d.domain)}：${esc(d.display)}${d.opposite ? `　<span style="color:#a94442">相反 ${d.opposite} 例</span>` : ''}</div>`).join('');
     const ruleHtml = cal.rules.slice(0, 30).map(r =>
       `<div style="font-size:12px;border-bottom:1px solid #f0f0f0;padding:2px 0;">
-        <code>${esc(r.ruleId)}</code>　${esc(r.display)}${r.opposite ? `　<span style="color:#a94442">相反 ${r.opposite}</span>` : ''}
+        <code>${esc(r.ruleId)}</code>　${esc(r.display)}${r.opposite ? `　<span style="color:#a94442">相反 ${r.opposite}</span>` : ''}${r.misreadN ? `　<span style="color:#a94442">被指为断错依据 ${r.misreadN} 次</span>` : ''}
       </div>`).join('');
     // 应期机制命中率：必须连随机基准一起显示，否则「命中」会被当成灵验
     const tc = CB.timingCalibration(rows);
