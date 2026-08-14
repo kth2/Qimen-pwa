@@ -7,6 +7,7 @@
   const TM = window.Timing;     // 应期时间线层（Phase 4；缺则不含 TIMING，yingqi 块照常承载应期）
   const CB = window.Casebook;   // 案例本·经验层（Phase 5；只统计与建议，绝不改写教义规则）
   const CSTORE = window.CaseStore;
+  const RV = window.Revise;     // 复盘正解与规则修订（Phase 6）
   const EV = window.Evidence;   // 结构化证据层（同上）
   const $ = (id) => document.getElementById(id);
   let school = 'zhuanpan';
@@ -386,6 +387,7 @@
             try {
               xiangyi = XY.analyze({
                 domain, chart: pan,
+                revisions: _revIndex,   // 本机经验修订：只收窄/降权/停用，绝不新造断法
                 // 传 wangshuai 的**分析结果**（非文本块）：旺衰与四害由它单一供给，
                 // 象义层只读不重算，避免与 wangshuai 出现两套说法。
                 wangshuai: (window.WangShuai && window.WangShuai.analyze) ? window.WangShuai.analyze(pan) : null,
@@ -471,11 +473,32 @@
   const store = (CSTORE && CSTORE.create) ? CSTORE.create() : null;
   let _lastReading = null;      // 最近一次解读的素材，供「存为案例」取用
   let _caseTab = 'list';
+  let _revIndex = null;         // 本机修订集（索引后），参与规则求值
+
+  /* 修订集以一条特殊记录存放（id 固定、createdAt 置 '0000' 使其排在列表末尾），
+     这样它随导出一并带走，换机不丢。修订独立于纲要层，只做收窄/降权/停用。 */
+  const REV_ID = '__revisions__';
+  async function getRevisionList() {
+    if (!store) return [];
+    try { const rec = await store.get(REV_ID); return (rec && rec.list) || []; }
+    catch (e) { return []; }
+  }
+  async function loadRevisions() {
+    if (!store || !RV) return null;
+    try { _revIndex = RV.indexRevisions(await getRevisionList()); }
+    catch (e) { console.warn('[revise] 载入修订集失败：', e.message); _revIndex = null; }
+    return _revIndex;
+  }
+  async function saveRevisions(list) {
+    if (!store) return;
+    await store.save({ id: REV_ID, schema: 'revisions', list: list, createdAt: '0000', question: '（本机规则修订集）' });
+    await loadRevisions();
+  }
 
   async function refreshCaseCount() {
     if (!store) return;
     try {
-      const rows = await store.list();
+      const rows = (await store.list()).filter(r => r.id !== REV_ID);
       const graded = rows.filter(r => CB && CB.graded(r)).length;
       $('caseCountTag').textContent = `共 ${rows.length} 例，已回填 ${graded} 例`
         + (store.persistent ? '' : '　⚠ 本设备无法持久化，关闭即丢失');
@@ -507,7 +530,7 @@
     if (!store || !CB) return;
     const host = $('caseListView');
     let rows;
-    try { rows = await store.list(); } catch (e) { host.innerHTML = `<span class="muted">读取失败：${esc(e.message)}</span>`; return; }
+    try { rows = (await store.list()).filter(r => r.id !== REV_ID); } catch (e) { host.innerHTML = `<span class="muted">读取失败：${esc(e.message)}</span>`; return; }
     if (!rows.length) {
       host.innerHTML = '<span class="muted">还没有案例。解读之后点「存为案例」，等事情有了结果再回来回填——积累到一定数量才谈得上统计。</span>';
       return;
@@ -590,6 +613,7 @@
         <div style="margin-top:8px;">
           <span class="muted">④ 逐条标注（这一步做了，统计才谈得上可信——否则只能按"整案归因"粗算）</span>
           <button class="btn" id="reviewAiBtn" style="background:#666;padding:3px 8px;font-size:12px;">🤖 让 AI 依实况给出建议</button>
+          <button class="btn" id="reviewFixBtn" style="background:#8a6d3b;padding:3px 8px;font-size:12px;">📐 求正解（当时该怎么断）</button>
           <span class="muted" id="reviewAiTag"></span>
           <div style="max-height:420px;overflow:auto;margin-top:4px;">
             <div style="margin:4px 0;font-weight:bold;">盘面象义（当时这盘的用神落宫与同宫之象）</div>
@@ -599,6 +623,7 @@
           </div>
         </div>
         <div id="reviewMisreads" style="margin-top:8px;">${mis.length ? renderMisreads(mis) : ''}</div>
+        <div id="reviewFix" style="margin-top:8px;">${rec.correction ? renderCorrection(rec.correction) : ''}</div>
         <div id="reviewObs" class="muted" style="margin-top:6px;"></div>
         <div style="margin-top:8px;">
           <button class="btn" id="reviewSaveBtn">保存复盘</button>
@@ -609,6 +634,7 @@
     $('reviewPanel').style.display = 'block';
     $('reviewDate').addEventListener('change', previewTimingHits);
     $('reviewAiBtn').addEventListener('click', aiReview);
+    $('reviewFixBtn').addEventListener('click', askCorrection);
     $('reviewSaveBtn').addEventListener('click', saveReview);
     $('reviewCancelBtn').addEventListener('click', () => { $('reviewPanel').style.display = 'none'; _reviewRec = null; });
     previewTimingHits();
@@ -625,6 +651,44 @@
         ${m.basedOn ? `<br>&nbsp;&nbsp;<span class="muted">依据：<code>${esc(m.basedOn)}</code></span>` : ''}
       </div>`).join('')}
     </div>`;
+  }
+
+  /** 正解：当时按纲要正确地断该是什么样。含「断不出来」这一诚实出口。 */
+  const VERDICT_LABEL = { derivable: '按纲要可以断出', partly_derivable: '部分可断出', not_derivable: '按纲要断不出此结果' };
+  const HOW_LABEL = { overrated: '当时高估了', underrated: '当时低估了', missed: '当时漏看了' };
+  function renderCorrection(c) {
+    if (!c) return '';
+    const bad = c.verdict === 'not_derivable';
+    return `<div style="border:1px solid ${bad ? '#c9c9c9' : '#c9dcc9'};border-radius:6px;padding:6px;background:${bad ? '#fafafa' : '#f7fbf7'};">
+      <b style="font-size:12px;">正解</b> <span class="muted">（${esc(VERDICT_LABEL[c.verdict] || c.verdict)}）</span>
+      ${bad
+        ? `<div class="muted" style="font-size:12px;margin-top:4px;">${esc(c.whyNotDerivable || '')}
+           <br>—— 这是允许且重要的答案：强行圆出一套说法，比承认断不出更有害。</div>`
+        : `<div style="font-size:12px;white-space:pre-wrap;margin-top:4px;">${esc(c.correction || '')}</div>`}
+      ${(c.misweighted || []).length ? `<div style="font-size:12px;margin-top:6px;">偏差所在：${
+        c.misweighted.map(m => `<div>· <code>${esc(m.itemId)}</code> ${esc(HOW_LABEL[m.how] || m.how)}——${esc(m.why)}</div>`).join('')
+      }</div>` : ''}
+    </div>`;
+  }
+
+  async function askCorrection() {
+    if (!_reviewRec || !RV) return;
+    const actual = $('reviewActual').value.trim();
+    if (!actual) { $('reviewAiTag').textContent = '请先填写实际情况'; return; }
+    const btn = $('reviewFixBtn'); btn.disabled = true; $('reviewAiTag').textContent = '求正解中…';
+    try {
+      const sys = '你在为奇门占例写正解。只能基于给定条目，不得新造断法；断不出就如实说。只输出 JSON。';
+      const out = await LLM.chat(sys, RV.correctionPrompt(_reviewRec, actual, _reviewRec.safetyNote || ''), null,
+        (m) => { $('reviewAiTag').textContent = m; });
+      const p = RV.parseCorrection(out, _reviewRec);
+      if (!p.ok) { $('reviewAiTag').textContent = '解析失败：' + p.error; return; }
+      _reviewRec._correction = p;
+      $('reviewFix').innerHTML = renderCorrection(p);
+      $('reviewAiTag').textContent = p.verdict === 'not_derivable'
+        ? '模型认为按纲要断不出此结果——这条信息本身很有价值'
+        : `已给出正解${p.misweighted.length ? `，指出 ${p.misweighted.length} 处偏差` : ''}${p.dropped.length ? `（丢弃 ${p.dropped.length} 条无效项）` : ''}`;
+    } catch (e) { $('reviewAiTag').textContent = '求正解失败：' + (e.message || e); }
+    finally { btn.disabled = false; }
   }
 
   /** 应期反推：确定性比对，实时显示命中了哪条机制。 */
@@ -703,7 +767,8 @@
         const sz = QM.qimen.calculate(new Date(happenedAt + 'T12:00:00'), { type: '四柱', method: '时家', purpose: '综合' }).siZhu;
         rec = CB.applyTimingDerivation(rec, CB.deriveTimingHits(rec, sz));
       }
-      delete rec._aiObservations; delete rec._aiMisreads;
+      if (_reviewRec._correction) rec = CB.applyCorrection(rec, _reviewRec._correction);
+      delete rec._aiObservations; delete rec._aiMisreads; delete rec._correction;
       await store.save(rec);
       $('reviewSaveTag').textContent = '已保存';
       $('reviewPanel').style.display = 'none'; _reviewRec = null;
@@ -715,7 +780,7 @@
   async function rebuildOverlay() {
     if (!store || !CB) return null;
     try {
-      const rows = await store.list();
+      const rows = (await store.list()).filter(r => r.id !== REV_ID);
       const cal = CB.calibrate(rows);
       const overlay = CB.buildOverlay(CB.proposals(cal), cal);
       await store.setOverlay(overlay);
@@ -726,7 +791,7 @@
   async function renderStats() {
     if (!store || !CB) return;
     const host = $('caseStatsView');
-    const rows = await store.list();
+    const rows = (await store.list()).filter(r => r.id !== REV_ID);
     const cal = CB.calibrate(rows);
     const ps = CB.proposals(cal);
     if (!cal.totals.graded) {
@@ -785,6 +850,111 @@
           <span class="muted">——建议而已，不会自动改规则。规则库是按纲要写的，要改请改 knowledge/domain-rules.json 并补出处。</span>
         </div>${psHtml}
       </div>`;
+  }
+
+  /* ---------- 规则修订：反推 → 冲突检查 → 人工采纳 ---------- */
+  let _revCandidates = [];
+
+  const OP_LABEL = { narrow: '收窄适用范围', reweight: '调整权重', mute: '停用此条' };
+
+  async function renderRevisions() {
+    if (!store || !RV || !CB) return;
+    const rows = (await store.list()).filter(r => r.id !== REV_ID);
+    const adopted = await getRevisionList();
+    const fails = rows.filter(r => RV.isFail(r)).length;
+    const digest = RV.failureDigest(rows);
+
+    const adoptedHtml = adopted.length ? adopted.map((r, i) => `
+      <div style="border-bottom:1px solid #f0f0f0;padding:4px 0;font-size:12px;">
+        <label><input type="checkbox" data-revtoggle="${i}"${r.enabled ? ' checked' : ''}> 启用</label>
+        <code>${esc(r.ruleId)}</code>　<b>${esc(OP_LABEL[r.op] || r.op)}</b>
+        ${r.op === 'reweight' ? `（${r.payload.delta > 0 ? '+' : ''}${r.payload.delta}）` : ''}
+        <div class="muted">易理依据：${esc(r.reasoning)}</div>
+        <div class="muted">支撑 ${r.supportCases.length} 例｜冲突 ${r.conflictCases.length} 例｜${esc(r.provenance)}</div>
+        <button class="btn" style="background:#a94442;padding:2px 6px;font-size:11px;" data-revdel="${i}">删除</button>
+      </div>`).join('') : '<span class="muted">尚未采纳任何修订。</span>';
+
+    const candHtml = _revCandidates.length ? _revCandidates.map((rv, i) => {
+      const c = rv.check, ok = rv.recommend === 'accept';
+      return `<div style="border:1px solid ${ok ? '#c9dcc9' : '#e0d0c0'};border-radius:6px;padding:6px;margin:6px 0;font-size:12px;">
+        <code>${esc(rv.revision.ruleId)}</code>　<b>${esc(OP_LABEL[rv.revision.op] || rv.revision.op)}</b>
+        ${rv.revision.op === 'reweight' ? `（${rv.revision.payload.delta > 0 ? '+' : ''}${rv.revision.payload.delta}）` : ''}
+        ${rv.revision.op === 'narrow' ? `<span class="muted">追加条件 ${esc(JSON.stringify(rv.revision.payload.when))}</span>` : ''}
+        <div style="margin-top:2px;">易理依据：${esc(rv.revision.reasoning)}</div>
+        <div class="muted" style="margin-top:2px;">支撑 ${c.supportN} 例不应验｜冲突 ${c.conflictN} 例已应验｜置信 ${esc(rv.revision.confidence)}</div>
+        <div style="margin-top:2px;color:${ok ? '#3c763d' : '#a94442'};">${esc(rv.recommendWhy)}</div>
+        ${ok ? `<button class="btn" style="padding:2px 8px;font-size:11px;margin-top:4px;" data-revadopt="${i}">采纳</button>`
+             : `<span class="muted">（不建议采纳）</span>`}
+      </div>`;
+    }).join('') : '';
+
+    $('caseRevView').innerHTML = `
+      <div style="font-size:13px;">
+        <p class="muted" style="margin:0 0 8px;">
+          修订**独立于《解断方法纲要》**：纲要文件一字不动，修订自成一集、可导出、可随时停用。
+          且只允许<b>收窄／降权／停用</b>——不允许从错例反推出新规则，
+          因为象数系统里任何结果都能被事后圆回来。
+        </p>
+        <div><b>当前修订集</b>　<span class="muted">${adopted.length} 条，哈希 ${esc((_revIndex && _revIndex.hash) || '—')}</span></div>
+        <div style="max-height:220px;overflow:auto;margin:4px 0;">${adoptedHtml}</div>
+        <hr style="border:none;border-top:1px solid #eee;margin:8px 0;">
+        <div><b>反推候选</b>　<span class="muted">已回填 ${rows.filter(r => CB.graded(r)).length} 例，其中不应验 ${fails} 例；
+          有 ${digest.length} 条规则反复不应验（需 ≥${RV.MIN_FAIL_CASES} 次才纳入反推）</span></div>
+        ${digest.length
+          ? `<button class="btn" id="revDeriveBtn" style="margin-top:6px;">🧭 让 AI 反推易理偏差</button>
+             <span class="muted" id="revDeriveTag"></span>`
+          : '<div class="muted" style="margin-top:6px;">暂无够格的反推对象——需要同一条规则累计 ≥4 次不应验。</div>'}
+        ${candHtml}
+      </div>`;
+
+    if ($('revDeriveBtn')) $('revDeriveBtn').addEventListener('click', () => deriveBias(rows, digest));
+    $('caseRevView').querySelectorAll('[data-revadopt]').forEach(b =>
+      b.addEventListener('click', () => adoptRevision(Number(b.dataset.revadopt))));
+    $('caseRevView').querySelectorAll('[data-revdel]').forEach(b =>
+      b.addEventListener('click', () => deleteRevision(Number(b.dataset.revdel))));
+    $('caseRevView').querySelectorAll('[data-revtoggle]').forEach(b =>
+      b.addEventListener('change', () => toggleRevision(Number(b.dataset.revtoggle), b.checked)));
+  }
+
+  async function deriveBias(rows, digest) {
+    const btn = $('revDeriveBtn'); btn.disabled = true; $('revDeriveTag').textContent = '反推中…';
+    try {
+      const known = [];
+      rows.forEach(r => ((r.fired && r.fired.rules) || []).forEach(x => { if (known.indexOf(x.id) < 0) known.push(x.id); }));
+      const sys = '你在为奇门规则做偏差反推。只许收窄/降权/停用，不得新造规则。每条须给易理依据。只输出 JSON。';
+      const out = await LLM.chat(sys, RV.biasPrompt(digest, ''), null, m => { $('revDeriveTag').textContent = m; });
+      const p = RV.parseBias(out, known);
+      if (!p.ok) { $('revDeriveTag').textContent = '解析失败：' + p.error; return; }
+      // 每条候选都要过「已应验案例」的反证
+      _revCandidates = RV.review(p.revisions, rows);
+      $('revDeriveTag').textContent = `得候选 ${p.revisions.length} 条`
+        + (p.notes.length ? `，另有 ${p.notes.length} 条判为「规则没错、是解读用错了」` : '')
+        + (p.dropped.length ? `，丢弃 ${p.dropped.length} 条无效项` : '');
+      await renderRevisions();
+    } catch (e) { $('revDeriveTag').textContent = '反推失败：' + (e.message || e); }
+    finally { if ($('revDeriveBtn')) $('revDeriveBtn').disabled = false; }
+  }
+
+  async function adoptRevision(i) {
+    const rv = _revCandidates[i]; if (!rv || !RV) return;
+    const list = await getRevisionList();
+    const rec = RV.adopt(rv, new Date().toISOString());
+    const at = list.findIndex(x => x.id === rec.id);
+    if (at >= 0) list[at] = rec; else list.push(rec);
+    await saveRevisions(list);
+    _revCandidates.splice(i, 1);
+    await renderRevisions();
+  }
+  async function deleteRevision(i) {
+    const list = await getRevisionList();
+    if (!list[i]) return;
+    if (!confirm('删除这条修订？之后解读将恢复按纲要原样。')) return;
+    list.splice(i, 1); await saveRevisions(list); await renderRevisions();
+  }
+  async function toggleRevision(i, on) {
+    const list = await getRevisionList();
+    if (!list[i]) return;
+    list[i].enabled = !!on; await saveRevisions(list); await renderRevisions();
   }
 
   async function exportCases() {
@@ -879,7 +1049,9 @@
         [...$('caseTabSeg').children].forEach(x => x.classList.toggle('on', x === b));
         $('caseListView').style.display = _caseTab === 'list' ? 'block' : 'none';
         $('caseStatsView').style.display = _caseTab === 'stats' ? 'block' : 'none';
+        $('caseRevView').style.display = _caseTab === 'revisions' ? 'block' : 'none';
         if (_caseTab === 'stats') await renderStats();
+        if (_caseTab === 'revisions') await renderRevisions();
       });
       // 反馈与删除用事件委托：列表是动态重绘的，逐个绑定会在重绘后失效
       $('caseListView').addEventListener('click', async (e) => {
@@ -891,7 +1063,7 @@
           await refreshCaseCount(); await renderCases(); await rebuildOverlay();
         }
       });
-      refreshCaseCount(); renderCases();
+      refreshCaseCount(); renderCases(); loadRevisions();
     }
     loadCfgForm();
     cast();

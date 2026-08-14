@@ -240,6 +240,15 @@
     };
   }
 
+  /** 把复盘正解并入记录（纯函数，返回新对象）。正解是「当时该怎么断」，与实况反馈分开存。 */
+  function applyCorrection(rec, correction) {
+    if (!rec) return rec;
+    var out = {};
+    for (var k in rec) out[k] = rec[k];
+    out.correction = correction || null;
+    return out;
+  }
+
   /** 把反推结果并入记录（纯函数，返回新对象）。 */
   function applyTimingDerivation(rec, derivation) {
     if (!rec) return rec;
@@ -758,6 +767,7 @@
     makeCase: makeCase, applyFeedback: applyFeedback, graded: graded,
     calibrate: calibrate, proposals: proposals,
     deriveTimingHits: deriveTimingHits, applyTimingDerivation: applyTimingDerivation,
+    applyCorrection: applyCorrection,
     timingCalibration: timingCalibration,
     reviewPrompt: reviewPrompt, parseReview: parseReview,
     buildOverlay: buildOverlay, calibrationFor: calibrationFor

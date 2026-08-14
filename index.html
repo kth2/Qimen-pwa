@@ -167,6 +167,7 @@
       <span class="seg" id="caseTabSeg">
         <button data-tab="list" class="on">案例列表</button>
         <button data-tab="stats">校准统计</button>
+        <button data-tab="revisions">规则修订</button>
       </span>
       <button class="btn" id="caseExportBtn" style="background:#666;">导出</button>
       <label class="btn" style="background:#666;cursor:pointer;">导入
@@ -178,6 +179,7 @@
     </div>
     <div id="caseListView"></div>
     <div id="caseStatsView" style="display:none;"></div>
+    <div id="caseRevView" style="display:none;"></div>
   </div>
 
   <p class="muted" style="text-align:center;">排盘/解断离线可用 · AI 需所选 provider 可达 · Key 仅存于本机</p>
@@ -194,6 +196,7 @@
   <!-- 案例本：经验层。与教义层(knowledge/*.json)严格分离，反馈永不改写规则 -->
   <script src="core/casebook.js"></script>
   <script src="core/casestore.js"></script>
+  <script src="core/revise.js"></script>
   <script src="llm.js"></script>
   <script src="app.js"></script>
   <script>
