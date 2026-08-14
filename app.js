@@ -173,6 +173,15 @@
     $('cfgGeminiKey').value = c.geminiKey || ''; $('cfgGeminiModel').value = c.geminiModel || '';
     $('cfgOllamaUrl').value = c.ollamaUrl || ''; $('cfgOllamaModel').value = c.ollamaModel || '';
     $('cfgCustomUrl').value = c.customUrl || ''; $('cfgCustomKey').value = c.customKey || ''; $('cfgCustomModel').value = c.customModel || '';
+    $('cfgGeminiFallbackModel').value = c.geminiFallbackModel || '';
+    $('cfgCustomFallbackModel').value = c.customFallbackModel || '';
+    // 超时与重试：留空即用 LLM.DEF 的默认值，故此处不回填默认数字（placeholder 已示意）
+    const sec = (ms) => (ms ? String(Math.round(ms / 1000)) : '');
+    $('cfgIdleTimeout').value = sec(c.idleTimeoutMs);
+    $('cfgTotalTimeout').value = sec(c.totalTimeoutMs);
+    $('cfgMaxRetries').value = (c.maxRetries === 0 || c.maxRetries) ? String(c.maxRetries) : '';
+    $('cfgMaxTokens').value = c.maxTokens ? String(c.maxTokens) : '';
+    $('cfgFallbackProvider').value = c.fallbackProvider || 'none';
     showProvFields(); updateProviderTag();
   }
   function showProvFields() {
@@ -184,7 +193,15 @@
       provider: $('cfgProvider').value,
       geminiKey: $('cfgGeminiKey').value.trim(), geminiModel: $('cfgGeminiModel').value.trim() || 'gemini-3.5-flash',
       ollamaUrl: $('cfgOllamaUrl').value.trim() || 'http://localhost:11434', ollamaModel: $('cfgOllamaModel').value.trim() || 'qwen3:latest',
-      customUrl: $('cfgCustomUrl').value.trim(), customKey: $('cfgCustomKey').value.trim(), customModel: $('cfgCustomModel').value.trim() || 'gpt-3.5-turbo'
+      customUrl: $('cfgCustomUrl').value.trim(), customKey: $('cfgCustomKey').value.trim(), customModel: $('cfgCustomModel').value.trim() || 'gpt-3.5-turbo',
+      geminiFallbackModel: $('cfgGeminiFallbackModel').value.trim(),
+      customFallbackModel: $('cfgCustomFallbackModel').value.trim(),
+      fallbackProvider: $('cfgFallbackProvider').value,
+      // 秒 → 毫秒；留空存 0，LLM 侧 numOr() 会回落默认值
+      idleTimeoutMs: (Number($('cfgIdleTimeout').value) || 0) * 1000,
+      totalTimeoutMs: (Number($('cfgTotalTimeout').value) || 0) * 1000,
+      maxRetries: $('cfgMaxRetries').value === '' ? '' : Number($('cfgMaxRetries').value),
+      maxTokens: Number($('cfgMaxTokens').value) || 0
     });
     $('cfgSavedTag').textContent = '已保存 ✓'; setTimeout(() => $('cfgSavedTag').textContent = '', 2000); updateProviderTag();
   }
@@ -425,7 +442,8 @@
         + analysisBlocks + sxBlock;
       const answer = await LLM.chat(prompt.system + '\n' + AI_DISCIPLINE + sysExtra, userMsg, (full) => {
         streamed = true; $('aiAnswer').textContent = head + (full || '');
-      });
+      // onStatus：把重试与备用切换过程显示出来。干等两分钟再报错，是最劝退的体验
+      }, (msg) => { $('aiStatus').textContent = msg; });
       if (!streamed || !answer) $('aiAnswer').textContent = head + (answer || '(无内容)');
       else $('aiAnswer').textContent = head + answer; // 收尾用清理后的完整文本(去 <think> 等)
       $('aiStatus').textContent = '完成';
