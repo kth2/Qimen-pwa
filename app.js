@@ -500,7 +500,7 @@
     try {
       const rows = (await store.list()).filter(r => r.id !== REV_ID);
       const graded = rows.filter(r => CB && CB.graded(r)).length;
-      $('caseCountTag').textContent = `共 ${rows.length} 例，已回填 ${graded} 例`
+      $('caseCountTag').textContent = `共 ${rows.length} 例：待回填 ${rows.length - graded} · 已归档 ${graded}`
         + (store.persistent ? '' : '　⚠ 本设备无法持久化，关闭即丢失');
     } catch (e) { $('caseCountTag').textContent = '读取失败：' + e.message; }
   }
@@ -513,7 +513,7 @@
       const rec = CB.makeCase(Object.assign({ id: store.newId(), now: new Date().toISOString() }, _lastReading));
       await store.save(rec);
       $('caseSaveTag').textContent = '已存档，事后可在「案例本」回填实际结果';
-      await refreshCaseCount(); await renderCases();
+      await refreshCaseCount(); await renderCaseViews();
     } catch (e) {
       $('caseSaveTag').textContent = '保存失败：' + e.message;
     } finally { btn.disabled = false; }
@@ -526,36 +526,131 @@
     ['not_happened', '未应验'], ['opposite', '结果相反']
   ];
 
+  /* ---------- 案例两分：待回填 / 已归档 ----------
+   * 案例本只增不减，若一列到底，「还没回填的有哪几条」很快就淹没在几百条已结案里，
+   * 页面也随之无限拉长。故按「是否已回填结果」分两页：待回填是待办清单（天然短），
+   * 已归档是资料库（可筛可搜、分页加载）。两页共用同一条渲染，避免两套样式各自漂移。 */
+  const PAGE_SIZE = 20;
+  let _archFilter = 'all';                 // all | happened | partial | not_happened | opposite
+  let _archQuery = '';
+  let _pendShown = PAGE_SIZE;
+  let _archShown = PAGE_SIZE;
+
+  const OUTCOME_COLOR = { happened: '#3c763d', opposite: '#a94442' };
+  const outcomeColor = (o) => OUTCOME_COLOR[o] || '#8a6d3b';
+
+  function caseRowHtml(r) {
+    const fb = r.feedback;
+    const tag = fb
+      ? `<b style="color:${outcomeColor(fb.outcome)}">${esc(fb.label)}</b>`
+      : '<span class="muted">待回填</span>';
+    const hit = r.timingHits && r.timingHits.hits.length
+      ? `　<span style="color:#3c763d">应期命中 ${r.timingHits.hits.length} 条</span>` : '';
+    const actual = fb && fb.actual ? `<div class="muted" style="margin-top:2px;">实况：${esc(fb.actual.slice(0, 80))}</div>` : '';
+    const misTag = fb && (fb.misreads || []).length ? `　<span style="color:#a94442">断错分析 ${fb.misreads.length} 条</span>` : '';
+    const noAns = rec_hasAnswer(r) ? '' : '　<span class="muted">（未存解读全文）</span>';
+    const marked = fb ? (Object.keys(fb.ruleVerdicts || {}).length + Object.keys(fb.symbolVerdicts || {}).length) : 0;
+    return `<div style="border-bottom:1px solid #eee;padding:6px 0;font-size:13px;">
+      <div><b>${esc(r.question || '(未填问题)')}</b> <span class="muted">${esc(r.domain || '')}　${esc(r.chartRef.siZhu || '')}</span></div>
+      <div class="muted">${esc((r.createdAt || '').slice(0, 10))}　判读 ${r.fired.rules.length} 条　锚点 ${r.fired.anchors.length} 个　${tag}${marked ? `　已逐条标注 ${marked} 条` : ''}${hit}${misTag}${noAns}</div>
+      ${actual}
+      <div style="margin-top:4px;">
+        <button class="btn" style="background:#3c763d;padding:3px 8px;font-size:12px;" data-open="${esc(r.id)}">${fb ? '查看/修改复盘' : '📝 填写实况并复盘'}</button>
+        <button class="btn" style="background:#a94442;padding:3px 8px;font-size:12px;" data-del="${esc(r.id)}">删除</button></div>
+    </div>`;
+  }
+
+  /** 只截取要显示的一段并补一个「显示更多」。列表长到几百条时，
+   *  一次性 innerHTML 全量重绘会明显卡顿，而这里每次只铺 20 条。 */
+  function pagedHtml(rows, shown, moreAttr) {
+    const slice = rows.slice(0, shown);
+    const rest = rows.length - slice.length;
+    return slice.map(caseRowHtml).join('')
+      + (rest > 0
+        ? `<div style="text-align:center;margin-top:8px;">
+             <button class="btn" style="background:#666;padding:4px 14px;font-size:13px;" ${moreAttr}>显示更多（还有 ${rest} 例）</button>
+           </div>`
+        : '');
+  }
+
+  async function allCases() {
+    return (await store.list()).filter(r => r.id !== REV_ID);
+  }
+
   async function renderCases() {
     if (!store || !CB) return;
     const host = $('caseListView');
     let rows;
-    try { rows = (await store.list()).filter(r => r.id !== REV_ID); } catch (e) { host.innerHTML = `<span class="muted">读取失败：${esc(e.message)}</span>`; return; }
+    try { rows = await allCases(); } catch (e) { host.innerHTML = `<span class="muted">读取失败：${esc(e.message)}</span>`; return; }
+    const pending = rows.filter(r => !CB.graded(r));
     if (!rows.length) {
       host.innerHTML = '<span class="muted">还没有案例。解读之后点「存为案例」，等事情有了结果再回来回填——积累到一定数量才谈得上统计。</span>';
       return;
     }
-    host.innerHTML = rows.map(r => {
-      const fb = r.feedback;
-      const tag = fb
-        ? `<b style="color:${fb.outcome === 'happened' ? '#3c763d' : fb.outcome === 'opposite' ? '#a94442' : '#8a6d3b'}">${esc(fb.label)}</b>`
-        : '<span class="muted">待回填</span>';
-      const hit = r.timingHits && r.timingHits.hits.length
-        ? `　<span style="color:#3c763d">应期命中 ${r.timingHits.hits.length} 条</span>` : '';
-      const actual = fb && fb.actual ? `<div class="muted" style="margin-top:2px;">实况：${esc(fb.actual.slice(0, 80))}</div>` : '';
-      const misTag = fb && (fb.misreads || []).length ? `　<span style="color:#a94442">断错分析 ${fb.misreads.length} 条</span>` : '';
-      const noAns = rec_hasAnswer(r) ? '' : '　<span class="muted">（未存解读全文）</span>';
-      const marked = fb ? (Object.keys(fb.ruleVerdicts || {}).length + Object.keys(fb.symbolVerdicts || {}).length) : 0;
-      return `<div style="border-bottom:1px solid #eee;padding:6px 0;font-size:13px;">
-        <div><b>${esc(r.question || '(未填问题)')}</b> <span class="muted">${esc(r.domain || '')}　${esc(r.chartRef.siZhu || '')}</span></div>
-        <div class="muted">${esc((r.createdAt || '').slice(0, 10))}　判读 ${r.fired.rules.length} 条　锚点 ${r.fired.anchors.length} 个　${tag}${marked ? `　已逐条标注 ${marked} 条` : ''}${hit}${misTag}${noAns}</div>
-        ${actual}
-        <div style="margin-top:4px;">
-          <button class="btn" style="background:#3c763d;padding:3px 8px;font-size:12px;" data-open="${esc(r.id)}">${fb ? '查看/修改复盘' : '📝 填写实况并复盘'}</button>
-          <button class="btn" style="background:#a94442;padding:3px 8px;font-size:12px;" data-del="${esc(r.id)}">删除</button></div>
-      </div>`;
-    }).join('');
+    if (!pending.length) {
+      host.innerHTML = `<span class="muted">待回填的案例都清完了。${rows.length} 例已全部回填，在「已归档」页翻阅。</span>`;
+      return;
+    }
+    if (_pendShown < PAGE_SIZE) _pendShown = PAGE_SIZE;
+    host.innerHTML = `<div class="muted" style="margin-bottom:6px;">
+        还有 <b>${pending.length}</b> 例等着回填结果。回填之后它们会移到「已归档」，并计入校准统计。
+      </div>` + pagedHtml(pending, _pendShown, 'data-more="pending"');
   }
+
+  async function renderArchive() {
+    if (!store || !CB) return;
+    const host = $('caseArchiveView');
+    let rows;
+    try { rows = await allCases(); } catch (e) { host.innerHTML = `<span class="muted">读取失败：${esc(e.message)}</span>`; return; }
+    const graded = rows.filter(r => CB.graded(r));
+    if (!graded.length) {
+      host.innerHTML = `<span class="muted">还没有回填过结果的案例。先去「待回填」把已经有结果的事填上——
+        归档、统计、以及规则修订的反推，全都只认已回填的案例。</span>`;
+      return;
+    }
+    // 结果分布：这是归档页唯一该给的「统计」——分子分母都在眼前，不做任何外推
+    const byOutcome = {};
+    graded.forEach(r => { const o = r.feedback.outcome; byOutcome[o] = (byOutcome[o] || 0) + 1; });
+    const chips = OUTCOME_BTNS.map(([v, label]) => {
+      const n = byOutcome[v] || 0;
+      const on = _archFilter === v;
+      return `<button class="btn" data-archfilter="${v}" style="padding:3px 10px;font-size:12px;background:${on ? outcomeColor(v) : '#eee'};color:${on ? '#fff' : '#333'};">${label} ${n}</button>`;
+    }).join(' ');
+    const allOn = _archFilter === 'all';
+    const allChip = `<button class="btn" data-archfilter="all" style="padding:3px 10px;font-size:12px;background:${allOn ? '#3c763d' : '#eee'};color:${allOn ? '#fff' : '#333'};">全部 ${graded.length}</button>`;
+
+    let list = _archFilter === 'all' ? graded : graded.filter(r => r.feedback.outcome === _archFilter);
+    const q = _archQuery.trim().toLowerCase();
+    if (q) {
+      list = list.filter(r => [r.question, r.domain, (r.feedback && r.feedback.actual) || '', (r.chartRef && r.chartRef.siZhu) || '']
+        .join(' ').toLowerCase().indexOf(q) >= 0);
+    }
+    const hitRate = graded.length
+      ? Math.round(((byOutcome.happened || 0) / graded.length * 100)) : 0;
+    // 「完全应验占比」是描述这一堆案例本身的，不是准确率——占类混杂、问题难度不一，
+    // 拿它当命中率会高估。规则一级的符合率在「校准统计」页，那里才有样本门槛把关。
+    const summary = `<div style="font-size:12px;background:#fafafa;border-radius:6px;padding:6px 8px;margin-bottom:6px;">
+        已归档 <b>${graded.length}</b> 例，其中完全应验 <b>${byOutcome.happened || 0}</b> 例（${hitRate}%）。
+        <span class="muted">这只是这批案例的结果分布，不等于准确率——占类混杂、难度不一。
+        按规则拆开的符合率（含样本门槛）在「校准统计」页。</span>
+      </div>`;
+    const controls = `<div style="margin-bottom:6px;display:flex;flex-wrap:wrap;gap:4px;align-items:center;">
+        ${allChip} ${chips}
+        <input id="archSearch" placeholder="搜问题 / 占类 / 实况 / 四柱" value="${esc(_archQuery)}"
+               style="flex:1;min-width:140px;padding:4px 6px;font-size:13px;">
+      </div>`;
+    const body = list.length
+      ? pagedHtml(list, _archShown, 'data-more="archive"')
+      : '<span class="muted">这个筛选下没有案例。</span>';
+    host.innerHTML = summary + controls
+      + (list.length !== graded.length ? `<div class="muted" style="font-size:12px;margin-bottom:4px;">筛出 ${list.length} 例</div>` : '')
+      + body;
+    // 重绘会丢焦点，键入时逐字重绘等于打不了字，故只在有查询词时把光标接回去
+    if (q) { const s = $('archSearch'); if (s) { s.focus(); s.selectionStart = s.selectionEnd = s.value.length; } }
+  }
+
+  /** 回填/删除/导入之后，两页的内容都可能变，一并重绘。 */
+  async function renderCaseViews() { await renderCases(); await renderArchive(); }
 
   /* ---------- 复盘表单：实况文本 + 实际日期 + 逐条标注 + AI 复盘 ---------- */
   let _reviewRec = null;
@@ -772,7 +867,7 @@
       await store.save(rec);
       $('reviewSaveTag').textContent = '已保存';
       $('reviewPanel').style.display = 'none'; _reviewRec = null;
-      await refreshCaseCount(); await renderCases(); await rebuildOverlay();
+      await refreshCaseCount(); await renderCaseViews(); await rebuildOverlay();
     } catch (e) { $('reviewSaveTag').textContent = '保存失败：' + e.message; }
   }
 
@@ -974,7 +1069,7 @@
       const data = JSON.parse(await file.text());
       const r = await store.importAll(data);          // 默认合并，不覆盖本机较新的记录
       $('caseCountTag').textContent = `导入完成：新增 ${r.added}、更新 ${r.updated}、跳过 ${r.skipped}`;
-      await renderCases(); await rebuildOverlay();
+      await renderCaseViews(); await rebuildOverlay();
       if (_caseTab === 'stats') await renderStats();
     } catch (e) { $('caseCountTag').textContent = '导入失败：' + e.message; }
   }
@@ -1048,22 +1143,39 @@
         _caseTab = b.dataset.tab;
         [...$('caseTabSeg').children].forEach(x => x.classList.toggle('on', x === b));
         $('caseListView').style.display = _caseTab === 'list' ? 'block' : 'none';
+        $('caseArchiveView').style.display = _caseTab === 'archive' ? 'block' : 'none';
         $('caseStatsView').style.display = _caseTab === 'stats' ? 'block' : 'none';
         $('caseRevView').style.display = _caseTab === 'revisions' ? 'block' : 'none';
+        if (_caseTab === 'archive') { _archShown = PAGE_SIZE; await renderArchive(); }
         if (_caseTab === 'stats') await renderStats();
         if (_caseTab === 'revisions') await renderRevisions();
       });
       // 反馈与删除用事件委托：列表是动态重绘的，逐个绑定会在重绘后失效
-      $('caseListView').addEventListener('click', async (e) => {
+      const onCaseClick = async (e) => {
+        const more = e.target.closest('button[data-more]');
+        if (more) {
+          if (more.dataset.more === 'pending') { _pendShown += PAGE_SIZE; await renderCases(); }
+          else { _archShown += PAGE_SIZE; await renderArchive(); }
+          return;
+        }
+        const f = e.target.closest('button[data-archfilter]');
+        if (f) { _archFilter = f.dataset.archfilter; _archShown = PAGE_SIZE; await renderArchive(); return; }
         const open = e.target.closest('button[data-open]');
         if (open) { await openReview(open.dataset.open); return; }
         const del = e.target.closest('button[data-del]');
         if (del && confirm('删除这条案例？删除后它不再计入统计。')) {
           await store.remove(del.dataset.del);
-          await refreshCaseCount(); await renderCases(); await rebuildOverlay();
+          await refreshCaseCount(); await renderCaseViews(); await rebuildOverlay();
         }
+      };
+      $('caseListView').addEventListener('click', onCaseClick);
+      $('caseArchiveView').addEventListener('click', onCaseClick);
+      $('caseArchiveView').addEventListener('input', async (e) => {
+        if (e.target.id !== 'archSearch') return;
+        _archQuery = e.target.value; _archShown = PAGE_SIZE;
+        await renderArchive();
       });
-      refreshCaseCount(); renderCases(); loadRevisions();
+      refreshCaseCount(); renderCaseViews(); loadRevisions();
     }
     loadCfgForm();
     cast();
