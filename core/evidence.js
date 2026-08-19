@@ -313,7 +313,8 @@
       });
     }
 
-    /* ---------- TIMING：应期锚点（Phase 4） ---------- */
+    /* ---------- TIMING：应期锚点（Phase 4；v5 起每条带时/日/月/年四级读法） ---------- */
+
     if (tm && tm.applicable) {
       (tm.anchors || []).slice(0, MAX_TIMING_ITEMS).forEach(function (a) {
         items.push({
@@ -322,7 +323,12 @@
           value: a.value, kind: a.kind, gong: a.gong,
           strength: a.strength, weight: a.weight, offset: a.offset,
           targets: (a.targets || []).map(function (t) { return t.name; }),
-          content: [a.display + (a.note ? '（' + a.note + '）' : '')],
+          // v5：同一干支在时/日/月/年四级各读一次，并标明哪一级是机制原文所许、哪一级由「远近」推及
+          reads: (a.reads || []).filter(function (r) { return r.offset != null; }).map(function (r) {
+            return { unit: r.unit, label: r.label, window: r.window, when: r.when, source: r.source };
+          }),
+          nativeUnits: (a.nativeUnits || []).slice(),
+          content: [a.note || a.display],
           basis: a.basis, caution: a.caution || ''
         });
       });
@@ -369,6 +375,7 @@
         timeline: (tm.timeline || []).map(function (a) {
           return { value: a.value, mechanism: a.mechanism, offset: a.offset, strength: a.strength };
         }),
+        byUnit: tm.byUnit, units: tm.units,
         pace: tm.pace, horizon: tm.horizon, numbers: tm.numbers, notes: tm.notes
       } : null,
       items: items,
@@ -390,9 +397,21 @@
         cals.push('  - ' + x.ruleId + '：' + x.content.join('') );
       }
       else if (x.type === 'TIMING') {
-        times.push('  - [' + (STR[x.strength] || '') + '] ' + x.label + '：' + x.content.join('') +
+        times.push('  - [' + (STR[x.strength] || '') + '] ' + x.label + '：' + x.value +
           (x.gong ? '　(' + x.gong + '宫)' : '') +
-          (x.targets.length ? '　用神：' + x.targets.join('、') : '　（非用神宫）'));
+          (x.targets.length ? '　用神：' + x.targets.join('、') : '　（非用神宫）') +
+          (x.content.length ? '　—— ' + x.content.join('') : ''));
+        // 四级读法另起一行。〔推及〕＝该法原文只写了日，这一级是由「近事看日时、中事看月、
+        // 远事看年」推来的——标出来，才不至于把断法悄悄推广到纲要没说的地方。
+        var rs = (x.reads || []);
+        if (rs.length) {
+          times.push('      ' + rs.map(function (r) {
+            var bits = [];
+            if (r.window) bits.push(r.window);
+            if (r.when) bits.push(r.when);
+            return r.label + (r.source === 'native' ? '' : '〔推及〕') + (bits.length ? '(' + bits.join('，') + ')' : '');
+          }).join(' ｜ '));
+        }
       }
       else if (x.type === 'READING' && reads[x.scope]) {
         var revMark = x.revised ? '〔本机修订·' + (x.revised === 'mute' ? '停用' : x.revised === 'narrow' ? '已收窄' : '已调权') + '〕' : '';
@@ -481,10 +500,29 @@
       var tmi = ev.timing || {};
       L.push('· TIMING（应期锚点：干支取自上方 yingqi 同一组计算，此处只是筛过、定过强弱、排过序的那一份。' +
         '取期只在这些候选中选，不得自造日辰）：');
+      // 远近必须摆在锚点**之前**：放在后面，模型读到时早已把每一条都当成「某日」断完了，
+      // 远期之问（几个月后、哪一年）就永远得不到答案。
+      if (tmi.horizon) {
+        L.push('  · 【先定远近】本次缺省按「' + tmi.horizon.tier + '事」读（看 ' +
+          (tmi.horizon.units || []).join('、') + ' 一级）。' + tmi.horizon.guidance);
+        L.push('  ⚠ 这只是缺省——**先看用户问的是多远的事**：问这两天就断日与时辰，问这几个月就断月，' +
+          '问哪一年就断年。同一批锚点按哪一级读，答案就落在哪一级，不要一律断成某日；' +
+          '也不要因为用户问的是远事，就说「本盘只能断日」。');
+        if (tmi.horizon.caution) L.push('  ⚠ ' + tmi.horizon.caution);
+      }
       L = L.concat(times);
+      L.push('  · 单位出处：无标记者＝该法在纲要里就写明了这一级（马星「之日/月」、转盘冲墓「之年月日时」、' +
+        '飞盘远期暗干支「年/月/日时」），可直接照断；〔推及〕＝该法原文只写了日，这一级是由' +
+        '「近事看日时、中事看月、远事看年」一条推来的——可用，但断语里要说清是按远近推的。');
+      if (times.some(function (s) { return s.indexOf('干') >= 0 && /时干|月干|年干/.test(s); })) {
+        L.push('  · 天干的称谓：「戊日」是纲要原有用语；时辰与月建以**地支**命名（午时、辰月），' +
+          '天干在时/月/年三柱上只能说「该柱之干为某」，故写作「时干戊」「月干戊」「年干戊」——' +
+          '断语中不要写成「戊时」「戊月」，那是生造的说法。');
+      }
       if (tmi.timeline && tmi.timeline.length) {
-        L.push('  先后次序（同一循环内距今位次，仅表先到后到，非"几天后"之断言）：' +
-          tmi.timeline.map(function (a) { return a.value + '日(' + a.mechanism + (a.offset == null ? '' : '·第' + a.offset + '位') + ')'; }).join(' → '));
+        L.push('  先后次序（按日一级的位次；四柱各支逐位递进，故位次即该候选下次出现的真实距离，' +
+          '但「候选何时再来」是历法事实，「事情是否应在那时」仍须据全盘定夺）：' +
+          tmi.timeline.map(function (a) { return a.value + '(' + a.mechanism + (a.offset == null ? '' : '·第' + a.offset + '位') + ')'; }).join(' → '));
       }
       if (tmi.pace) {
         L.push('  迟速：以 ' + tmi.pace.from + ' 落 ' + tmi.pace.gong + '宫' + tmi.pace.state +
@@ -495,7 +533,21 @@
           return n.gong + '宫天' + n.tianGan + '=' + n.tianNum + '、地' + n.diGan + '=' + n.diNum;
         }).join('；'));
       }
-      if (tmi.horizon) L.push('  断日/断月/断年：' + tmi.horizon.guidance);
+      // 分单位再铺一次：同一批候选按时/日/月/年各排一行，问远问近都能直接取用
+      var UHEAD = {
+        '时': '  若断时辰（同一日之内何时；近事必看这一级）：',
+        '日': '  若断日：',
+        '月': '  若断月（月建以节气分界，非农历朔望月）：',
+        '年': '  若断年（年以立春分界，所标公历年为约数）：'
+      };
+      (tmi.units || []).forEach(function (u) {
+        var list = (tmi.byUnit || {})[u] || [];
+        if (!list.length) return;
+        L.push((UHEAD[u] || ('  若断' + u + '：')) + list.slice(0, 8).map(function (r) {
+          return r.label + (r.source === 'native' ? '' : '〔推及〕') +
+            (r.window ? '(' + r.window + ')' : '') + (r.when ? ' ' + r.when : '');
+        }).join('；'));
+      });
       var cau = [];
       ev.items.forEach(function (x) {
         if (x.type === 'TIMING' && x.caution && cau.indexOf(x.caution) < 0) cau.push(x.caution);
