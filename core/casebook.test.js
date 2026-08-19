@@ -422,7 +422,14 @@ t('复盘提示同时列出盘面象义与规则判读', function () {
 });
 
 console.log('== 应期反推：完全确定性 ==');
+/** 只填了日期（未填时刻）时的四柱：**摘掉时柱**，与 app 的行为一致。
+ *  拿中午顶替出来的时柱去核对「时辰」一级，等于白送一层蒙中的机会。 */
 function siZhuOf(iso) {
+  var s = QM.qimen.calculate(new Date(iso), { type: '四柱', method: '时家', purpose: '综合' }).siZhu;
+  return s ? { year: s.year, month: s.month, day: s.day } : null;   // 非法日期照旧退化为空，不抛错
+}
+/** 连时刻一起填了时的四柱：含时柱，「时辰」一级才参与核对。 */
+function siZhuOfMoment(iso) {
   return QM.qimen.calculate(new Date(iso), { type: '四柱', method: '时家', purpose: '综合' }).siZhu;
 }
 t('给出实际日期即可判定命中了哪条锚点，命中值必与那天干支一致', function () {
@@ -707,6 +714,75 @@ t('指向象义 key 的断错不计入规则的被指错次数', function () {
   cal.rules.forEach(function (x) {
     assert.strictEqual(x.misreadN, 0, '象义 key 不应记到规则头上：' + x.ruleId);
   });
+});
+
+
+console.log('== 应期核对：加入「时辰」一级（Phase 7） ==');
+
+t('未填时刻则不评时辰一级，只评日/月/年三层', function () {
+  var rec = mkCase(1);
+  var d = CB.deriveTimingHits(rec, siZhuOf('2024-05-12T12:00:00'));
+  assert.deepStrictEqual(d.levelsEvaluated, ['日', '月', '年']);
+  assert.ok(!d.levels['时'], '没填时刻就不该有时辰一级的命中');
+  d.hits.forEach(function (h) {
+    assert.ok((h.at || []).indexOf('时') < 0, '未填时刻却记了时辰命中');
+  });
+});
+
+t('填了时刻才评时辰一级，且如实记入 levelsEvaluated', function () {
+  var rec = mkCase(1);
+  var d = CB.deriveTimingHits(rec, siZhuOfMoment('2024-05-12T14:00:00'));
+  assert.deepStrictEqual(d.levelsEvaluated, ['日', '月', '年', '时']);
+});
+
+t('命中记录列出**全部**命中层级，而不只是第一个', function () {
+  var rec = mkCase(1);
+  var sz = siZhuOfMoment('2024-05-12T14:00:00');
+  var d = CB.deriveTimingHits(rec, sz);
+  var L = { '日': sz.day, '月': sz.month, '年': sz.year, '时': sz.time };
+  d.hits.forEach(function (h) {
+    assert.ok(Array.isArray(h.at) && h.at.length, '每条命中须列出命中层级');
+    assert.strictEqual(h.level, h.at[0], 'level 须与 at 的首项一致（向后兼容）');
+    h.at.forEach(function (lv) {
+      var s = String(L[lv] || '');
+      assert.strictEqual(h.kind === 'gan' ? s.charAt(0) : s.charAt(1), h.value,
+        lv + ' 一级记了命中，但那一柱的干支根本不是 ' + h.value);
+    });
+    ['日', '月', '年', '时'].forEach(function (lv) {
+      if (h.at.indexOf(lv) >= 0) return;
+      var s = String(L[lv] || '');
+      if (!s) return;
+      assert.notStrictEqual(h.kind === 'gan' ? s.charAt(0) : s.charAt(1), h.value,
+        lv + ' 一级明明匹配却没记进 at');
+    });
+  });
+});
+
+t('多评一层，随机基准必须跟着抬高——否则等于凭空拔高命中率', function () {
+  var rec = mkCase(1);
+  var three = CB.deriveTimingHits(rec, siZhuOf('2024-05-12T14:00:00'));
+  var four = CB.deriveTimingHits(rec, siZhuOfMoment('2024-05-12T14:00:00'));
+  assert.strictEqual(three.levelsEvaluated.length, 3);
+  assert.strictEqual(four.levelsEvaluated.length, 4);
+  assert.ok(four.chance > three.chance,
+    '加了时辰一级却不抬基准，命中率就被虚高了：3层=' + three.chance + ' 4层=' + four.chance);
+  if (four.high.chance != null && three.high.chance != null) {
+    assert.ok(four.high.chance >= three.high.chance, '★强子集的基准同样须随层数抬高');
+  }
+});
+
+t('反馈保留 happenedTime，且不填时留空串（不拿中午顶替）', function () {
+  var rec = mkCase(1);
+  var a = CB.applyFeedback(rec, { outcome: 'happened', happenedAt: '2024-05-12', now: '2024-05-20T00:00:00Z' });
+  assert.strictEqual(a.feedback.happenedTime, '');
+  var b = CB.applyFeedback(rec, { outcome: 'happened', happenedAt: '2024-05-12', happenedTime: '14:30', now: '2024-05-20T00:00:00Z' });
+  assert.strictEqual(b.feedback.happenedTime, '14:30');
+});
+
+t('无实况时不抛错，且 levelsEvaluated 为空', function () {
+  var d = CB.deriveTimingHits(mkCase(1), null);
+  assert.deepStrictEqual(d.levelsEvaluated, []);
+  assert.strictEqual(d.chance, null);
 });
 
 console.log('== 存储：只在本机、导入不覆盖 ==');

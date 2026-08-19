@@ -186,52 +186,56 @@
    * 同一个支，近事读作某日、远事读作某年，故三层都要看，并如实标明命中在哪一层。
    *
    * @param {object} rec 案例记录
-   * @param {object} actualSiZhu 实际发生日的四柱 {year,month,day}（由引擎算得）
-   * @returns {object} { hits:[], missed:[], levels:{}, chance:number }
+   * @param {object} actualSiZhu 实际发生的四柱 {year,month,day[,time]}（由引擎算得）。
+   *        time 只在用户填了具体时刻时才传——没填就别传，否则等于白送一层蒙中的机会。
+   * @returns {object} { hits:[], missed:[], levels:{}, levelsEvaluated:[], chance:number }
    */
   function deriveTimingHits(rec, actualSiZhu) {
     var anchors = (rec && rec.fired && rec.fired.anchors) || [];
     if (!anchors.length || !actualSiZhu || !actualSiZhu.day) {
-      return { hits: [], missed: anchors.slice(), levels: {}, chance: null };
+      return { hits: [], missed: anchors.slice(), levels: {}, chance: null, levelsEvaluated: [] };
     }
-    // 三层的干与支
-    var L = {
-      '日': { gan: String(actualSiZhu.day || '').charAt(0), zhi: String(actualSiZhu.day || '').charAt(1) },
-      '月': { gan: String(actualSiZhu.month || '').charAt(0), zhi: String(actualSiZhu.month || '').charAt(1) },
-      '年': { gan: String(actualSiZhu.year || '').charAt(0), zhi: String(actualSiZhu.year || '').charAt(1) }
-    };
+    function pair(s) { return { gan: String(s || '').charAt(0), zhi: String(s || '').charAt(1) }; }
+    var L = { '日': pair(actualSiZhu.day), '月': pair(actualSiZhu.month), '年': pair(actualSiZhu.year) };
+    // 时辰只在用户**真的填了发生时刻**时才评。没填而拿中午顶替，等于凭空多送一次蒙中的机会。
+    var order = ['日', '月', '年'];
+    if (actualSiZhu.time) { L['时'] = pair(actualSiZhu.time); order.push('时'); }
+
     var hits = [], missed = [], levels = {};
     anchors.forEach(function (a) {
-      var matchedAt = null;
-      ['日', '月', '年'].forEach(function (lv) {
-        if (matchedAt) return;
+      var at = [];
+      order.forEach(function (lv) {
         var v = a.kind === 'gan' ? L[lv].gan : L[lv].zhi;
-        if (v && v === a.value) matchedAt = lv;
+        if (v && v === a.value) at.push(lv);
       });
-      if (matchedAt) {
-        hits.push({ mechanism: a.mechanism, value: a.value, kind: a.kind, strength: a.strength, gong: a.gong, level: matchedAt });
-        levels[matchedAt] = (levels[matchedAt] || 0) + 1;
+      if (at.length) {
+        hits.push({
+          mechanism: a.mechanism, value: a.value, kind: a.kind, strength: a.strength,
+          gong: a.gong, level: at[0], at: at
+        });
+        at.forEach(function (lv) { levels[lv] = (levels[lv] || 0) + 1; });
       } else {
         missed.push(a);
       }
     });
-    // 随机基准：候选越多，蒙中的概率越高。不给这个数，用户会把"命中"当成灵验。
-    // 取去重后的候选数 / 周期长度，日/月/年三层按独立近似合成。
+    // 随机基准：候选越多、评的层数越多，蒙中的概率越高。不给这个数，用户会把"命中"当成灵验。
+    // 层数必须取**实际评了几层**——加了时辰这一层却仍按三层算基准，等于凭空抬高命中率。
     function baselineOf(list) {
       var dz = {}, dg = {};
       list.forEach(function (a) { (a.kind === 'gan' ? dg : dz)[a.value] = 1; });
       var pz = Math.min(1, Object.keys(dz).length / 12);
       var pg = Math.min(1, Object.keys(dg).length / 10);
       var per = 1 - (1 - pz) * (1 - pg);
-      return round(Math.min(1, 1 - Math.pow(1 - per, 3)));
+      return round(Math.min(1, 1 - Math.pow(1 - per, order.length)));
     }
-    // 全量锚点的基准往往逼近 1（十来个候选 × 三层，几乎必中），那样的"命中"没有信息量。
+    // 全量锚点的基准往往逼近 1（十来个候选 × 三四层，几乎必中），那样的"命中"没有信息量。
     // 故另算一份**只看 ★强锚点**的：它们数量少、且是纲要明言「须待此时方应」者，
     // 命中率与基准的差距才真正说明问题。
     var highAnchors = anchors.filter(function (a) { return a.strength === 'high'; });
     var highHits = hits.filter(function (h) { return h.strength === 'high'; });
     return {
       hits: hits, missed: missed, levels: levels,
+      levelsEvaluated: order.slice(),
       chance: baselineOf(anchors),
       high: {
         total: highAnchors.length, hit: highHits.length,
@@ -474,7 +478,7 @@
   /**
    * 回填反馈。
    * @param {object} rec 案例记录
-   * @param {object} fb {outcome, happenedAt, note, now, ruleVerdicts:{ruleId:outcome}}
+   * @param {object} fb {outcome, happenedAt, happenedTime, note, now, ruleVerdicts:{ruleId:outcome}}
    * @returns {object} 新记录（不改原对象）
    */
   function applyFeedback(rec, fb) {
@@ -497,6 +501,7 @@
       outcome: fb.outcome,
       label: outcomeLabel(fb.outcome),
       happenedAt: fb.happenedAt || '',
+      happenedTime: fb.happenedTime || '',        // 可选。填了才核对「时辰」一级，见 deriveTimingHits
       // actual＝用户用自己的话写下的实际发生情况。四档太粗，真正能拿来反推的是这段文字。
       actual: fb.actual || fb.note || '',
       note: fb.note || '',

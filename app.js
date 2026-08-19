@@ -270,7 +270,8 @@
     '6. 趋避建议须由盘面推出、具体可行（往何方位、何时机、借何门何神之象、忌何宫），并注明所据宫位；不写与本盘无关的泛泛套话与免责声明。',
     '7. 纲要与盘面确未直接载明处，可据纲要衍象作合理延伸并标注「（据×宫×象推）」；仅在毫无盘面依据时才写「纲要未载，不予推断」，不得以此搪塞本可分析之处。',
     '【结构——每节都要展开充分，理由部分尤须详尽】',
-    '8. 按骨架输出：① 结论（一句断吉凶成败）② 用神与关键宫位逐宫详析 ③ 生克成败推理 ④ 方位 ⑤ 应期/数字 ⑥ 趋避建议。'
+    '8. 按骨架输出：① 结论（一句断吉凶成败）② 用神与关键宫位逐宫详析 ③ 生克成败推理 ④ 方位 ⑤ 应期/数字 ⑥ 趋避建议。',
+    '9. 应期一节须落到**与所问远近相称的那一级**：近事给到日并尽量给到时辰（几点到几点），中事给到月（并注明节气区间），远事给到年（并注明生肖与约略公历年）。只给一个笼统的「某日」而不说是哪一天、或问的是几个月后的事却只答某日，都算没答。'
   ].join('\n');
   // 仅在证据包可用时追加。与上文纲要纪律互补：纲要管"按哪派理论断"，
   // 这段管"哪些内容是既定事实、哪些可由你推理"，二者不重复。
@@ -293,10 +294,13 @@
     'E10. READING 是本占类下的象义判读（已注明依据），凡涉及其所断元素，须优先采用其读法，不得改用与占类无关的泛化解释；其 [助]/[阻] 只表倾向，**不是成败断语**，成败仍须结合引擎吉凶与全盘旺衰自行推断，不得以"助多于阻"直接下结论。',
     'E11. 【关注点与权重】的 ★ 决定着墨详略：★★★★★ 者须逐条展开，★★ 者点到为止，不要平均用力。标为「盘上未见」者按未见论。',
     'E12. 若证据包声明本占类「规则未建」，那是应用尚未收录该占类规则，**不等于盘上没有阻碍**；此时按《解断方法纲要》正常推断，不得以"未见判读"为由声称一切顺遂。',
-    // Phase 4：应期锚点。要点是"只在候选里选"与"位次不是天数"——这两处一旦被误读，应期就会重新开始瞎猜。
-    'E13. 断应期只许在 TIMING 所列锚点中选取，不得自造日辰；其干支与上方 yingqi 同源，二者不是两套推算，不要并列陈述或相互印证。填实/冲实/冲墓/马星只能是**地支日**，宫干定日只能是**天干日**，两者不可互换。',
-    'E14. TIMING 的"距今位次"只表同一循环内的先到后到，**不是"几天后"**，不得换算成具体天数或日期。断日/断月/断年须按问事远近自行判定（近事看日时、中事看月、远事看年），并说明所据。',
-    'E15. TIMING 的 [★强]/[★中]/[★参考] 表示该机制与本占用神的关系强弱，不是应验概率；不得写成"某日必应"，应表述为"应期多在…"或"须待…方应"。'
+    // Phase 4/7：应期锚点。要点是"只在候选里选"与"先定远近再定单位"——这两处一旦被误读，应期就会重新开始瞎猜。
+    'E13. 断应期只许在 TIMING 所列锚点中选取，不得自造日辰；其干支与上方 yingqi 同源，二者不是两套推算，不要并列陈述或相互印证。填实/冲实/冲墓/马星取的是**地支**，宫干定日取的是**天干**，两者不可互换。',
+    'E14. TIMING 已把每个候选折成具体时点（第 N 日后 = 某年某月某日、第 N 个时辰后并附钟点、第 N 个月后并附节气区间、第 N 年后并附生肖与约略公历年），**照用即可，不必也不要另行换算**。但要分清：「这个候选下次何时到来」是历法事实，「事情是否应在那时」才是你的判断——后者须结合旺衰、格局与问事性质，不得把前者直接说成后者。',
+    'E15. **先看用户问的是多远的事，再决定按哪一级作答**：问「这两天/这几天能不能成」就断日，并进一步给时辰（TIMING 的「若断时辰」一段）；问「这两三个月」就断月（「若断月」一段）；问「今年还是明年」「哪一年」就断年（「若断年」一段）。同一批锚点按哪一级读，答案就落在哪一级——不要一律断成某日，也不要因为用户问的是远事就说「本盘只能断日」。证据包里的「本次缺省按…读」只是缺省推定，用户问题与它冲突时以用户问题为准。',
+    'E16. TIMING 中带〔推及〕标记的单位，是由纲要「近事看日时、中事看月、远事看年」一条推及的，该法原文只写了日；不带标记的是纲要写这条法时就写明了这一级。两者都可用，但断语中若用了带〔推及〕者，须说明是按远近推的，不得说成该法本身如此。',
+    'E17. 同一个支在时/日/月/年四级是**同一个候选的四种读法，不是四个候选**，不可分别陈述以显得处处应验。另：时辰与月建以地支命名（午时、辰月），天干在时/月/年三柱上只能说「时干戊」「月干戊」「年干戊」，**不得写成「戊时」「戊月」**；惟「戊日」是纲要原有用语，照旧。',
+    'E18. TIMING 的 [★强]/[★中]/[★参考] 表示该机制与本占用神的关系强弱，不是应验概率；不得写成"某日必应"，应表述为"应期多在…"或"须待…方应"。'
   ].join('\n');
   // 转盘断局补充：日干(求测人)/时干(所占之事)天盘落宫。
   // 引擎序列化只给四柱与九宫干，不点明二者落宫；此处算好喂给 AI，
@@ -698,7 +702,13 @@
         <div style="margin-top:6px;">
           <span class="muted">② 实际发生日期</span>
           <input type="date" id="reviewDate" value="${esc(fb.happenedAt || '')}">
+          <span class="muted">时刻(可选)</span>
+          <input type="time" id="reviewTime" value="${esc(fb.happenedTime || '')}" style="width:96px;">
           <span class="muted" id="reviewHitTag"></span>
+          <div class="muted" style="font-size:11px;margin-top:2px;">
+            填了时刻才会核对「时辰」一级。不填就不核对——拿中午顶替等于白送一次蒙中的机会，
+            那样算出来的命中率是虚的。
+          </div>
         </div>
         <div style="margin-top:6px;">
           <span class="muted">③ 整体判断</span>
@@ -728,6 +738,7 @@
       </div>`;
     $('reviewPanel').style.display = 'block';
     $('reviewDate').addEventListener('change', previewTimingHits);
+    $('reviewTime').addEventListener('change', previewTimingHits);
     $('reviewAiBtn').addEventListener('click', aiReview);
     $('reviewFixBtn').addEventListener('click', askCorrection);
     $('reviewSaveBtn').addEventListener('click', saveReview);
@@ -786,17 +797,29 @@
     finally { btn.disabled = false; }
   }
 
+  /** 实际发生时刻 → 四柱。未填时刻则**摘掉时柱**：中午顶替出来的时柱会白送一层命中机会。 */
+  function actualSiZhu(dateStr, timeStr) {
+    if (!dateStr) return null;
+    const at = new Date(dateStr + 'T' + (timeStr || '12:00') + ':00');
+    const sz = QM.qimen.calculate(at, { type: '四柱', method: '时家', purpose: '综合' }).siZhu;
+    const out = { year: sz.year, month: sz.month, day: sz.day };
+    if (timeStr) out.time = sz.time;
+    return out;
+  }
+
   /** 应期反推：确定性比对，实时显示命中了哪条机制。 */
   function previewTimingHits() {
     if (!_reviewRec || !CB) return;
-    const d = $('reviewDate').value;
+    const d = $('reviewDate').value, tm = $('reviewTime') ? $('reviewTime').value : '';
     if (!d) { $('reviewHitTag').textContent = ''; return; }
-    const sz = QM.qimen.calculate(new Date(d + 'T12:00:00'), { type: '四柱', method: '时家', purpose: '综合' }).siZhu;
+    const sz = actualSiZhu(d, tm);
     const der = CB.deriveTimingHits(_reviewRec, sz);
+    const head = esc(sz.day) + '日' + (sz.time ? '·' + esc(sz.time) + '时' : '');
+    const lv = (der.levelsEvaluated || []).join('/');
     $('reviewHitTag').innerHTML = der.hits.length
-      ? `　<span style="color:#3c763d">${esc(sz.day)}日 — 命中：${der.hits.map(h => esc(h.mechanism + '·' + h.value + '(' + h.level + ')')).join('、')}</span>
-         <span class="muted">（随机基准 ${Math.round(der.chance * 100)}%，命中率与基准相当即不算准）</span>`
-      : `　<span class="muted">${esc(sz.day)}日 — 当时的锚点无一命中（随机基准 ${Math.round(der.chance * 100)}%）</span>`;
+      ? `　<span style="color:#3c763d">${head} — 命中：${der.hits.map(h => esc(h.mechanism + '·' + h.value + '(' + (h.at || [h.level]).join('+') + ')')).join('、')}</span>
+         <span class="muted">（评了 ${esc(lv)} ${(der.levelsEvaluated || []).length} 层，随机基准 ${Math.round(der.chance * 100)}%，命中率与基准相当即不算准）</span>`
+      : `　<span class="muted">${head} — 当时的锚点无一命中（评了 ${esc(lv)} ${(der.levelsEvaluated || []).length} 层，随机基准 ${Math.round(der.chance * 100)}%）</span>`;
   }
 
   /** AI 复盘：只让模型把实况映射到当时的判读上，输出经严格校验后填进表单，由用户过目再存。 */
@@ -845,11 +868,12 @@
       if (sel.value) { symbolVerdicts[sel.dataset.symverdict] = sel.value; anyManual = true; }
     });
     const happenedAt = $('reviewDate').value;
+    const happenedTime = $('reviewTime') ? $('reviewTime').value : '';
     try {
       let rec = CB.applyFeedback(_reviewRec, {
         outcome: picked.value,
         actual: $('reviewActual').value.trim(),
-        happenedAt,
+        happenedAt, happenedTime,
         ruleVerdicts: verdicts,
         symbolVerdicts,
         // 用户在界面上过目并可改动过，故一律记为 manual；AI 只是预填
@@ -859,8 +883,7 @@
         now: new Date().toISOString()
       });
       if (happenedAt) {
-        const sz = QM.qimen.calculate(new Date(happenedAt + 'T12:00:00'), { type: '四柱', method: '时家', purpose: '综合' }).siZhu;
-        rec = CB.applyTimingDerivation(rec, CB.deriveTimingHits(rec, sz));
+        rec = CB.applyTimingDerivation(rec, CB.deriveTimingHits(rec, actualSiZhu(happenedAt, happenedTime)));
       }
       if (_reviewRec._correction) rec = CB.applyCorrection(rec, _reviewRec._correction);
       delete rec._aiObservations; delete rec._aiMisreads; delete rec._correction;

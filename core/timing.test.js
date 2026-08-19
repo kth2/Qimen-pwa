@@ -77,13 +77,17 @@ t('两派通用的机制，basis 须同时注明两份纲要（非由一派推�
       k + ' 声称两派通用，basis 却未分别引两份纲要：' + m.basis);
   });
 });
-t('只在转盘启用的机制，须写明为何不及飞盘', function () {
+t('只在单派启用的机制，须写明为何不及另一派（两个方向都要）', function () {
+  var single = 0;
   Object.keys(RULES.mechanisms).forEach(function (k) {
     var m = RULES.mechanisms[k];
-    if (m.appliesTo.length !== 1) return;
-    assert.strictEqual(m.appliesTo[0], 'zhuanpan');
-    assert.ok(m._schoolOmit && /飞盘/.test(m._schoolOmit), k + ' 须说明为何不在飞盘启用');
+    if (k.charAt(0) === '_' || !m.appliesTo || m.appliesTo.length !== 1) return;
+    single++;
+    var other = m.appliesTo[0] === 'zhuanpan' ? '飞盘' : '转盘';
+    assert.ok(m._schoolOmit && m._schoolOmit.indexOf(other) >= 0,
+      k + ' 只在 ' + m.appliesTo[0] + ' 启用，须说明为何不在' + other + '启用');
   });
+  assert.ok(single >= 2, '马星(仅转盘)与暗干远期(仅飞盘)两向皆应有单派机制');
 });
 t('地支/天干序表正确', function () {
   assert.strictEqual(RULES.zhiOrder.length, 12);
@@ -415,12 +419,212 @@ t('提示块声明干支同源、禁止自造日辰，并带出机制禁令', fu
   assert.ok(/取自上方【应期与数字】块的同一组计算/.test(txt), '须声明与 yingqi 同源，避免被当成两套推算');
   assert.ok(/不得自造日辰/.test(txt));
   assert.ok(/严禁改用天干或无关地支充数/.test(txt), '机制禁令须带出——这是实测最易被绕过之处');
-  assert.ok(/仅表先到后到/.test(txt), '位次不得被读成"几天后"');
+  // v5：四柱各支逐位递进，位次确是该候选下次出现的真实距离，故不再回避"第几日后"；
+  // 但必须把「候选何时再来」与「事情是否应在那时」分开说，不得把前者当成后者。
+  assert.ok(/历法事实/.test(txt) && /据全盘定夺/.test(txt),
+    '位次可作真实距离，但须写明「候选何时再来」不等于「事情应在那时」');
 });
 t('提示块不把锚点写成"必于某日应验"', function () {
   var banned = /必于|必在.{0,3}日应|铁定|一定应在/;
   SAMPLES.slice(0, 30).forEach(function (c) {
     assert.ok(!banned.test(TM.toPromptBlock(run(c, 'wealth'))), '应期提示块出现了确定性断言');
+  });
+});
+
+console.log('== 多元应期：时 / 日 / 月 / 年（Phase 7） ==');
+
+t('每个锚点都在时/日/月/年四级各读一次，且四级齐备', function () {
+  var UNITS = ['时', '日', '月', '年'];
+  RES.anchors.forEach(function (a) {
+    assert.ok(Array.isArray(a.reads), a.id + ' 缺 reads');
+    assert.deepStrictEqual(a.reads.map(function (r) { return r.unit; }), UNITS, a.id + ' 单位次序须为 时日月年');
+    a.reads.forEach(function (r) {
+      assert.strictEqual(r.kind, a.kind, '读法的干支性质须与锚点一致');
+      assert.ok(r.source === 'native' || r.source === 'horizon', '每一级须标明出处来源');
+      assert.ok(r.basis && r.basis.length > 10, a.id + '/' + r.unit + ' 缺出处');
+    });
+  });
+});
+
+t('位次按各柱各起：日读法的位次＝原 offset，其余各按本柱算', function () {
+  var sz = CHART.siZhu;
+  var P = { '时': sz.time, '日': sz.day, '月': sz.month, '年': sz.year };
+  RES.anchors.forEach(function (a) {
+    var order = a.kind === 'gan' ? RULES.ganOrder : RULES.zhiOrder;
+    a.reads.forEach(function (r) {
+      var from = a.kind === 'gan' ? String(P[r.unit]).charAt(0) : String(P[r.unit]).charAt(1);
+      assert.strictEqual(r.offset, TM.offsetIn(order, from, a.value),
+        a.id + ' 的「' + r.unit + '」位次未按' + r.unit + '柱起算');
+    });
+    var dayRead = a.reads.filter(function (r) { return r.unit === '日'; })[0];
+    assert.strictEqual(dayRead.offset, a.offset, 'anchor.offset 须仍是日一级的位次（下游案例本依赖它）');
+  });
+});
+
+t('填实/冲实的 native 只有日——纲要再三强调「只能是地支日」，不得悄悄推广', function () {
+  ['填实', '冲实'].forEach(function (k) {
+    assert.deepStrictEqual(RULES.mechanisms[k].nativeUnits, ['日'], k + ' 不得声称原文许了日以外的单位');
+  });
+  RES.anchors.filter(function (a) { return a.mechanism === '填实' || a.mechanism === '冲实'; })
+    .forEach(function (a) {
+      a.reads.forEach(function (r) {
+        assert.strictEqual(r.source, r.unit === '日' ? 'native' : 'horizon',
+          a.mechanism + ' 的「' + r.unit + '」级只能记作由远近推及');
+      });
+    });
+});
+
+t('马星原文写「之日/月」，故日与月两级皆为原文所许', function () {
+  assert.deepStrictEqual(RULES.mechanisms['马星'].nativeUnits, ['日', '月']);
+  assert.ok(/日\/月/.test(RULES.mechanisms['马星'].unitBasis), '须引原文「之日/月」为据');
+});
+
+t('冲墓的单位按盘别分列：转盘四级(要诀2「年月日时」)、飞盘只日', function () {
+  var m = RULES.mechanisms['冲墓'];
+  assert.deepStrictEqual(m.nativeUnitsBySchool.zhuanpan, ['年', '月', '日', '时']);
+  assert.deepStrictEqual(m.nativeUnitsBySchool.feipan, ['日']);
+  assert.ok(/年月日时/.test(m.unitBasis) && /飞盘/.test(m.unitBasis), '两派写法不同须各自注明');
+  var zp = RES.anchors.filter(function (a) { return a.mechanism === '冲墓'; })[0];
+  if (zp) assert.deepStrictEqual(zp.nativeUnits, ['年', '月', '日', '时']);
+  var fp = run(CHART, 'wealth', { school: 'feipan', yongShenGongs: ['2', '6'] });
+  var fa = fp.anchors.filter(function (a) { return a.mechanism === '冲墓'; })[0];
+  if (fa) assert.deepStrictEqual(fa.nativeUnits, ['日'], '飞盘冲墓不得沿用转盘的四级');
+});
+
+t('零串味：暗干远期只在飞盘、马星只在转盘', function () {
+  assert.deepStrictEqual(RULES.mechanisms['暗干远期'].appliesTo, ['feipan']);
+  SAMPLES.slice(0, 20).forEach(function (c) {
+    assert.ok(!run(c, 'wealth').anchors.some(function (a) { return a.mechanism === '暗干远期'; }),
+      '转盘不得出现飞盘专法「暗干远期」');
+    assert.ok(!run(c, 'wealth', { school: 'feipan', yongShenGongs: ['1', '5'] })
+      .anchors.some(function (a) { return a.mechanism === '马星'; }),
+      '飞盘不得出现转盘专法「马星」');
+  });
+});
+
+t('飞盘暗干远期取盘面 diPanAnGan，干支两半各成一锚', function () {
+  var fpChart = QM.feipanQimen.calculate(new Date('2024-04-10T10:00:00'), { method: '时家', purpose: '财运' });
+  var yq = YQ.analyze(fpChart, { yongShenGongs: ['4'] });
+  var r = TM.analyze({ chart: fpChart, yingqi: yq, options: { school: 'feipan', yongShenGongs: ['4'] } });
+  var an = r.anchors.filter(function (a) { return a.mechanism === '暗干远期'; });
+  assert.ok(an.length >= 2, '干支两半应各出一锚');
+  var pair = String(fpChart.diPanAnGan['4']);
+  assert.ok(an.some(function (a) { return a.kind === 'gan' && a.value === pair.charAt(0); }), '干的一半须取自 diPanAnGan');
+  assert.ok(an.some(function (a) { return a.kind === 'zhi' && a.value === pair.charAt(1); }), '支的一半须取自 diPanAnGan');
+  an.forEach(function (a) {
+    assert.deepStrictEqual(a.nativeUnits, ['年', '月', '日', '时'], '飞盘远期原文即许四级');
+  });
+});
+
+t('干在时/月/年三柱不得写成「戊时」「戊月」——那是生造的名目', function () {
+  RES.anchors.filter(function (a) { return a.kind === 'gan'; }).forEach(function (a) {
+    a.reads.forEach(function (r) {
+      if (r.unit === '日') assert.strictEqual(r.label, a.value + '日', '「戊日」是纲要原有用语，须照旧');
+      else assert.strictEqual(r.label, r.unit + '干' + a.value, '干在' + r.unit + '柱须写作「' + r.unit + '干X」');
+    });
+  });
+  RES.anchors.filter(function (a) { return a.kind === 'zhi'; }).forEach(function (a) {
+    a.reads.forEach(function (r) { assert.strictEqual(r.label, a.value + r.unit); });
+  });
+});
+
+t('地支的时辰钟点与月建节气取自规则库，非临时杜撰', function () {
+  assert.strictEqual(RULES.zhiUnits['时']['子'], '23:00–01:00');
+  assert.strictEqual(RULES.zhiUnits['时']['午'], '11:00–13:00');
+  assert.strictEqual(RULES.zhiUnits['月']['寅'].lunar, '正月');
+  assert.strictEqual(RULES.zhiUnits['月']['午'].jieqi, '芒种至小暑');
+  assert.strictEqual(RULES.zhiUnits['年']['午'], '马年');
+  assert.strictEqual(Object.keys(RULES.zhiUnits['时']).length, 12);
+  assert.strictEqual(Object.keys(RULES.zhiUnits['月']).length, 12);
+  RES.anchors.filter(function (a) { return a.kind === 'zhi'; }).forEach(function (a) {
+    a.reads.forEach(function (r) {
+      if (r.unit === '时') assert.strictEqual(r.window, RULES.zhiUnits['时'][a.value]);
+      if (r.unit === '年') assert.strictEqual(r.window, RULES.zhiUnits['年'][a.value]);
+      if (r.unit === '日') assert.strictEqual(r.window, '', '日无钟点区间可标');
+    });
+  });
+});
+
+t('位次折成的时点与盘日一致：第 N 日后须真是那一天', function () {
+  RES.anchors.forEach(function (a) {
+    var r = a.reads.filter(function (x) { return x.unit === '日'; })[0];
+    if (r.offset === 0) { assert.strictEqual(r.when, '即今日'); return; }
+    var m = /第 (\d+) 日后 = (\d{4}-\d{2}-\d{2})/.exec(r.when);
+    assert.ok(m, '日一级须给出具体公历日：' + r.when);
+    assert.strictEqual(+m[1], r.offset);
+    var d = new Date('2024-04-10T00:00:00Z');
+    d.setUTCDate(d.getUTCDate() + r.offset);
+    assert.strictEqual(m[2], d.toISOString().slice(0, 10), '折算出的公历日与位次对不上');
+  });
+});
+
+t('年一级给出的公历年＝盘年 + 位次，且标为约数（年以立春分界）', function () {
+  RES.anchors.forEach(function (a) {
+    var r = a.reads.filter(function (x) { return x.unit === '年'; })[0];
+    if (r.offset === 0) return;
+    var m = /第 (\d+) 年后 ≈ (\d{4}) 年/.exec(r.when);
+    assert.ok(m, '年一级须给出约略公历年：' + r.when);
+    assert.strictEqual(+m[2], 2024 + r.offset);
+  });
+  assert.ok(/年以立春分界，所标公历年为约数/.test(TM.toPromptBlock(RES)), '须写明年的分界与约数性质');
+});
+
+t('byUnit 按单位分铺，同名只留最强的一条来源（不把同一支当成多次机会）', function () {
+  ['时', '日', '月', '年'].forEach(function (u) {
+    var list = RES.byUnit[u];
+    assert.ok(Array.isArray(list) && list.length, u + ' 一级应有内容');
+    var seen = {};
+    list.forEach(function (r) {
+      assert.ok(!seen[r.label], u + ' 一级出现重复读法 ' + r.label + '——同一支不得当成多个候选');
+      seen[r.label] = 1;
+    });
+    for (var i = 1; i < list.length; i++) {
+      assert.ok(list[i - 1].offset <= list[i].offset, u + ' 一级须按位次由近及远');
+    }
+  });
+});
+
+t('远近：未指定时依迟速缺省推定，并写明这是推定而非用户所述', function () {
+  assert.ok(RES.horizon, '须给出远近');
+  assert.ok(['近', '中', '远'].indexOf(RES.horizon.tier) >= 0);
+  assert.ok(RES.horizon.source === 'pace' || RES.horizon.source === 'default');
+  assert.ok(/推定/.test(RES.horizon.sourceNote), '缺省推定必须自认是推定');
+  var r2 = run(CHART, 'wealth');
+  r2 = TM.analyze({
+    chart: CHART, yingqi: YQ.analyze(CHART, { yongShenGongs: ['2'] }),
+    options: { school: 'zhuanpan', yongShenGongs: ['2'], horizon: '远' }
+  });
+  assert.strictEqual(r2.horizon.tier, '远');
+  assert.strictEqual(r2.horizon.source, 'user');
+  assert.deepStrictEqual(r2.horizon.units, ['年']);
+});
+
+t('提示块把「先定远近」摆在锚点之前，并明说不要一律断成某日', function () {
+  var txt = TM.toPromptBlock(RES);
+  assert.ok(txt.indexOf('【远近·先定这一条】') >= 0 && txt.indexOf('【远近·先定这一条】') < txt.indexOf('应期锚点'),
+    '远近须在锚点之前，否则模型已经按日断完了');
+  assert.ok(/不要一律断成某日/.test(txt));
+  assert.ok(/若断时辰/.test(txt) && /若断月/.test(txt) && /若断年/.test(txt), '四级须各自分铺一段');
+  assert.ok(/不是多给了一个候选/.test(txt), '须防止把同一支跨级读当成多次机会');
+  assert.ok(/本法原文所许/.test(txt) && /按远近推及/.test(txt), '两级出处须在提示词里分得开');
+});
+
+t('确定性：同盘同占类，四级读法与 byUnit 逐字相同', function () {
+  var a = run(CHART, 'wealth'), b = run(CHART, 'wealth');
+  assert.strictEqual(JSON.stringify(a.anchors), JSON.stringify(b.anchors));
+  assert.strictEqual(JSON.stringify(a.byUnit), JSON.stringify(b.byUnit));
+  assert.strictEqual(TM.toPromptBlock(a), TM.toPromptBlock(b));
+});
+
+t('多盘稳健：90 张样本盘四级读法皆不抛错、位次皆在循环内', function () {
+  SAMPLES.forEach(function (c) {
+    var r = run(c, 'wealth');
+    r.anchors.forEach(function (a) {
+      assert.strictEqual(a.reads.length, 4);
+      a.reads.forEach(function (x) {
+        assert.ok(x.offset == null || (x.offset >= 0 && x.offset < x.cycle), '位次越界');
+      });
+    });
   });
 });
 

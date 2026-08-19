@@ -31,8 +31,12 @@
   'use strict';
 
   var DB = null;
-  var VERSION = '4.0.0';
+  var VERSION = '5.0.0';
   var MAX_ANCHORS = 12;   // 应期锚点不宜多：候选越多越等于没给答案
+
+  /* 单位 → 四柱中的哪一柱。同一个支在不同柱上各读一次，故位次也各按各柱起算。 */
+  var PILLAR_OF = { '时': 'time', '日': 'day', '月': 'month', '年': 'year' };
+  var UNIT_ORDER = ['时', '日', '月', '年'];
 
   function load(rulesJson) {
     DB = (rulesJson && rulesJson.mechanisms) ? rulesJson : null;
@@ -48,9 +52,10 @@
   }
 
   /**
-   * 距今位次：从本盘日支(或日干)数到目标支(或干)还有几位。
-   * 地支 12 位循环、天干 10 位循环；0 表示就在今日。
-   * 这不是「几天后」的断言——只是同一循环内的先后次序，用来把并列的候选排成时间线。
+   * 距今位次：从本盘某柱之支(或干)数到目标支(或干)还有几位。地支 12 位循环、天干 10 位循环。
+   * 四柱各支逐位递进（日支一日一位、月支一月一位、年支一年一位、时支一辰一位），
+   * 故此位次就是**该候选下一次出现的真实距离**：0＝正当其时，2＝两位之后。
+   * 但「候选何时再来」是历法事实，「事情是否应在那时」是另一回事——后者仍由模型据全盘定夺。
    */
   function offsetIn(order, from, to) {
     if (!order || !from || !to) return null;
@@ -100,6 +105,81 @@
     return w;
   }
 
+
+  /** 四柱各柱的干与支。位次按各柱各起（日支一日一位、月支一月一位…），故须逐柱取。 */
+  function pillarsOf(sz) {
+    var p = {};
+    UNIT_ORDER.forEach(function (u) {
+      var s = String((sz || {})[PILLAR_OF[u]] || '');
+      p[u] = { gan: s.charAt(0), zhi: s.charAt(1) };
+    });
+    return p;
+  }
+
+  /** 盘的公历日期，用来把位次折成看得见的年月日。取自 basicInfo.date；缺则只给位次不折算。 */
+  function chartDate(chart) {
+    var s = (chart && chart.basicInfo && chart.basicInfo.date) || '';
+    var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s));
+    return m ? { y: +m[1], mo: +m[2], d: +m[3] } : null;
+  }
+  function addDaysISO(cd, n) {
+    if (!cd) return '';
+    var d = new Date(Date.UTC(cd.y, cd.mo - 1, cd.d));
+    d.setUTCDate(d.getUTCDate() + n);
+    return d.getUTCFullYear() + '-' + ('0' + (d.getUTCMonth() + 1)).slice(-2) + '-' + ('0' + d.getUTCDate()).slice(-2);
+  }
+
+  /** 该机制**原文**写明的单位。冲墓在两派纲要中写法不同，故支持按盘别分列。 */
+  function nativeUnitsOf(m, school) {
+    if (m.nativeUnitsBySchool) return (m.nativeUnitsBySchool[school] || []).slice();
+    return (m.nativeUnits || ['日']).slice();
+  }
+
+  /**
+   * 同一个干支在时/日/月/年四级各读一次。
+   *   source='native'  —— 该机制原文写明的单位（马星「之日/月」、冲墓「之年月日时」、飞盘暗干支「年/月/日时」）；
+   *   source='horizon' —— 由纲要·三节应期5「近事看日时、中事看月、远事看年」一条推及者。
+   * 两者出处分列，模型据此看得出哪一级不是该机制自己说的。填实/冲实原文再三强调「只能是地支日」，
+   * 故其 native 只有日，其余三级一律记 horizon——不把断法悄悄推广。
+   */
+  function buildReads(m, kind, value, school, pillars, cd) {
+    var native = nativeUnitsOf(m, school);
+    var order = kind === 'gan' ? (DB.ganOrder || []) : (DB.zhiOrder || []);
+    var zu = DB.zhiUnits || {}, hz = DB.horizon || {};
+    return UNIT_ORDER.map(function (u) {
+      var from = (pillars[u] || {})[kind === 'gan' ? 'gan' : 'zhi'] || '';
+      var off = offsetIn(order, from, value);
+      var isNative = native.indexOf(u) >= 0;
+      // 干与支的称谓不同：地支才有「午时」「辰月」这样的名目，天干在时/月/年三柱上
+      // 只能说「该柱之干为某」——写成「己时」「戊月」是生造的说法，故分开命名。
+      // 惟「戊日」是纲要本来的用语（「用神坐丙→丙日」），照旧。
+      var name = kind === 'gan' && u !== '日' ? (u + '干' + value) : (value + u);
+      var r = {
+        unit: u, label: name, kind: kind,
+        offset: off, cycle: order.length,
+        source: isNative ? 'native' : 'horizon',
+        basis: isNative ? (m.unitBasis || m.basis || '') : (hz.basis || ''),
+        window: '', when: ''
+      };
+      if (kind === 'zhi') {
+        if (u === '时') r.window = (zu['时'] || {})[value] || '';
+        else if (u === '年') r.window = (zu['年'] || {})[value] || '';
+        else if (u === '月') {
+          var mm = (zu['月'] || {})[value];
+          if (mm) r.window = mm.lunar + '（' + mm.jieqi + '，' + mm.gregorian + '）';
+        }
+      }
+      // 位次折成时点：四柱各支逐位递进，故位次即真实距离——这是历法定数，不是断言事情应在那时
+      if (off != null) {
+        if (u === '日') r.when = off === 0 ? '即今日' : ('第 ' + off + ' 日后' + (cd ? ' = ' + addDaysISO(cd, off) : ''));
+        else if (u === '时') r.when = off === 0 ? '即当下这个时辰' : ('第 ' + off + ' 个时辰后');
+        else if (u === '月') r.when = off === 0 ? '即本月建' : ('第 ' + off + ' 个月后');
+        else r.when = off === 0 ? '即本年太岁' : ('第 ' + off + ' 年后' + (cd ? ' ≈ ' + (cd.y + off) + ' 年' : ''));
+      }
+      return r;
+    });
+  }
+
   var STRENGTH_RANK = { high: 3, medium: 2, low: 1 };
 
   /**
@@ -124,8 +204,8 @@
     var base = {
       version: VERSION, domain: domain, school: school,
       applicable: false, reason: '',
-      dayZhi: '', dayGan: '',
-      anchors: [], timeline: [], pace: null, horizon: null,
+      dayZhi: '', dayGan: '', pillars: null,
+      anchors: [], timeline: [], byUnit: null, units: [], pace: null, horizon: null,
       numbers: [], targetSource: '', notes: []
     };
 
@@ -136,6 +216,13 @@
     base.dayGan = String(sz.day || '').charAt(0);
     base.dayZhi = String(sz.day || '').charAt(1);
     if (!base.dayZhi) { base.reason = '盘面缺日柱，无从计算距今位次。'; return base; }
+    var pillars = pillarsOf(sz);
+    var cd = chartDate(chart);
+    base.pillars = pillars;
+    // 缺哪一柱就说哪一柱：少了月柱就断不了月，如实标出，不拿日柱顶替
+    UNIT_ORDER.forEach(function (u) {
+      if (!pillars[u].zhi) base.notes.push('盘面缺' + PILLAR_OF[u] + '柱，「' + u + '」一级的位次无从起算，该级只给支名不给远近。');
+    });
 
     var targets = buildTargets(xy, options);
     base.targetSource = targets.source;
@@ -152,17 +239,21 @@
       var m = mech(name);
       return !!m && (m.appliesTo || []).indexOf(school) >= 0;
     }
-    function push(mechName, value, gong, extra) {
+    function push(mechName, value, gong, extra, kindOverride) {
       var m = mech(mechName);
-      if (!m) return;
-      var kind = m.kind === 'gan' ? 'gan' : 'zhi';
-      var unit = kind === 'gan' ? '干日' : '地支日';
+      if (!m || !value) return;
+      // 多数机制的干支性质是固定的；惟飞盘暗干支一法干支两半俱有，故容调用处指明
+      var kind = (kindOverride || m.kind) === 'gan' ? 'gan' : 'zhi';
+      var unit = kind === 'gan' ? '干' : '地支';
       var tg = targetsAt(targets, gong);
       // 强弱＝机制与用神的关系，非打分。级别由规则库显式声明（mechanism.onTarget），
       // 不由描述字段的有无去推断——落到用神宫才谈得上强弱，否则一律 low。
       var strength = tg.length ? (m.onTarget || 'medium') : 'low';
       var order = kind === 'gan' ? GAN : ZHI;
+      // offset 仍是**日**一级的位次：既是本层原有语义，也是下游案例本对轨所依赖的那一个
       var offset = offsetIn(order, kind === 'gan' ? base.dayGan : base.dayZhi, value);
+      var reads = buildReads(m, kind, value, school, pillars, cd);
+      var nativeUnits = nativeUnitsOf(m, school);
       out.push({
         id: mechName + ':' + value + '@' + (gong || '-') + '#' + (seq++),
         mechanism: mechName, label: m.label || mechName,
@@ -171,6 +262,9 @@
         gong: gong ? String(gong) : '',
         targets: tg, weight: maxWeight(tg), strength: strength,
         offset: offset, cycle: order.length,
+        // v5：同一个干支在时/日/月/年四级各读一次，并标明哪一级是机制原文所许、哪一级由「远近」推及
+        reads: reads, nativeUnits: nativeUnits,
+        unitBasis: m.unitBasis || '',
         basis: m.basis || '', caution: m.caution || '',
         note: (extra && extra.note) || ''
       });
@@ -214,7 +308,21 @@
       });
     }
 
-    /* ---------- ⑤ 排序：先按强弱，再按用神权重，最后按距今位次（同分以 id 稳定） ---------- */
+    /* ---------- ⑤ 用神宫暗干定远期（仅飞盘：转盘纲要应期节未列此法） ----------
+     * 这是纲要里唯一**专为远期而设**的机制：飞盘·应期节明写「远期：取用神宫的地盘暗干支定（年/月/日时）」。
+     * 飞盘盘面 diPanAnGan 排出的是**完整干支**（如「丁卯」），干支两半俱在，正合纲要所指。 */
+    if (enabled('暗干远期') && chart && chart.diPanAnGan) {
+      Object.keys(targets.byGong).forEach(function (g) {
+        var ag = String(chart.diPanAnGan[g] || chart.diPanAnGan[String(g)] || '');
+        if (!ag) return;
+        var agGan = ag.charAt(0), agZhi = ag.charAt(1);
+        // 干支两半各成一锚：循环长短不同（十 vs 十二），位次须各按各算，不能合成一条
+        push('暗干远期', agGan, g, { note: '用神宫地盘暗干支 ' + ag + ' 之干；纲要以此定远期（年/月/日时）' }, 'gan');
+        if (agZhi) push('暗干远期', agZhi, g, { note: '用神宫地盘暗干支 ' + ag + ' 之支；纲要以此定远期（年/月/日时）' }, 'zhi');
+      });
+    }
+
+    /* ---------- ⑥ 排序：先按强弱，再按用神权重，最后按距今位次（同分以 id 稳定） ---------- */
     out.sort(function (a, b) {
       var sa = STRENGTH_RANK[a.strength] || 0, sb = STRENGTH_RANK[b.strength] || 0;
       if (sa !== sb) return sb - sa;
@@ -238,7 +346,7 @@
       return a.id < b.id ? -1 : 1;
     });
 
-    /* ---------- ⑥ 迟速：以权重最高之用神的旺衰定（纲要·三节应期5） ---------- */
+    /* ---------- ⑦ 迟速：以权重最高之用神的旺衰定（纲要·三节应期5） ---------- */
     if (ws && xy && xy.applicable && xy.focus && xy.focus.length) {
       var lead = xy.focus[0];
       var st = lead.state || (ws.gongs[lead.gong] || {}).gongState || '';
@@ -255,7 +363,7 @@
       }
     }
 
-    /* ---------- ⑦ 数字：只取用神宫的河图数（全盘对照表仍由 yingqi 块承载） ---------- */
+    /* ---------- ⑧ 数字：只取用神宫的河图数（全盘对照表仍由 yingqi 块承载） ---------- */
     Object.keys(targets.byGong).forEach(function (g) {
       var gg = (yq.gongGan || {})[g];
       if (!gg) return;
@@ -266,7 +374,58 @@
     });
     base.numbers.sort(function (a, b) { return a.gong < b.gong ? -1 : 1; });
 
-    base.horizon = DB.horizon ? { guidance: DB.horizon.guidance, basis: DB.horizon.basis } : null;
+    /* ---------- ⑨ 按单位汇总：同一批锚点分别按时/日/月/年铺一次 ----------
+     * 同一个支在四级上是**同一个候选的四种读法**，不是四个候选。故按 label 去重，
+     * 只留最强的那条来源，避免「午日/午月/午年」被当成三次独立的机会去凑命中。 */
+    base.byUnit = {};
+    UNIT_ORDER.forEach(function (u) {
+      var seen = {}, list = [];
+      out.forEach(function (a) {
+        (a.reads || []).forEach(function (r) {
+          if (r.unit !== u || r.offset == null) return;
+          var prev = seen[r.label];
+          var row = {
+            label: r.label, value: a.value, kind: a.kind, window: r.window, when: r.when,
+            offset: r.offset, source: r.source, mechanism: a.mechanism, mechLabel: a.label,
+            strength: a.strength, weight: a.weight, gong: a.gong
+          };
+          if (!prev) { seen[r.label] = row; list.push(row); return; }
+          // 同名者留最强：先比强弱，再比用神权重，再优先机制原文所许者
+          var better = (STRENGTH_RANK[row.strength] || 0) > (STRENGTH_RANK[prev.strength] || 0)
+            || (row.strength === prev.strength && row.weight > prev.weight)
+            || (row.strength === prev.strength && row.weight === prev.weight
+                && row.source === 'native' && prev.source !== 'native');
+          if (better) { list[list.indexOf(prev)] = row; seen[r.label] = row; }
+        });
+      });
+      list.sort(function (a, b) {
+        if (a.offset !== b.offset) return a.offset - b.offset;
+        var sa = STRENGTH_RANK[a.strength] || 0, sb = STRENGTH_RANK[b.strength] || 0;
+        if (sa !== sb) return sb - sa;
+        return a.label < b.label ? -1 : 1;
+      });
+      base.byUnit[u] = list;
+    });
+
+    /* ---------- ⑩ 远近：断时/断日/断月/断年，取哪一级 ----------
+     * 远近本应由**所问之事**决定（纲要·三节应期5）。用户未言明时，依同一句「得令旺相则应速，
+     * 休囚墓绝则应迟」，以迟速作缺省推定——推定就写明是推定，不冒充用户所述。 */
+    if (DB.horizon) {
+      var hz = DB.horizon, tier = '', src_ = '';
+      if (options.horizon && hz.tiers[options.horizon]) { tier = options.horizon; src_ = 'user'; }
+      else if (base.pace && (hz.fromPace || {})[base.pace.speed]) { tier = hz.fromPace[base.pace.speed]; src_ = 'pace'; }
+      else { tier = '近'; src_ = 'default'; }
+      var t = hz.tiers[tier] || {};
+      base.horizon = {
+        tier: tier, units: (t.units || []).slice(), when: t.when || '', tierNote: t.note || '',
+        source: src_,
+        sourceNote: src_ === 'user' ? '由调用方按所问之事指定'
+          : src_ === 'pace' ? ('未据所问之事指定，依用神' + (base.pace ? base.pace.state : '') + '所定之「' + (base.pace ? base.pace.speed : '') + '」缺省推定——' + (hz.fromPaceNote || ''))
+          : '既未指定、亦无迟速可依，缺省按近事（日与时辰）读；若所问是数月或数年之事，请改按月/年一级读下列锚点。',
+        guidance: hz.guidance || '', basis: hz.basis || '', caution: hz.caution || ''
+      };
+      base.units = UNIT_ORDER.filter(function (u) { return (base.byUnit[u] || []).length > 0; });
+    } else { base.horizon = null; base.units = []; }
     base.applicable = base.anchors.length > 0;
     base.reason = base.applicable
       ? '已按机制与用神权重筛出应期锚点（干支全部取自 yingqi 计算，未另推）。'
@@ -279,28 +438,79 @@
     if (!res || !res.applicable || !res.anchors.length) return '';
     var L = [];
     var SPEED = { high: '★强', medium: '★中', low: '★参考' };
+    var SRC = { native: '机制原文', horizon: '远近推及' };
     L.push('');
     L.push('【应期时间线 Timing v' + res.version + (res.domain ? '　占类：' + res.domain : '') + '】');
     L.push('· 下列干支**全部取自上方【应期与数字】块的同一组计算**，本层只做「挑出与本占用神相关者、' +
-      '定其强弱、排出先后」，未另推一套。取期请只在这些候选中选，不得自造日辰。');
+      '定其强弱、定其可读的单位、排出先后」，未另推一套。取期请只在这些候选中选，不得自造日辰。');
     if (res.targetSource === 'engine') {
       L.push('· 用神落宫取自引擎自算（未启用占类象义层），故只分主次不分权重。');
     } else if (!res.targetSource) {
       L.push('· 未取得用神落宫，以下锚点均为参考级，请结合盘面自行判定主次。');
     }
+
+    /* ---- 远近：先把「这次该按哪一级读」摆在最前，否则模型一律断成某日 ---- */
+    if (res.horizon) {
+      L.push('· 【远近·先定这一条】本次缺省按「' + res.horizon.tier + '事」读，即看 ' +
+        res.horizon.units.join('、') + ' 一级' + (res.horizon.when ? '（' + res.horizon.when + '）' : '') + '。' +
+        res.horizon.sourceNote);
+      L.push('  ' + res.horizon.guidance);
+      L.push('  ⚠ **这只是缺省。请先看用户问的是多远的事**：问「这两天能不能成」就断日与时辰；' +
+        '问「这两三个月」就断月；问「今年明年」「哪一年」就断年。同一批锚点按哪一级读，答案就落在哪一级——' +
+        '不要一律断成某日，也不要因为用户问的是远事就说「本盘只能断日」。');
+      if (res.horizon.caution) L.push('  ⚠ ' + res.horizon.caution);
+    }
+
+    /* ---- 锚点：每条给出机制原文所许的单位，与由远近推及的其余单位 ---- */
     L.push('· 应期锚点（按强弱与用神权重排序）：');
     res.anchors.forEach(function (a) {
       var who = a.targets.length
         ? a.targets.map(function (t) { return t.name + (t.aspect ? '(' + t.aspect + ')' : ''); }).join('、')
         : '非用神宫';
-      L.push('  - [' + (SPEED[a.strength] || '') + '] ' + a.label + '：' + a.value + '日' +
-        (a.gong ? '　(' + a.gong + '宫' + ')' : '') + '　用神：' + who +
-        (a.note ? '　—— ' + a.note : ''));
+      L.push('  - [' + (SPEED[a.strength] || '') + '] ' + a.label + '：' + a.value +
+        (a.gong ? '　(' + a.gong + '宫)' : '') + '　用神：' + who + (a.note ? '　—— ' + a.note : ''));
+      var reads = (a.reads || []).filter(function (r) { return r.offset != null; });
+      var nat = reads.filter(function (r) { return r.source === 'native'; });
+      var hor = reads.filter(function (r) { return r.source === 'horizon'; });
+      function fmt(r) {
+        var bits = [];
+        if (r.window) bits.push(r.window);
+        if (r.when) bits.push(r.when);
+        return r.label + (bits.length ? '（' + bits.join('，') + '）' : '');
+      }
+      if (nat.length) L.push('      〔本法原文所许〕' + nat.map(fmt).join('　｜　'));
+      if (hor.length) L.push('      〔按远近推及〕' + hor.map(fmt).join('　｜　'));
     });
-    L.push('· 先后次序（同一循环内距今位次，仅表先到后到，不是"几天后"的断言）：' +
+    if (res.anchors.some(function (a) { return a.kind === 'gan'; })) {
+      L.push('  · 天干锚点的读法：「戊日」是纲要原有用语；但时辰与月建是以**地支**命名的（午时、辰月），' +
+        '天干在时/月/年三柱上只能说「该柱之干为某」，故写作「时干戊」「月干戊」「年干戊」——' +
+        '断语中不要写成「戊时」「戊月」，那是生造的说法。');
+    }
+    L.push('  · 〔本法原文所许〕＝纲要写这条法时就写明了这一级（如马星「之日/月」、冲墓「之年月日时」、' +
+      '飞盘远期暗干支「年/月/日时」），可直接照断。' +
+      '〔按远近推及〕＝该法原文只写了日，是由「近事看日时、中事看月、远事看年」一条推及的——' +
+      '可用，但断语里要说清是按远近推的，不要说成该法本身如此。');
+
+    /* ---- 按单位分铺：这一段直接回答「同一天不同时辰」「远期在哪几个月/哪一年」 ---- */
+    (res.units || []).forEach(function (u) {
+      var list = (res.byUnit && res.byUnit[u]) || [];
+      if (!list.length) return;
+      var head = u === '时' ? '· 若断时辰（同一日之内何时；近事必看这一级）：'
+        : u === '日' ? '· 若断日：'
+        : u === '月' ? '· 若断月（中事看月；月建以节气分界，非农历朔望月）：'
+        : '· 若断年（远事看年；年以立春分界，所标公历年为约数）：';
+      L.push(head + list.slice(0, 8).map(function (r) {
+        return r.label + '[' + (SPEED[r.strength] || '') + '·' + r.mechLabel + (r.source === 'native' ? '' : '·推及') + ']'
+          + (r.window ? '（' + r.window + '）' : '') + (r.when ? '　' + r.when : '');
+      }).join('；'));
+    });
+
+    L.push('· 先后次序（按日一级的距今位次；四柱各支逐位递进，故位次即该候选下次出现的真实距离，' +
+      '但「候选何时再来」是历法事实，「事情是否应在那时」仍须你据全盘定夺）：' +
       res.timeline.map(function (a) {
-        return a.value + '日(' + a.label + (a.offset == null ? '' : '·第' + a.offset + '位') + ')';
+        return a.value + '(' + a.label + (a.offset == null ? '' : '·第' + a.offset + '位') + ')';
       }).join(' → '));
+
     if (res.pace) {
       L.push('· 迟速：以 ' + res.pace.from + (res.pace.aspect ? '(' + res.pace.aspect + ')' : '') +
         ' 落 ' + res.pace.gong + '宫' + res.pace.state + ' 论，应期偏「' + res.pace.speed + '」——' + res.pace.note +
@@ -313,7 +523,6 @@
             '、地' + n.diGan + '=' + n.diNum;
         }).join('；'));
     }
-    if (res.horizon) L.push('· 断日/断月/断年：' + res.horizon.guidance + '　（依据：' + res.horizon.basis + '）');
     // 机制自带的禁令逐条带出——这是实测最容易被绕过的地方
     var cautions = [];
     res.anchors.forEach(function (a) { if (a.caution && cautions.indexOf(a.caution) < 0) cautions.push(a.caution); });

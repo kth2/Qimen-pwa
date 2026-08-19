@@ -345,7 +345,9 @@ t('提示块声明应期与 yingqi 同源，并禁止自造日辰', function () 
   var txt = EV.toPromptBlock(buildWithTiming());
   assert.ok(/取自上方 yingqi 同一组计算/.test(txt), '须声明同源，避免被当成两套推算');
   assert.ok(/不得自造日辰/.test(txt));
-  assert.ok(/仅表先到后到/.test(txt), '位次不得被读成"几天后"');
+    // v5：位次确是该候选下次出现的真实距离；须防的是把它当成「事情必应在那时」
+  assert.ok(/历法事实/.test(txt) && /据全盘定夺/.test(txt),
+    '位次可作真实距离，但须与「事情是否应在那时」分开说');
   assert.ok(/严禁改用天干或无关地支充数/.test(txt), '机制禁令须带出');
 });
 t('证据包保留时间线次序、迟速与用神宫河图数', function () {
@@ -365,6 +367,63 @@ t('含应期的证据包仍受体积约束', function () {
 t('含判读的证据包可 JSON 序列化且确定性', function () {
   assert.doesNotThrow(function () { JSON.parse(JSON.stringify(buildWithXy())); });
   assert.deepStrictEqual(buildWithXy(), buildWithXy());
+});
+
+console.log('== 应期多元性：四级读法必须进到证据包（这是真正送给模型的那一份） ==');
+
+t('TIMING 条目带上四级读法与其出处', function () {
+  var ev = buildWithTiming();
+  var ts = ev.items.filter(function (x) { return x.type === 'TIMING'; });
+  assert.ok(ts.length, '本盘应有应期锚点');
+  ts.forEach(function (x) {
+    assert.ok(Array.isArray(x.reads) && x.reads.length, x.id + ' 缺四级读法');
+    assert.ok(Array.isArray(x.nativeUnits) && x.nativeUnits.length, x.id + ' 缺 nativeUnits');
+    x.reads.forEach(function (r) {
+      assert.ok(['时', '日', '月', '年'].indexOf(r.unit) >= 0);
+      assert.ok(r.source === 'native' || r.source === 'horizon');
+    });
+  });
+});
+
+t('远近须排在锚点之前——排在后面等于模型已经按日断完了', function () {
+  var txt = EV.toPromptBlock(buildWithTiming());
+  var iHead = txt.indexOf('· TIMING（应期锚点');
+  var iHorizon = txt.indexOf('【先定远近】');
+  var iAnchor = txt.indexOf('  - [★', iHead);
+  assert.ok(iHorizon > iHead, '远近须在 TIMING 段内');
+  assert.ok(iHorizon < iAnchor, '远近必须排在第一条锚点之前');
+});
+
+t('提示块按时/日/月/年各铺一段，且标明月建以节气分界、年以立春分界', function () {
+  var txt = EV.toPromptBlock(buildWithTiming());
+  assert.ok(/若断时辰（同一日之内何时/.test(txt), '须能回答「同一天不同时辰」');
+  assert.ok(/若断日：/.test(txt));
+  assert.ok(/若断月（月建以节气分界，非农历朔望月）/.test(txt), '月建不可与农历朔望月混同');
+  assert.ok(/若断年（年以立春分界，所标公历年为约数）/.test(txt), '年的分界与约数性质须写明');
+});
+
+t('两级出处在提示词里分得开，且警告不得把跨级当成多次机会', function () {
+  var txt = EV.toPromptBlock(buildWithTiming());
+  assert.ok(/〔推及〕/.test(txt), '非原文所许的单位须带标记');
+  assert.ok(/单位出处：/.test(txt) && /可直接照断/.test(txt));
+  assert.ok(/不是多给了一个候选/.test(txt), '须防止把同一支跨级读当成多次命中机会');
+  assert.ok(/不要一律断成某日/.test(txt));
+});
+
+t('干支称谓：干在时/月/年三柱写作「时干X」，不得写成「X时」', function () {
+  var ev = buildWithTiming();
+  ev.items.filter(function (x) { return x.type === 'TIMING' && x.kind === 'gan'; }).forEach(function (x) {
+    x.reads.forEach(function (r) {
+      if (r.unit === '日') assert.strictEqual(r.label, x.value + '日');
+      else assert.strictEqual(r.label, r.unit + '干' + x.value);
+    });
+  });
+});
+
+t('无 timing 时证据包照常可用，不因新增单位层而崩', function () {
+  var ev = EV.build({ domain: 'wealth', chart: CHART, yongshen: YS.resolve({ domain: 'wealth', chart: CHART }) });
+  assert.ok(EV.toPromptBlock(ev).length > 0);
+  assert.ok(!ev.items.some(function (x) { return x.type === 'TIMING'; }));
 });
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
