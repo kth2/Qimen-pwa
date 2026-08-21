@@ -281,5 +281,70 @@ t('结果可 JSON 序列化（要进案例本与证据包）', function () {
   assert.strictEqual(typeof JSON.parse(JSON.stringify(r)).candidates[0].symbol, 'string');
 });
 
+console.log('== 不止失物：各占类通用 ==');
+
+t('索引覆盖各占类，且新增条目仍条条有出处', function () {
+  var syms = {};
+  RULES.index.forEach(function (e) { syms[e.symbol] = 1; });
+  ['戊', '辛', '丁', '乙', '庚', '甲', '癸',
+   '开门', '生门', '伤门', '死门', '景门',
+   '六合', '玄武', '九地', '值符', '太阴',
+   '天芮', '天心', '天辅', '天冲'].forEach(function (s) {
+    assert.ok(syms[s], '索引应覆盖 ' + s);
+  });
+  RULES.index.forEach(function (e) {
+    assert.ok(e.basis && e.basis.length > 10, e.symbol + '(' + e.matched + ') 缺出处');
+  });
+});
+
+t('各占类的代表性问句都能取到象（不只失物）', function () {
+  var cases = [
+    ['求财', '这笔货款收得回来吗', '戊'],
+    ['求财', '我的房子能卖掉吗', '戊'],
+    ['事业', '我这份工作能升职吗', '开门'],
+    ['事业', '老板会同意吗', '甲'],
+    ['功名', '孩子考试能录取吗', '天辅'],
+    ['婚姻', '这门婚事能成吗', '六合'],
+    ['婚姻', '我老婆会回来吗', '乙'],
+    ['疾病', '他的病能好吗', '天芮'],
+    ['疾病', '这个医生靠谱吗', '天心'],
+    ['官司', '这次开庭会赢吗', '开门'],
+    ['出行', '出差顺利吗', '开门'],
+    ['怀孕', '这胎能顺产吗', '生门'],
+    ['竞赛', '这次投标能中吗', '天冲'],
+    ['风水', '祖坟有问题吗', '九地'],
+    ['寻人', '走失的人能找到吗', '六合'],
+    ['天气', '明天会下雨吗', '癸']
+  ];
+  cases.forEach(function (c) {
+    var got = symbolsOf(run(c[1], { domain: 'general' }));
+    assert.ok(got.indexOf(c[2]) >= 0,
+      c[0] + '「' + c[1] + '」应取到 ' + c[2] + '，实得：' + (got.join('、') || '(无)'));
+  });
+});
+
+t('甲可定宫：甲不上天盘，遁于旬首，以值符落宫论——否则测老板永远「盘上未见」', function () {
+  var r = run('老板会同意吗');
+  var jia = r.candidates.filter(function (c) { return c.symbol === '甲'; })[0];
+  assert.ok(jia, '老板应取甲(栋梁/首领)');
+  assert.ok(jia.located, '甲须能定宫，不得因三盘无甲就记为盘上未见');
+  assert.ok(/^[1-9]$/.test(jia.gong));
+  assert.ok(/遁于旬首/.test(jia.via || ''), '须写明是以值符落宫论，不是盘上真有个甲');
+  var zf = String(CHART.zhiFuLuoGong || CHART.zhiFuGong);
+  assert.strictEqual(jia.gong, zf, '甲之宫须等于值符落宫');
+});
+
+t('低置信度的候选（律师/男友/女友）标为 low 并说明取用前须斟酌', function () {
+  ['律师', '男朋友', '女朋友'].forEach(function (w) {
+    var r = run('我的' + w + '怎么样');
+    var low = r.candidates.filter(function (c) { return c.confidence === 'low'; });
+    assert.ok(low.length > 0, w + ' 应列为低度候选而非直接断定');
+    low.forEach(function (c) {
+      assert.strictEqual(c.provenance, '本层归类');
+      assert.ok(c.why.length >= 6);
+    });
+  });
+});
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

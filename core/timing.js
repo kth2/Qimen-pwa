@@ -72,7 +72,7 @@
    * 飞盘或 xiangyi 停用时：退回 options.yongShenGongs（引擎自算，不带占类语义），权重一律记 0，
    * 如实表示「知道是用神宫，但不知其在本占中的分量」——不代为编造权重。
    */
-  function buildTargets(xy, options) {
+  function buildTargets(xy, options, lx) {
     var byGong = {}, source = '';
     function add(gong, entry) {
       var g = String(gong);
@@ -90,6 +90,30 @@
       options.yongShenGongs.forEach(function (g) {
         add(g, { name: '用神', aspect: '', weight: 0, roleType: '' });
       });
+    }
+    /* 类象用神也是用神（纲要二节表尾「人/物/事各取对应符号」），故其落宫同样是用神宫，
+     * 「用神宫干支定日」「用神入墓→冲墓」等法照样适用——问钥匙何时寻见、货款何时到账，
+     * 靠的正是所问之物那一宫，而不是值符值使那几宫。
+     * 但**不给它编造占类权重**：占类权重出自 domain-rules 的 roles，类象用神不在其中，
+     * 故一律记 0，如实表示「知道是用神宫，但纲要没说它在本占中占多少分量」。 */
+    if (lx && lx.applicable && lx.candidates) {
+      lx.candidates.forEach(function (c) {
+        if (!c.located || !c.gong) return;
+        // 同名同宫者（如失物占里的玄武，既是占类用神又被类象取中）不另立一条，
+        // 只在原条目上补记类象来历——否则用神名单里会出现「玄武、玄武」。
+        var exist = (byGong[String(c.gong)] || []).filter(function (t) { return t.name === c.symbol; })[0];
+        if (exist) {
+          exist.leixiang = true;
+          exist.terms = (c.terms || []).slice();
+          if (!exist.aspect) exist.aspect = c.matched || '';
+          return;
+        }
+        add(c.gong, {
+          name: c.symbol, aspect: c.matched || '', weight: 0,
+          roleType: 'leixiang', leixiang: true, terms: (c.terms || []).slice()
+        });
+      });
+      if (source) source += '+leixiang'; else source = 'leixiang';
     }
     return { byGong: byGong, source: source };
   }
@@ -198,6 +222,7 @@
     var yq = args.yingqi || null;
     var xy = args.xiangyi || null;
     var ws = (args.wangshuai && args.wangshuai.gongs) ? args.wangshuai : null;
+    var lx = (args.leixiang && args.leixiang.version && args.leixiang.applicable) ? args.leixiang : null;
     var school = options.school || detectSchool(chart);
     var domain = options.domain || (xy && xy.domain) || '';
 
@@ -224,10 +249,17 @@
       if (!pillars[u].zhi) base.notes.push('盘面缺' + PILLAR_OF[u] + '柱，「' + u + '」一级的位次无从起算，该级只给支名不给远近。');
     });
 
-    var targets = buildTargets(xy, options);
+    var targets = buildTargets(xy, options, lx);
     base.targetSource = targets.source;
     if (!targets.source) {
       base.notes.push('未取得用神落宫（占类象义层停用且未传 yongShenGongs），锚点无法按用神主次排序，一律记为参考级。');
+    }
+    if (lx) {
+      base.notes.push('所问之物的类象用神（' +
+        lx.candidates.filter(function (c) { return c.located; })
+          .map(function (c) { return c.symbol + '=' + (c.terms || []).join('/'); }).join('、') +
+        '）之落宫已一并计入用神宫：问「何时寻见/何时到手」正应看这几宫。' +
+        '惟纲要未给类象用神以占类权重，故其权重记 0，排序时靠机制强弱而非权重。');
     }
 
     var ZHI = DB.zhiOrder || [], GAN = DB.ganOrder || [];
@@ -465,7 +497,10 @@
     L.push('· 应期锚点（按强弱与用神权重排序）：');
     res.anchors.forEach(function (a) {
       var who = a.targets.length
-        ? a.targets.map(function (t) { return t.name + (t.aspect ? '(' + t.aspect + ')' : ''); }).join('、')
+        ? a.targets.map(function (t) {
+          return t.name + (t.aspect ? '(' + t.aspect + ')' : '') +
+            (t.leixiang ? '〔类象·所问「' + (t.terms || []).join('/') + '」〕' : '');
+        }).join('、')
         : '非用神宫';
       L.push('  - [' + (SPEED[a.strength] || '') + '] ' + a.label + '：' + a.value +
         (a.gong ? '　(' + a.gong + '宫)' : '') + '　用神：' + who + (a.note ? '　—— ' + a.note : ''));

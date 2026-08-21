@@ -628,5 +628,100 @@ t('多盘稳健：90 张样本盘四级读法皆不抛错、位次皆在循环�
   });
 });
 
+console.log('== 类象用神并入应期用神宫（Phase 8b） ==');
+var LX = require('./leixiang.js');
+var YS = require('./yongshen.js');
+LX.load(require('../knowledge/leixiang.json'));
+YS.load(require('../knowledge/domains.json'));
+
+function runWithLX(q, chart, domain) {
+  chart = chart || CHART; domain = domain || 'lost_item';
+  var ws = WS.analyze(chart);
+  var xy = XY.analyze({ domain: domain, chart: chart, wangshuai: ws });
+  var ys = YS.resolve({ domain: domain, chart: chart });
+  var lx = LX.resolve({
+    question: q, chart: chart,
+    options: { school: 'zhuanpan', locate: YS.locate, actors: ys.actors }
+  });
+  var base = xy.applicable ? xy.focus.map(function (f) { return String(f.gong); }) : [];
+  var lxG = lx.applicable ? lx.candidates.filter(function (c) { return c.located; })
+    .map(function (c) { return String(c.gong); }) : [];
+  var gongs = base.concat(lxG).filter(function (g, i, a) { return a.indexOf(g) === i; });
+  var yq = YQ.analyze(chart, { yongShenGongs: gongs });
+  return {
+    lx: lx,
+    withLX: TM.analyze({ chart: chart, yingqi: yq, xiangyi: xy, wangshuai: ws, leixiang: lx,
+      options: { domain: domain, school: 'zhuanpan', yongShenGongs: gongs } }),
+    without: TM.analyze({ chart: chart, yingqi: yq, xiangyi: xy, wangshuai: ws,
+      options: { domain: domain, school: 'zhuanpan', yongShenGongs: gongs } })
+  };
+}
+
+t('类象用神的落宫计入用神宫，锚点带上「所问的是哪件东西」', function () {
+  var r = runWithLX('我的钥匙丢了，什么时候能找到？');
+  assert.ok(/leixiang/.test(r.withLX.targetSource), 'targetSource 须标出类象来源：' + r.withLX.targetSource);
+  var lxAnchors = r.withLX.anchors.filter(function (a) {
+    return a.targets.some(function (t) { return t.leixiang; });
+  });
+  assert.ok(lxAnchors.length > 0, '钥匙(辛)落宫应有应期锚点');
+  lxAnchors.forEach(function (a) {
+    var t = a.targets.filter(function (x) { return x.leixiang; })[0];
+    assert.ok(t.terms && t.terms.length, '类象用神须带出所问之词，否则看不出这日子是冲谁来的');
+  });
+});
+
+t('不给类象用神编造占类权重——纲要没说它占多少分量，一律记 0', function () {
+  var r = runWithLX('我的钥匙丢了，什么时候能找到？');
+  r.withLX.anchors.forEach(function (a) {
+    a.targets.forEach(function (t) {
+      if (t.roleType === 'leixiang') assert.strictEqual(t.weight, 0, t.name + ' 不得被编造权重');
+    });
+  });
+});
+
+t('同名同宫不重复登记（玄武既是失物占类用神、又被类象取中）', function () {
+  var r = runWithLX('我的钥匙丢了，能找回吗？');
+  r.withLX.anchors.forEach(function (a) {
+    var names = a.targets.map(function (t) { return t.name; });
+    var uniq = names.filter(function (n, i) { return names.indexOf(n) === i; });
+    assert.deepStrictEqual(names, uniq, '用神名单出现重复：' + names.join('、'));
+  });
+  var xw = null;
+  r.withLX.anchors.forEach(function (a) {
+    a.targets.forEach(function (t) { if (t.name === '玄武') xw = t; });
+  });
+  if (xw) assert.ok(xw.leixiang, '玄武被类象取中，原条目上应补记类象来历');
+});
+
+t('不传 leixiang 时结果与从前一致（向后兼容）', function () {
+  var r = runWithLX('我的钥匙丢了，什么时候能找到？');
+  assert.strictEqual(r.without.targetSource, 'xiangyi');
+  assert.ok(!r.without.anchors.some(function (a) {
+    return a.targets.some(function (t) { return t.leixiang; });
+  }), '未传类象却出现类象标记');
+});
+
+t('类象说明写清「这几宫正是问何时到手该看的」，且自认无占类权重', function () {
+  var r = runWithLX('我的钥匙丢了，什么时候能找到？');
+  var note = r.withLX.notes.join(' ');
+  assert.ok(/类象用神/.test(note) && /何时寻见/.test(note));
+  assert.ok(/权重记 0/.test(note), '须自认没有占类权重，不冒充有分量');
+});
+
+t('多占类通用：不止失物——货款/工作/婚事各自取到象并进用神宫', function () {
+  [['这笔货款什么时候到账', 'wealth'], ['这份工作什么时候有信', 'career'],
+   ['这门婚事什么时候能成', 'relationship']].forEach(function (p) {
+    var r = runWithLX(p[0], CHART, p[1]);
+    assert.ok(r.lx.applicable, p[0] + ' 应取到类象');
+    assert.ok(/leixiang/.test(r.withLX.targetSource), p[0] + ' 的类象落宫未计入用神宫');
+  });
+});
+
+t('确定性：同问句同盘，含类象的应期结果逐字相同', function () {
+  var a = runWithLX('我的钥匙丢了，什么时候能找到？');
+  var b = runWithLX('我的钥匙丢了，什么时候能找到？');
+  assert.strictEqual(JSON.stringify(a.withLX.anchors), JSON.stringify(b.withLX.anchors));
+});
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

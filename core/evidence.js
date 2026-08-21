@@ -344,7 +344,10 @@
           id: a.id, mechanism: a.mechanism, label: a.label,
           value: a.value, kind: a.kind, gong: a.gong,
           strength: a.strength, weight: a.weight, offset: a.offset,
-          targets: (a.targets || []).map(function (t) { return t.name; }),
+          targets: (a.targets || []).map(function (t) {
+            // 类象用神的锚点要标明白：不标，模型看不出「这个日子是冲着所问那件东西来的」
+            return t.name + (t.leixiang ? '〔类象·所问「' + (t.terms || []).join('/') + '」〕' : '');
+          }),
           // v5：同一干支在时/日/月/年四级各读一次，并标明哪一级是机制原文所许、哪一级由「远近」推及
           reads: (a.reads || []).filter(function (r) { return r.offset != null; }).map(function (r) {
             return { unit: r.unit, label: r.label, window: r.window, when: r.when, source: r.source };

@@ -169,6 +169,17 @@
       g = findIn(v.xing, name) || findIn(v.xing, name, true); kind = 'xing';
     } else if (GAN.indexOf(name) >= 0) {
       g = findIn(v.tianGan, name) || findIn(v.diGan, name) || findIn(v.anGan, name); kind = 'gan';
+      // 甲三盘皆无（甲不上天盘，遁于旬首），若直接返回 null，则凡以甲为用神者——
+      // 类象取甲为「栋梁/首领」断老板、领导——一律落得「盘上未见」，等于白取。
+      // 纲要既已明言「以值符落宫论」，此处与上面日干为甲一路同样处理，非新造断法。
+      if (!g && name === '甲') {
+        g = String(chart.zhiFuLuoGong || chart.zhiFuGong || '');
+        if (!g) return null;
+        var mJia = gongMeta(g, chart);
+        mJia.name = name; mJia.kind = 'gan';
+        mJia.via = '甲不上天盘，遁于旬首，以值符落宫论';
+        return mJia;
+      }
     } else {
       g = findIn(v.shen, name) || findIn(v.diShen, name); kind = 'shen';
     }
