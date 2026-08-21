@@ -421,22 +421,6 @@
               });
             } catch (xe) { console.warn('[xiangyi] 判读失败，本次不含 READING：', xe.message); xiangyi = null; }
           }
-          // 应期时间线（Phase 4）：把 yingqi 已算好的干支按「与本占用神的关系」筛选、定强弱、排先后。
-          // 干支一律取自上面同一份 yingqi 计算，绝不重算——两处若各推一套，模型必然选错日子。
-          let timing = null;
-          if (_timingReady && TM) {
-            try {
-              const ysGongsForTiming = (xiangyi && xiangyi.applicable)
-                ? xiangyi.focus.map(f => f.gong)
-                : ysGongs;   // 飞盘/象义层停用时退回引擎自算的用神宫
-              timing = TM.analyze({
-                chart: pan,
-                yingqi: window.YingQi.analyze(pan, { yongShenGongs: ysGongsForTiming }),
-                xiangyi, wangshuai: (window.WangShuai && window.WangShuai.analyze) ? window.WangShuai.analyze(pan) : null,
-                options: { domain, school: school === 'feipan' ? 'feipan' : 'zhuanpan', yongShenGongs: ysGongsForTiming }
-              });
-            } catch (te) { console.warn('[timing] 排应期失败，本次不含 TIMING：', te.message); timing = null; }
-          }
           // 类象取用（Phase 8）：所问的具体人事物本身也要有一个用神，否则解读永远只在
           // 值符/值使/日干宫/时干宫几个宫里打转。转盘专有——飞盘《鸣法·用神章》按占问类型
           // 固定取用，不含类象取用，故 leixiang 自行停用。
@@ -453,6 +437,28 @@
                 }
               });
             } catch (le) { console.warn('[leixiang] 类象取用失败，本次不含类象用神：', le.message); leixiang = null; }
+          }
+          // 应期时间线（Phase 4）：把 yingqi 已算好的干支按「与本占用神的关系」筛选、定强弱、排先后。
+          // 干支一律取自上面同一份 yingqi 计算，绝不重算——两处若各推一套，模型必然选错日子。
+          let timing = null;
+          if (_timingReady && TM) {
+            try {
+              const baseGongs = (xiangyi && xiangyi.applicable)
+                ? xiangyi.focus.map(f => String(f.gong))
+                : ysGongs;   // 飞盘/象义层停用时退回引擎自算的用神宫
+              // 类象用神的落宫也要并进来：yingqi 只为所给之宫算宫干，漏了它，
+              // 「所问那件东西何时到手」就永远算不出宫干定日。
+              const lxGongs = (leixiang && leixiang.applicable)
+                ? leixiang.candidates.filter(c => c.located).map(c => String(c.gong)) : [];
+              const ysGongsForTiming = [...new Set([...baseGongs.map(String), ...lxGongs])];
+              timing = TM.analyze({
+                chart: pan,
+                yingqi: window.YingQi.analyze(pan, { yongShenGongs: ysGongsForTiming }),
+                xiangyi, leixiang,
+                wangshuai: (window.WangShuai && window.WangShuai.analyze) ? window.WangShuai.analyze(pan) : null,
+                options: { domain, school: school === 'feipan' ? 'feipan' : 'zhuanpan', yongShenGongs: ysGongsForTiming }
+              });
+            } catch (te) { console.warn('[timing] 排应期失败，本次不含 TIMING：', te.message); timing = null; }
           }
           // 不传 shanxiang：山向背景与阳宅断法要求仍由 sxBlock 原样承载（那段含解读指引而不止事实），
           // 若再进证据包会造成同一内容重复入提示词。
