@@ -426,5 +426,81 @@ t('无 timing 时证据包照常可用，不因新增单位层而崩', function 
   assert.ok(!ev.items.some(function (x) { return x.type === 'TIMING'; }));
 });
 
+console.log('== 类象用神进证据包（Phase 8：所问之物本身也要有代表） ==');
+var LX = require('./leixiang.js');
+// FACT 的 content 是字符串，SYMBOL/READING 的是数组——统一成串再断言
+function textOf(x) { return Array.isArray(x.content) ? textOf(x) : String(x.content || ''); }
+LX.load(require('../knowledge/leixiang.json'));
+
+function buildWithLeiXiang(q, school) {
+  var chart = CHART;
+  var ys = YS.resolve({ domain: 'lost_item', chart: chart });
+  var lx = LX.resolve({
+    question: q, chart: chart,
+    options: {
+      school: school || 'zhuanpan', locate: YS.locate, actors: ys.actors,
+      domainNames: (ys.examine || []).map(function (m) { return m.name; })
+    }
+  });
+  return EV.build({ question: q, domain: 'lost_item', chart: chart, yongshen: ys, leixiang: lx });
+}
+
+t('类象用神进 FACT，并写明所问之词、出处与落宫', function () {
+  var ev = buildWithLeiXiang('我的钥匙丢了，能找回吗？');
+  var fs_ = ev.items.filter(function (x) { return x.type === 'FACT' && /类象用神/.test(textOf(x)); });
+  assert.ok(fs_.length >= 2, '钥匙一问应至少取到玄武与辛两个类象');
+  var xin = fs_.filter(function (x) { return /辛/.test(textOf(x)); })[0];
+  assert.ok(xin, '钥匙应取辛');
+  assert.ok(/钥匙/.test(textOf(xin)), '须写明是所问的哪个词取的象');
+  assert.ok(/宫/.test(textOf(xin)) || /盘上未见/.test(textOf(xin)), '须给落宫或明说未见');
+  assert.ok(/本层归类/.test(textOf(xin)), '钥匙非纲要原文之词，须标为归类');
+});
+
+t('类象用神的象义也进 SYMBOL——只给「辛＝金刃/首饰」四个字断不出情状', function () {
+  var ev = buildWithLeiXiang('我的钥匙丢了，能找回吗？');
+  var syms = ev.items.filter(function (x) { return x.type === 'SYMBOL'; })
+    .map(function (x) { return x.element || x.label; });
+  assert.ok(syms.indexOf('辛') >= 0, '辛的象义须进 SYMBOL');
+  var lxi = ev.leixiang;
+  var located = lxi.candidates.filter(function (c) { return c.located; });
+  located.forEach(function (c) {
+    assert.ok(syms.some(function (s) { return String(s).indexOf(c.gong) >= 0; }),
+      c.symbol + ' 落宫 ' + c.gong + ' 的象义也应进 SYMBOL（失物断方位全靠它）');
+  });
+});
+
+t('提示块把类象用神紧贴占类用神，并要求逐宫展开', function () {
+  var txt = EV.toPromptBlock(buildWithLeiXiang('我的钥匙丢了，能找回吗？'));
+  var iDom = txt.indexOf('· 占类用神');
+  var iLx = txt.indexOf('· 类象用神');
+  var iFact = txt.indexOf('· FACT');
+  assert.ok(iLx > 0, '须有类象用神一段');
+  assert.ok(iDom > 0 && iLx > iDom, '类象用神须紧跟占类用神');
+  assert.ok(iLx < iFact, '类象用神须在证据条目之前，不能塞到包尾');
+  assert.ok(/必须把这些类象用神的落宫也逐一展开/.test(txt));
+  assert.ok(/不得只写值符、值使、日干宫、时干宫/.test(txt), '这正是用户报的症结，须明写');
+  assert.ok(/衍象类象：人\/物\/事各取对应符号/.test(txt), '须引纲要原文为据');
+});
+
+t('飞盘不得出现类象用神一段（零串味）', function () {
+  var ev = buildWithLeiXiang('我的钥匙丢了', 'feipan');
+  assert.ok(!ev.items.some(function (x) { return x.type === 'FACT' && /类象用神/.test(textOf(x)); }));
+  assert.ok(EV.toPromptBlock(ev).indexOf('· 类象用神') < 0);
+});
+
+t('未匹配到类象时如实交代，并请模型自行取象', function () {
+  var txt = EV.toPromptBlock(buildWithLeiXiang('这件事总体如何'));
+  assert.ok(/类象用神：本次未在索引中匹配到类象词/.test(txt));
+  assert.ok(/自行为所问之人\/物\/事取象/.test(txt));
+});
+
+t('不传 leixiang 时证据包一切照旧（向后兼容）', function () {
+  var ev = build();
+  assert.strictEqual(ev.leixiang, null);
+  var txt = EV.toPromptBlock(ev);
+  assert.ok(txt.length > 0);
+  assert.ok(txt.indexOf('· 类象用神') < 0);
+});
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

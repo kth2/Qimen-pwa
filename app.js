@@ -5,6 +5,7 @@
   const YS = window.YongShen;   // 结构化用神层（可缺失：缺则退回原有流程）
   const XY = window.XiangYi;    // 占类象义推理层（Phase 2；缺则证据包不含 READING，其余照旧）
   const TM = window.Timing;     // 应期时间线层（Phase 4；缺则不含 TIMING，yingqi 块照常承载应期）
+  const LX = window.LeiXiang;   // 类象取用层（Phase 8；转盘专有，缺则不含类象用神）
   const CB = window.Casebook;   // 案例本·经验层（Phase 5；只统计与建议，绝不改写教义规则）
   const CSTORE = window.CaseStore;
   const RV = window.Revise;     // 复盘正解与规则修订（Phase 6）
@@ -230,6 +231,7 @@
   let _kbReady = false;
   let _rulesReady = false;      // 象义规则库单独计：它缺席只减 READING，不该拖垮整个证据层
   let _timingReady = false;     // 应期规则库同理：缺席只减 TIMING
+  let _leixiangReady = false;   // 类象库同理：缺席只减类象用神，占类用神照常
   async function loadKnowledge() {
     if (!YS || !EV) return false;
     const get = (p) => fetch(p).then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)));
@@ -252,6 +254,11 @@
       try { _timingReady = TM.load(await get('knowledge/timing-rules.json')); }
       catch (e) { console.warn('[timing] 应期规则库加载失败，本次不排应期时间线：', e.message); _timingReady = false; }
     }
+    // 类象库同样单独计：它缺席只减类象用神，占类用神与引擎用神照常
+    if (_kbReady && LX && !_leixiangReady) {
+      try { _leixiangReady = LX.load(await get('knowledge/leixiang.json')); }
+      catch (e) { console.warn('[leixiang] 类象库加载失败，本次不取类象用神：', e.message); _leixiangReady = false; }
+    }
     return _kbReady;
   }
 
@@ -271,6 +278,11 @@
     '7. 纲要与盘面确未直接载明处，可据纲要衍象作合理延伸并标注「（据×宫×象推）」；仅在毫无盘面依据时才写「纲要未载，不予推断」，不得以此搪塞本可分析之处。',
     '【结构——每节都要展开充分，理由部分尤须详尽】',
     '8. 按骨架输出：① 结论（一句断吉凶成败）② 用神与关键宫位逐宫详析 ③ 生克成败推理 ④ 方位 ⑤ 应期/数字 ⑥ 趋避建议。',
+    '8.1 第②节的「用神」不止值符/值使/日干宫/时干宫：**所问的具体人事物本身也要取一个用神**——'
+      + '测钱财取戊(财货)、测钥匙首饰取辛(金刃/首饰)、测车取伤门(车)、测丧葬坟墓取死门(死丧/坟)、'
+      + '测文书证件取丁(文书)或景门、测病取天芮(病符)、测妻取乙、测夫取庚……依二节表尾'
+      + '「衍象类象：人/物/事各取对应符号(见第四节)，落宫定方位、临神临门定性质」。'
+      + '取定之后与占类用神一同逐宫展开，并写明取的是哪个象、据四节哪一条。（此为转盘法；飞盘按《鸣法·用神章》固定取用。）',
     '9. 应期一节须落到**与所问远近相称的那一级**：近事给到日并尽量给到时辰（几点到几点），中事给到月（并注明节气区间），远事给到年（并注明生肖与约略公历年）。只给一个笼统的「某日」而不说是哪一天、或问的是几个月后的事却只答某日，都算没答。'
   ].join('\n');
   // 仅在证据包可用时追加。与上文纲要纪律互补：纲要管"按哪派理论断"，
@@ -292,6 +304,16 @@
     // 以下三条对应 Phase 2 的 READING 层。要点：判读是"该占类下这个符号怎么读"，不是结论；
     // 权重决定详略；"规则未建"不等于"盘上无碍"——这三处一旦被模型误读，本层反成噪音。
     'E10. READING 是本占类下的象义判读（已注明依据），凡涉及其所断元素，须优先采用其读法，不得改用与占类无关的泛化解释；其 [助]/[阻] 只表倾向，**不是成败断语**，成败仍须结合引擎吉凶与全盘旺衰自行推断，不得以"助多于阻"直接下结论。',
+    // Phase 8：类象用神。用户实测反馈——「用神与关键宫位逐宫详析」永远只写值符值使日干时干，
+    // 所问的那件东西（钥匙、钱、尸体…）在解读里根本没有代表。纲要二节表尾本就写了要取象。
+    'E10b. 证据包若给出【类象用神】，「② 用神与关键宫位逐宫详析」一节**必须把每一个类象用神的落宫也逐一展开**——'
+      + '读其星/门/神/天地盘干、旺衰四害、与年命(或日干)的生克盗泄，并据其落宫定方位与场所。'
+      + '只写值符、值使、日干宫、时干宫而略过所问之物本身，算没答。'
+      + '类象用神与占类用神**并列合参**，不相取代；标〔本层归类〕者可用，但须写明是按该类归的，不要说成纲要原文如此。'
+      + '标「盘上未见」者按未见论，不得代为安置落宫。',
+    'E10c. 证据包若说【类象用神】未匹配到类象词，**不等于盘上没有此物**：请你自行按转盘纲要四节'
+      + '（九星/八门/八神/十干）为所问之人/物/事取象为用神，并写明「取×为用神，据四节×象」。'
+      + '不得因索引未匹配就略过这一步，也不得凭空指派纲要未载之象。',
     'E11. 【关注点与权重】的 ★ 决定着墨详略：★★★★★ 者须逐条展开，★★ 者点到为止，不要平均用力。标为「盘上未见」者按未见论。',
     'E12. 若证据包声明本占类「规则未建」，那是应用尚未收录该占类规则，**不等于盘上没有阻碍**；此时按《解断方法纲要》正常推断，不得以"未见判读"为由声称一切顺遂。',
     // Phase 4/7：应期锚点。要点是"只在候选里选"与"先定远近再定单位"——这两处一旦被误读，应期就会重新开始瞎猜。
@@ -369,8 +391,8 @@
       // 按次作用域收集本轮的结构化产物。**不能靠 window._xiangyi 之类的全局量**：
       // 知识库加载失败或证据构建抛错时那些全局量不会被更新，仍留着上一次解读的值，
       // 存案例就会把「别的盘」的象义记进这一条里——统计从此全错。
-      const runOut = { yongshen: null, xiangyi: null, timing: null, evidence: null, domain: '' };
-      window._evidence = window._xiangyi = window._timing = null;   // 先清干净，宁可为空也不串盘
+      const runOut = { yongshen: null, xiangyi: null, timing: null, leixiang: null, evidence: null, domain: '' };
+      window._evidence = window._xiangyi = window._timing = window._leixiang = null;   // 先清干净，宁可为空也不串盘
       if (await loadKnowledge()) {
         try {
           // 占类优先取引擎按问句识别的结果（比下拉框更贴合实际所问），识别不出再回落界面「目的」
@@ -415,6 +437,23 @@
               });
             } catch (te) { console.warn('[timing] 排应期失败，本次不含 TIMING：', te.message); timing = null; }
           }
+          // 类象取用（Phase 8）：所问的具体人事物本身也要有一个用神，否则解读永远只在
+          // 值符/值使/日干宫/时干宫几个宫里打转。转盘专有——飞盘《鸣法·用神章》按占问类型
+          // 固定取用，不含类象取用，故 leixiang 自行停用。
+          let leixiang = null;
+          if (_leixiangReady && LX && school !== 'feipan') {
+            try {
+              leixiang = LX.resolve({
+                question: q, chart: pan,
+                options: {
+                  school: 'zhuanpan',
+                  locate: YS.locate,                       // 定宫复用 yongshen，不另写一套
+                  actors: yongshen.actors,
+                  domainNames: (yongshen.examine || []).map(m => m.name)
+                }
+              });
+            } catch (le) { console.warn('[leixiang] 类象取用失败，本次不含类象用神：', le.message); leixiang = null; }
+          }
           // 不传 shanxiang：山向背景与阳宅断法要求仍由 sxBlock 原样承载（那段含解读指引而不止事实），
           // 若再进证据包会造成同一内容重复入提示词。
           // 经验层（Phase 5）：把本机历史反馈里已达样本门槛的规则附一条说明。
@@ -427,14 +466,16 @@
             } catch (ce) { console.warn('[casebook] 读取经验层失败，本次不附经验：', ce.message); }
           }
           const evidence = EV.build({
-            question: q, domain, chart: pan, yongshen, xiangyi, timing, calibration,
+            question: q, domain, chart: pan, yongshen, xiangyi, timing, leixiang, calibration,
             wangshuai: wsBlock, yingqi: yqBlock
           });
           runOut.yongshen = yongshen; runOut.xiangyi = xiangyi;
-          runOut.timing = timing; runOut.evidence = evidence; runOut.domain = domain;
+          runOut.timing = timing; runOut.leixiang = leixiang;
+          runOut.evidence = evidence; runOut.domain = domain;
           window._evidence = evidence;                 // 便于在控制台核对喂给模型的内容
           window._xiangyi = xiangyi;                   // 同上：逐条核对判读命中了哪些规则
           window._timing = timing;                     // 同上：核对应期锚点与其机制
+          window._leixiang = leixiang;                 // 同上：核对所问之物取了哪个象作用神
           evBlock = EV.toPromptBlock(evidence);
           if (evBlock) sysExtra = '\n' + EVIDENCE_DISCIPLINE;
         } catch (ee) {
