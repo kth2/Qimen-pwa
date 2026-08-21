@@ -196,6 +196,7 @@
     var ys = args.yongshen || null;
     var xy = (args.xiangyi && args.xiangyi.version) ? args.xiangyi : null;
     var tm = (args.timing && args.timing.version) ? args.timing : null;
+    var lx = (args.leixiang && args.leixiang.version) ? args.leixiang : null;
     var domain = args.domain || (ys && ys.domain) || 'general';
     var items = [];
     // 用神清单按占类权重重排：SYMBOL 与关键词池皆据此取用，截断时先保重点
@@ -227,6 +228,18 @@
           // 标注来源，模型才能分辨"引擎为本盘算出的"与"占类补充查看的"
           var tag = m.origin === 'engine' ? '引擎用神' : (m.origin === 'both' ? '用神·引擎+占类' : '占类参考');
           items.push(fact('【' + tag + '】' + describeLocated(m), 'yongshen:' + m.name));
+        });
+      }
+      // 类象用神落宫（Phase 8）。所问的具体人事物本身也要有代表，否则解读永远只在
+      // 值符值使日干时干几个宫里打转——纲要二节表尾「人/物/事各取对应符号」正是此意。
+      if (lx && lx.applicable) {
+        lx.candidates.forEach(function (c) {
+          items.push(fact('【类象用神·' + c.provenance + '】' + c.symbol + '(' + c.matched + ')＝所问「' +
+            c.terms.join('/') + '」' +
+            (c.located ? ' 落 ' + c.gong + '宫' + (c.gongName || '') + (c.direction ? '·' + c.direction : '') +
+              (c.resolved && c.resolved !== c.symbol ? '（' + c.resolved + '）' : '')
+              : ' —— 此象盘上未见，不得代为安置落宫'),
+            'leixiang:' + c.symbol));
         });
       }
       if (ys && ys.missing && ys.missing.length) {
@@ -292,6 +305,15 @@
       // 其所落之宫（方位/场所之象，失物与风水尤需）
       addSymbol('jiugong', m.gong);
     });
+    // 类象用神同样要有象义可读：只给「辛＝金刃/首饰」四个字，模型断不出它落宫是何情状。
+    // 象义仍从 symbols.json 取，与占类用神走同一条路，不另开一套。
+    if (lx && lx.applicable) {
+      lx.candidates.forEach(function (c) {
+        var cat = KIND_TO_CAT[c.kind];
+        if (cat) addSymbol(cat, c.resolved && cat === 'tiangan' ? c.resolved : c.symbol);
+        if (c.gong) addSymbol('jiugong', c.gong);
+      });
+    }
 
     var symCount = items.filter(function (x) { return x.type === 'SYMBOL'; }).length;
     if (symCount > MAX_SYMBOL_ITEMS) {
@@ -378,6 +400,12 @@
         byUnit: tm.byUnit, units: tm.units,
         pace: tm.pace, horizon: tm.horizon, numbers: tm.numbers, notes: tm.notes
       } : null,
+      // 类象取用层元信息。候选本身也进了 FACT，此处记出处与未匹配时的交代。
+      leixiang: lx ? {
+        version: lx.version, applicable: lx.applicable, school: lx.school, reason: lx.reason,
+        candidates: lx.candidates, unmatched: lx.unmatched, fallbackNote: lx.fallbackNote,
+        bagua: lx.bagua ? { basis: lx.bagua.basis } : null, notes: lx.notes
+      } : null,
       items: items,
       combined: combine(examineOrdered, domain)
     };
@@ -446,6 +474,33 @@
             '；辅=' + (sec.join('、') || '—') +
             '；对方/阻力=' + (opp.join('、') || '—'));
         }
+      }
+      // 类象用神紧跟占类用神：这两段必须挨着，模型才知道「用神」不止值符值使日干时干那几个。
+      // 放到证据包尾部就晚了——那时它已经按占类用神把逐宫详析写完了。
+      var lxi = ev.leixiang;
+      if (lxi && lxi.school === 'zhuanpan') {
+        if (lxi.applicable) {
+          L.push('· 类象用神（**所问的具体人事物本身也要取一个用神**，与上面的占类用神并列合参，不相取代）：');
+          lxi.candidates.forEach(function (c) {
+            L.push('  - ' + c.symbol + '（' + c.matched + '）＝所问「' + c.terms.join('/') + '」' +
+              (c.located ? '，落 ' + c.gong + '宫' + (c.gongName || '') + (c.direction ? '·' + c.direction : '') : '') +
+              (c.inDomain ? '　〔已在占类用神之列〕' : '') +
+              '　〔' + c.provenance + '〕' + (c.why ? c.why + '。' : '') +
+              '　本象类象：' + c.words.join('/') +
+              (c.locateNote ? '　⚠ ' + c.locateNote : ''));
+          });
+          L.push('  依据：转盘纲要·二节用神取用表尾「衍象类象：人/物/事各取对应符号(见第四节)，' +
+            '落宫定方位、临神临门定性质」；失物一条「玄武(盗) + **用神类象** + 年命……类象定物，方位定处」。');
+          L.push('  〔纲要原文〕＝所问之词就是纲要写的那个类象词，可直接取用；' +
+            '〔本层归类〕＝是本应用把这个词归入纲要那一类（如钥匙归入「金刃/首饰」），可用，' +
+            '但断语中须写明是按此类归的，不要说成纲要原文如此。');
+          L.push('  取用之后照常断：该象落宫之星门神干、旺衰四害、与年命/日干的生克盗泄。' +
+            '「用神与关键宫位逐宫详析」一节**必须把这些类象用神的落宫也逐一展开**，' +
+            '不得只写值符、值使、日干宫、时干宫。');
+        } else if (lxi.unmatched) {
+          L.push('· 类象用神：本次未在索引中匹配到类象词。' + lxi.fallbackNote);
+        }
+        if (lxi.bagua) L.push('  若要定物之形色质类（射覆一路），再看用神落宫的八卦类象：' + lxi.bagua.basis);
       }
       if (res) {
         L.push('· 优先级裁定：以「' + (res.authority === 'engine' ? '引擎用神' : '占类用神') + '」为准。' + res.reason);
