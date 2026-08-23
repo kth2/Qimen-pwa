@@ -788,6 +788,58 @@ t('无实况时不抛错，且 levelsEvaluated 为空', function () {
   assert.strictEqual(d.chance, null);
 });
 
+console.log('== 宫际关系按分支统计（一条 id 底下六种读法，准头天差地别） ==');
+
+t('statKey：关系按分支拆开，其余条目照旧用 id', function () {
+  var rel = { id: 'g.rel.a-b', kind: 'relation', branchId: 'g.rel.a-b#我宫克彼宫', trigger: '我宫克彼宫' };
+  assert.strictEqual(CB.statKey ? CB.statKey(rel) : rel.branchId, rel.branchId);
+  var cond = { id: 'x.y.z', kind: 'condition' };
+  if (CB.statKey) assert.strictEqual(CB.statKey(cond), 'x.y.z');
+});
+
+t('改版前的老记录也能按分支归位——既有反馈不因改版作废', function () {
+  // 老记录没有 branchId/trigger，只有 label（"我方→事体 我宫克彼宫"）；须由它反推同一把键
+  function legacy(branchText, outcome) {
+    var rec = mkCase(1, outcome);
+    rec.fired.rules = [{ id: 'general.rel.日干-时干', kind: 'relation', polarity: '+', weight: 5,
+      label: '我方→事体 ' + branchText, concept: '' }];
+    return rec;
+  }
+  var recs = [];
+  for (var i = 0; i < 8; i++) recs.push(legacy('我宫克彼宫', 'happened'));
+  for (var j = 0; j < 8; j++) recs.push(legacy('二者同落一宫', 'not_happened'));
+  var cal = CB.calibrate(recs);
+  var a = cal.rules.filter(function (r) { return /我宫克彼宫/.test(r.ruleId); })[0];
+  var b = cal.rules.filter(function (r) { return /二者同落一宫/.test(r.ruleId); })[0];
+  assert.ok(a && b, '两支须各自成条，实得：' + cal.rules.map(function (r) { return r.ruleId; }).join('、'));
+  assert.strictEqual(a.rate, 1, '全中的那一支应为 100%');
+  assert.strictEqual(b.rate, 0, '全不中的那一支应为 0%');
+  assert.notStrictEqual(a.ruleId, b.ruleId, '两支不得并成一条——并了就成了没有意义的平均数');
+});
+
+t('新记录带 branchId，与老记录并到同一把键上', function () {
+  var rec = mkCase(1);
+  var rels = rec.fired.rules.filter(function (r) { return r.kind === 'relation'; });
+  rels.forEach(function (r) {
+    assert.ok(r.branchId, '关系条目须带 branchId');
+    assert.ok(r.branchId.indexOf('#') > 0);
+    assert.ok(r.trigger, '须存 trigger，老记录靠它对齐');
+    assert.strictEqual(r.branchId, r.id + '#' + r.trigger,
+      'branchId 须用人读得懂的触发文本，才能与老记录的 label 对上');
+  });
+});
+
+t('断错归因落到本案实际发的那一支上（basedOn 给的是规则 id）', function () {
+  var rec = mkCase(1, 'not_happened');
+  var rel = rec.fired.rules.filter(function (r) { return r.kind === 'relation'; })[0];
+  if (!rel) return;
+  rec.feedback.misreads = [{ claim: '断错了', actual: '实况如此', basedOn: rel.id }];
+  var cal = CB.calibrate([rec]);
+  var hit = cal.rules.filter(function (r) { return r.misreadN > 0; })[0];
+  assert.ok(hit, '指错须能挂上');
+  assert.strictEqual(hit.ruleId, rel.branchId, '须挂到本案实际发的那一支，而非笼统的规则 id');
+});
+
 console.log('== 存储：只在本机、导入不覆盖 ==');
 ta('保存/读取/列表/删除', function () {
   var s = CS.create(CS.memoryBackend());

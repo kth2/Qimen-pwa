@@ -466,6 +466,9 @@
         // 触发条件必须随判读一同呈现——只说结论不说"因何而得"，模型无从核验，也无从复述依据
         trigger: trig.join('+') + (hit.why ? '〔' + hit.why.join('；') + '〕' : ''),
         concept: (rule.concept || []).slice(),
+        // answers：这条断的是**哪一类问题**。实测里最常见的错不是规则错，是拿它去答了它不管的问
+        // （拿「显隐」之辞答「远近」、拿「有无实利」答「对方是否履约」），故须随判读带出。
+        answers: rule.answers || '', answersNote: rule.answersNote || '',
         polarity: rule.polarity || '0', basis: rule.basis || ''
       });
     });
@@ -514,8 +517,17 @@
         var eb = (ws.gongs[b.gong] || {}).gongElement || '';
         var w = Math.max(weightFor(d, rule.from), weightFor(d, rule.to));
         function emit(kind, entry) {
+          // 一条 relation 规则底下有六种互斥读法（生/克/比和/同宫/被生/被克），
+          // 实测里它们的准头天差地别——同一条 general.rel.日干-时干，「彼宫生我宫」3 例全中，
+          // 「二者同落一宫」5 例只中 1。若只按 rule.id 统计与修订，两者被平均成一个数，
+          // 既看不出问题，也没法只收窄其中一支（mute 会把好的那支一起杀掉）。
+          // 故另给**分支级 id**：校准、指错归因、规则修订一律以它为准。
           base.relations.push({
-            id: rule.id, kind: 'relation',
+            id: rule.id, branch: kind,
+            // branchId 取**人读得懂的那段触发文本**而非内部 kind：历史案例的 label 里存的正是它，
+            // 如此新旧记录并到同一个键上，既有反馈不会因改版而作废。
+            branchId: rule.id + '#' + ((DB.relationKinds || {})[kind] || kind),
+            kind: 'relation',
             from: rule.from, to: rule.to,
             fromLabel: rule.fromLabel || rule.from, toLabel: rule.toLabel || rule.to,
             fromGong: a.gong, toGong: b.gong,
@@ -523,15 +535,22 @@
             trigger: ((DB.relationKinds || {})[kind] || kind),
             weight: w,
             concept: (entry.concept || []).slice(),
+            answers: entry.answers || rule.answers || '',
+            answersNote: rule.answersNote || '',
             polarity: entry.polarity || '0', basis: rule.basis || ''
           });
         }
-        var revR = revIdx ? revIdx.byRule[rule.id] : null;
+        var kind = relationKind(a.gong, b.gong, ea, eb);
+        // 修订可挂在分支上，也可挂在整条规则上；分支级优先——那才是可收窄的最小单位
+        var kindText = (DB.relationKinds || {})[kind] || kind;
+        var revR = revIdx ? (revIdx.byRule[rule.id + '#' + kindText] || revIdx.byRule[rule.id]) : null;
         if (revR && revR.op === 'mute') {
-          base.revisions.applied.push({ id: revR.id, ruleId: rule.id, op: 'mute', reasoning: revR.reasoning, effect: '已停用' });
+          base.revisions.applied.push({
+            id: revR.id, ruleId: revR.ruleId || rule.id, op: 'mute',
+            reasoning: revR.reasoning, effect: '已停用'
+          });
           return;
         }
-        var kind = relationKind(a.gong, b.gong, ea, eb);
         var entry = kind && rule.map ? rule.map[kind] : null;
         if (entry) emit(kind, entry);
         // 相冲与五行生克并不互斥（如坤二与艮八既比和又相冲），故另行加判、不覆盖上一条。

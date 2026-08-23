@@ -50,6 +50,23 @@
   var FAIL_OUTCOMES = ['partial', 'not_happened', 'opposite'];
 
   function clamp(n, lo, hi) { return Math.max(lo, Math.min(hi, n)); }
+  /**
+   * 与 casebook.statKey 同一把键：宫际关系按**分支**统计与修订。
+   * 一条 relation id 底下六种互斥读法准头天差地别（实测：同一条规则「彼宫生我宫」3 例全中、
+   * 「二者同落一宫」5 例只中 1），混作一条既看不出问题，也没法只收窄其中一支——
+   * mute 整条会把准的那一支一起杀掉。
+   */
+  function statKey(r) {
+    if (!r) return '';
+    if (r.branchId) return r.branchId;
+    if (r.kind !== 'relation') return r.id;
+    var t = r.trigger || '';
+    if (!t && r.label) {
+      var i = String(r.label).indexOf(' ');
+      if (i > 0) t = String(r.label).slice(i + 1);
+    }
+    return t ? r.id + '#' + t : r.id;
+  }
   function graded(rec) { return !!(rec && rec.feedback && rec.feedback.outcome); }
   function isFail(rec) { return graded(rec) && FAIL_OUTCOMES.indexOf(rec.feedback.outcome) >= 0; }
   function isHit(rec) { return graded(rec) && rec.feedback.outcome === 'happened'; }
@@ -119,7 +136,7 @@
   /** 解析正解。itemId 必须是本案真实存在的条目，编造的一律清空。 */
   function parseCorrection(text, rec) {
     var known = {};
-    ((rec && rec.fired && rec.fired.rules) || []).forEach(function (r) { known[r.id] = 1; });
+    ((rec && rec.fired && rec.fired.rules) || []).forEach(function (r) { known[r.id] = 1; known[statKey(r)] = 1; });
     ((rec && rec.fired && rec.fired.symbols) || []).forEach(function (s) { known[s.key] = 1; });
     var empty = { ok: false, verdict: '', correction: '', misweighted: [], whyNotDerivable: '', dropped: [], error: '' };
     var raw = String(text || '').trim();
@@ -166,21 +183,22 @@
       var fb = rec.feedback;
       ((rec.fired && rec.fired.rules) || []).forEach(function (r) {
         // 逐条标注优先：整案失败不代表这一条错了
-        var v = (fb.ruleVerdicts || {})[r.id];
+        var v = (fb.ruleVerdicts || {})[statKey(r)] || (fb.ruleVerdicts || {})[r.id];
         var bad = v ? FAIL_OUTCOMES.indexOf(v) >= 0 : true;
         if (!bad) return;
-        if (!byRule[r.id]) {
-          byRule[r.id] = {
-            ruleId: r.id, label: r.label, concept: r.concept, polarity: r.polarity,
+        var key = statKey(r);
+        if (!byRule[key]) {
+          byRule[key] = {
+            ruleId: key, baseRuleId: r.id, label: r.label, concept: r.concept, polarity: r.polarity,
             failN: 0, marked: 0, cases: [], misreads: []
           };
         }
-        var s = byRule[r.id];
+        var s = byRule[key];
         s.failN++;
         if (v) s.marked++;
         if (s.cases.length < 12) s.cases.push(rec.id);
         (fb.misreads || []).forEach(function (m) {
-          if (m.basedOn === r.id && s.misreads.length < 5) {
+          if ((m.basedOn === r.id || m.basedOn === key) && s.misreads.length < 5) {
             s.misreads.push({ claim: m.claim, actual: m.actual, caseId: rec.id });
           }
         });
@@ -303,7 +321,9 @@
     var conflicts = [], supports = [];
     (records || []).forEach(function (rec) {
       if (!graded(rec)) return;
-      var fired = ((rec.fired && rec.fired.rules) || []).some(function (r) { return r.id === revision.ruleId; });
+      var fired = ((rec.fired && rec.fired.rules) || []).some(function (r) {
+        return statKey(r) === revision.ruleId || r.id === revision.ruleId;
+      });
       if (!fired) return;
       var v = (rec.feedback.ruleVerdicts || {})[revision.ruleId];
       var itemOk = v ? v === 'happened' : isHit(rec);
@@ -369,7 +389,7 @@
   }
 
   return {
-    VERSION: VERSION, OPS: OPS, OP_KEYS: OP_KEYS,
+    VERSION: VERSION, OPS: OPS, OP_KEYS: OP_KEYS, statKey: statKey,
     MIN_FAIL_CASES: MIN_FAIL_CASES, MAX_WEIGHT_DELTA: MAX_WEIGHT_DELTA,
     isFail: isFail, isHit: isHit,
     correctionPrompt: correctionPrompt, parseCorrection: parseCorrection,

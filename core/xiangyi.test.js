@@ -76,12 +76,13 @@ t('六大占类规则均已建成（Phase 2 求财 + Phase 2.3 五类）', funct
 t('综合类的生克关系只断成败倾向，不得拿去断迟速与幅度', function () {
   // 实测：「谋为可成(但费些气力)」屡被读成「会延误/需久等/幅度不大/只是小胜」，
   // 而实况反而更快更大更顺——那是把成败之辞挪去答了迟速与幅度之问。
+  // 字段名为 answers（「这条只答哪一类问题」）——evidence 里的 scope 另有其义（单象/组合/宫际），不可混用
   var rel = RULES.domains.general.relations[0];
-  assert.strictEqual(rel.scope, '成败倾向');
-  assert.ok(/不断迟速/.test(rel.scopeNote) && /不断幅度/.test(rel.scopeNote));
-  assert.ok(/应期5/.test(rel.scopeNote), '须指明迟速另有其法');
+  assert.strictEqual(rel.answers, '成败倾向');
+  assert.ok(/不断迟速/.test(rel.answersNote) && /不断幅度/.test(rel.answersNote));
+  assert.ok(/应期5/.test(rel.answersNote), '须指明迟速另有其法');
   Object.keys(rel.map).forEach(function (k) {
-    assert.strictEqual(rel.map[k].scope, '成败倾向', k + ' 缺 scope');
+    assert.strictEqual(rel.map[k].answers, '成败倾向', k + ' 缺 answers');
   });
 });
 t('标 complete 者必须真有规则（不得空壳冒充已建成）', function () {
@@ -846,6 +847,37 @@ t('倾向计数与判读条目数吻合', function () {
   assert.strictEqual(t2.support + t2.obstruct + t2.neutral, all.length);
   assert.strictEqual(t2.support, all.filter(function (x) { return x.polarity === '+'; }).length);
   assert.strictEqual(t2.obstruct, all.filter(function (x) { return x.polarity === '-'; }).length);
+});
+
+t('据实测复盘改正的两条判读：范围限定齐备且指明别的该看哪里', function () {
+  function findCond(dom, id) {
+    return (RULES.domains[dom].conditions || []).filter(function (c) { return c.id === id; })[0];
+  }
+  // ① 玄武休囚死：原作「藏得不深」，纲要无据且与二节「方位定处」相抵触
+  var xw = findCond('lost_item', 'lost_item.玄武.宫休囚死');
+  assert.ok(xw, '缺 lost_item.玄武.宫休囚死');
+  assert.strictEqual(xw.answers, '显隐');
+  assert.ok(!/藏得不深/.test(xw.concept.join('')), '「藏得不深」纲要无据，不得留在 concept 里');
+  assert.ok(/不断远近/.test(xw.answersNote) && /方位定处/.test(xw.answersNote),
+    '须指明远近处所由落宫方位定');
+  assert.ok(xw._authoringFix && /撰写之误/.test(xw._authoringFix), '撰写之误须留档，不得悄悄改掉');
+  // ② 事业生门旺相：纲要事业行取的是开门+值符，生门只是辅用；向背由时干宫断
+  var sm = findCond('career', 'career.生门.旺相');
+  assert.strictEqual(sm.answers, '事体有无实利');
+  assert.ok(/不断对方是否履约/.test(sm.answersNote));
+  assert.ok(/时干宫/.test(sm.answersNote), '须指明向背该看时干宫');
+  assert.ok(/开门 \+ 值符/.test(sm.answersNote), '须点明纲要事业行取的并非生门');
+});
+t('凡带 answersNote 者必同时带 answers，反之亦然（不得只写一半）', function () {
+  Object.keys(RULES.domains).forEach(function (id) {
+    var d = RULES.domains[id];
+    [].concat(d.conditions || [], d.combinations || []).forEach(function (c) {
+      if (c.answers || c.answersNote) {
+        assert.ok(c.answers && c.answersNote, c.id + ' 的范围限定只写了一半');
+        assert.ok(c.answersNote.length >= 20, c.id + ' 的范围说明过短，说不清「别的该看哪里」');
+      }
+    });
+  });
 });
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
