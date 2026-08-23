@@ -346,5 +346,49 @@ t('低置信度的候选（律师/男友/女友）标为 low 并说明取用前�
   });
 });
 
+console.log('== 占类提示：判错时也要提（实测里最贵的一类错） ==');
+
+function hintIdx() {
+  return YS.domainIds().map(function (id) {
+    var d = YS.getDomain(id) || {};
+    return { name: id, label: d.label, yongshen: d.yongshen };
+  });
+}
+function withHint(q, domain) {
+  return LX.resolve({
+    question: q, chart: CHART,
+    options: { school: 'zhuanpan', locate: YS.locate, domain: domain,
+      domainLabel: (YS.getDomain(domain) || {}).label || domain, domainsForHint: hintIdx() }
+  });
+}
+
+t('占类判错时提示：钱包丢了被判成求财，应提示失物', function () {
+  var r = withHint('网测，女士今天下午钱包丢了，问还能不能找到？', 'wealth');
+  assert.ok(r.suggestedDomains.some(function (s) { return s.domain === 'lost_item'; }),
+    '应提示 lost_item，实得：' + JSON.stringify(r.suggestedDomains));
+  var note = r.notes.join(' ');
+  assert.ok(/别的占类/.test(note) && /核对本次占类是否判对/.test(note));
+  assert.ok(/占类判错则用神与规则整套皆错/.test(note), '须说清判错的代价');
+});
+
+t('占类本就相符时不提示，免得每次都吵', function () {
+  var r = withHint('我的钥匙丢了，能找回吗？', 'lost_item');
+  assert.ok(!r.suggestedDomains.some(function (s) { return s.domain === 'lost_item'; }),
+    '与本次占类相同者不该再提示');
+});
+
+t('占类为「其他」时，措辞是「一并合参」而非「你判错了」', function () {
+  var r = withHint('他的病能好吗', 'general');
+  assert.ok(r.suggestedDomains.some(function (s) { return s.domain === 'health'; }));
+  var note = r.notes.join(' ');
+  assert.ok(/一并合参/.test(note));
+  assert.ok(!/核对本次占类是否判对/.test(note), '综合类不是判错，措辞须区分');
+});
+
+t('未传 domainsForHint 时不产出提示，不凭空猜占类', function () {
+  var r = LX.resolve({ question: '钱包丢了', chart: CHART, options: { school: 'zhuanpan', domain: 'wealth' } });
+  assert.deepStrictEqual(r.suggestedDomains, []);
+});
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

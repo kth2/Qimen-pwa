@@ -184,13 +184,16 @@
      * 那多半是问句没被引擎归对类——实测吃过亏：问大伯病情，占类判成 general，
      * health 的判读规则一条没跑，天芮(病符)只作为一个符号出现、毫无权重。
      * 此处只**提示**，不代为改写占类：改占类会连带换掉一整套用神与规则，须由人定夺。 */
+    // 占类提示：本次占类为「其他」时固然要提；**占类判错**时更要提——
+    // 实测里最贵的一类错就是占类判错（「钱包丢了能不能找到」被判成求财），
+    // 错了则用神、规则、判读整套都错，事后无从补救。
     var idx = options.domainsForHint;
-    if (idx && idx.length && (options.domain === 'general' || !options.domain)) {
+    if (idx && idx.length) {
       var hit = {};
       out.forEach(function (c) {
         idx.forEach(function (d) {
           var prim = (d.yongshen && d.yongshen.primary) || [];
-          if (d.name === 'general') return;
+          if (d.name === 'general' || d.name === options.domain) return;   // 与本次占类相同者不必提
           if (prim.indexOf(c.symbol) < 0) return;
           if (!hit[d.name]) hit[d.name] = { domain: d.name, label: d.label || '', symbols: [] };
           if (hit[d.name].symbols.indexOf(c.symbol) < 0) hit[d.name].symbols.push(c.symbol);
@@ -198,10 +201,15 @@
       });
       base.suggestedDomains = Object.keys(hit).sort().map(function (k) { return hit[k]; });
       if (base.suggestedDomains.length) {
+        var cur = options.domain || 'general';
         base.notes.push('问句取到的象（' +
           base.suggestedDomains.map(function (s) { return s.symbols.join('/') + '→' + (s.label || s.domain); }).join('；') +
-          '）正是该占类的主用神，而本次占类为「其他」，该占类的判读规则并未启用。' +
-          '请据其用神一并合参；若确属该类，可在界面「目的」里改选后重占。');
+          '）正是**别的占类**的主用神，而本次占类为「' + (options.domainLabel || cur) + '」，' +
+          '那些占类的判读规则并未启用。' +
+          (cur === 'general'
+            ? '请据其用神一并合参；若确属该类，可在提问处的「占类」里改选后重占。'
+            : '**请先核对本次占类是否判对**——占类判错则用神与规则整套皆错；' +
+              '若确属所提示的那一类，请在提问处的「占类」里改选后重占。'));
       }
     }
     base.fallbackNote = DB.fallbackNote || '';

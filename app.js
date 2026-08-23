@@ -386,7 +386,10 @@
       // fallbackCategory 必须传【引擎占类名】而非界面「目的」值：二者并不同名
       // （财运↔求财、健康↔疾病、学业↔功名），直传界面值会静默回落「综合」、丢掉该占类的专用用神。
       // 知识库未加载时 toEngineCategory 原样返回，行为与修复前一致。
-      const uiPurpose = $('inPurpose').value;
+      // 占类以 AI 面板的显式选择为先，其次才是排盘「目的」。
+      // 二者都留默认时，引擎按问句关键词自动判定——那正是实测里出错最多的一环：
+      // 「钱包丢了能不能找到」被判成求财、「另找合作方」被判成失物，整篇解读遂建在错的用神上。
+      const uiPurpose = ($('aiDomain') && $('aiDomain').value) || $('inPurpose').value;
       const fallbackCategory = (YS && YS.toEngineCategory) ? YS.toEngineCategory(uiPurpose) : uiPurpose;
       const opts = { nianMingGan: $('aiNianMing').value, methodText, fallbackCategory };
       const builder = school === 'feipan' ? QM.feipanPredict : QM.zhuanpanPredict;
@@ -457,7 +460,7 @@
                   school: 'zhuanpan',
                   locate: YS.locate,                       // 定宫复用 yongshen，不另写一套
                   actors: yongshen.actors,
-                  domain,
+                  domain, domainLabel: yongshen.label || domain,
                   domainNames: (yongshen.examine || []).map(m => m.name),
                   // 取到的象若正是某占类的主用神，而本次占类却落在「其他」，提示之
                   domainsForHint: YS.domainIds().map(id => {
@@ -1189,6 +1192,28 @@
     } catch (e) { $('caseCountTag').textContent = '导入失败：' + e.message; }
   }
 
+  /** 占类实时预览：在提问处就把「本次会按哪个占类断」摆出来，并说明是谁定的。
+   *  实测里最贵的一类错就是占类判错——错了则用神、规则、判读整套都错，事后无从补救。 */
+  function previewDomain() {
+    const sel = $('aiDomain'), tag = $('aiDomainTag');
+    if (!sel || !tag) return;
+    const q = ($('aiQuestion') && $('aiQuestion').value || '').trim();
+    const builder = school === 'feipan' ? QM.feipanPredict : QM.zhuanpanPredict;
+    if (!builder || !builder.classifyQuestion) { tag.textContent = ''; return; }
+    const picked = sel.value || $('inPurpose').value;
+    const fb = (YS && YS.toEngineCategory) ? YS.toEngineCategory(picked) : picked;
+    let cat = '';
+    try { cat = (builder.classifyQuestion(q, fb) || {}).category || ''; } catch (e) { cat = ''; }
+    if (!q) { tag.innerHTML = '<span class="muted">（填了问句才能判占类）</span>'; return; }
+    const bySelf = !!sel.value;
+    // 自动判定与「目的」都没指定时，结果全由关键词决定——这一情形要显眼地说出来
+    const auto = !bySelf && $('inPurpose').value === '综合';
+    tag.innerHTML = '→ 本次按 <b>' + esc(cat || '综合') + '</b> 断'
+      + (bySelf ? '<span class="muted">（你指定的）</span>'
+        : auto ? '　<b style="color:#8a6d3b">⚠ 据问句关键词自动判定，请核对</b>'
+          : '<span class="muted">（据排盘「目的」）</span>');
+  }
+
   /* ---------- init ---------- */
   function init() {
     const now = new Date();
@@ -1291,6 +1316,18 @@
         await renderArchive();
       });
       refreshCaseCount(); renderCaseViews(); loadRevisions();
+    }
+    // 占类下拉：与排盘「目的」同一份取值，另加一个「自动判定」
+    if ($('aiDomain') && $('inPurpose')) {
+      [...$('inPurpose').options].forEach(o => {
+        const n = document.createElement('option');
+        n.value = o.value; n.textContent = o.textContent;
+        $('aiDomain').appendChild(n);
+      });
+      $('aiDomain').addEventListener('change', previewDomain);
+      if ($('aiQuestion')) $('aiQuestion').addEventListener('input', previewDomain);
+      $('inPurpose').addEventListener('change', previewDomain);
+      previewDomain();
     }
     loadCfgForm();
     cast();
