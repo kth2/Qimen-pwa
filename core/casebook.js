@@ -75,6 +75,8 @@
               : (r.on + (r.aspect ? '(' + r.aspect + ')' : ''));
           rules.push({
             id: r.id, kind: r.kind, polarity: r.polarity, weight: r.weight || 0,
+            // 宫际关系一条 id 底下有六种互斥读法，准头天差地别，须按分支各记各的
+            branchId: r.branchId || '', trigger: r.trigger || '',
             label: label + (r.trigger ? ' ' + r.trigger : ''),
             concept: (r.concept || []).join('、').slice(0, 60)
           });
@@ -518,6 +520,25 @@
     return out;
   }
 
+  /**
+   * 统计用的键。宫际关系必须**按分支**统计——同一条 general.rel.日干-时干 之下，
+   * 「彼宫生我宫」实测 3 例全中、「二者同落一宫」5 例只中 1，混作一条算就成了没有意义的平均数，
+   * 也没法只收窄其中一支。
+   * 新记录带 branchId；改版之前的老记录没有，但 label 里存着那段触发文本（"我方→事体 我宫克彼宫"），
+   * 由它反推同一个键，故既有反馈不会因改版作废。
+   */
+  function statKey(r) {
+    if (!r) return '';
+    if (r.branchId) return r.branchId;
+    if (r.kind !== 'relation') return r.id;
+    var t = r.trigger || '';
+    if (!t && r.label) {
+      var i = String(r.label).indexOf(' ');
+      if (i > 0) t = String(r.label).slice(i + 1);
+    }
+    return t ? r.id + '#' + t : r.id;
+  }
+
   function graded(rec) { return !!(rec && rec.feedback && isOutcome(rec.feedback.outcome)); }
 
   /**
@@ -547,16 +568,20 @@
       if (caseOutcome === 'opposite') byDomain[d].opposite++;
 
       ((rec.fired && rec.fired.rules) || []).forEach(function (r) {
-        if (!byRule[r.id]) {
-          byRule[r.id] = {
-            ruleId: r.id, domain: d, polarity: r.polarity,
+        var key = statKey(r);
+        if (!byRule[key]) {
+          byRule[key] = {
+            ruleId: key, baseRuleId: r.id, branch: key !== r.id ? key.slice(r.id.length + 1) : '',
+            label: r.label || '', domain: d, polarity: r.polarity,
             ruleN: 0, ruleScore: 0, ruleOpposite: 0,
             caseN: 0, caseScore: 0, caseOpposite: 0,
             misreadN: 0, misreadExamples: []
           };
         }
-        var s = byRule[r.id];
-        var v = rec.feedback.ruleVerdicts[r.id];
+        var s = byRule[key];
+        // 逐条标注挂在 r.id 上（老记录如此，且同一张盘里一条关系只发一支，归属无歧义）；
+        // 分支级 id 若日后也被标注，一并认。
+        var v = rec.feedback.ruleVerdicts[key] || rec.feedback.ruleVerdicts[r.id];
         if (v) {
           s.ruleN++; s.ruleScore += OUTCOMES[v].score;
           if (v === 'opposite') s.ruleOpposite++;
@@ -571,6 +596,12 @@
       (rec.feedback.misreads || []).forEach(function (m) {
         if (!m || !m.basedOn) return;
         var s2 = byRule[m.basedOn];
+        if (!s2) {
+          // basedOn 指的是规则 id，而统计已按分支拆开：挂到本案实际发的那一支上。
+          // 同一张盘里一条关系只发一支，故归属无歧义。
+          var own = ((rec.fired && rec.fired.rules) || []).filter(function (r) { return r.id === m.basedOn; })[0];
+          if (own) s2 = byRule[statKey(own)];
+        }
         if (!s2) return;                       // 象义 key 或已不在本案的条目，跳过
         s2.misreadN++;
         if (s2.misreadExamples.length < 3) {

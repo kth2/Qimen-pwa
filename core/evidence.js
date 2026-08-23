@@ -110,6 +110,7 @@
     return {
       type: 'READING', source: 'knowledge/domain-rules.json',
       id: r.id, scope: scope,
+      answers: r.answers || '', answersNote: r.answersNote || '',
       element: scope === 'combination' ? (r.elements || []).join('+')
         : scope === 'relation' ? (r.fromLabel + '→' + r.toLabel) : r.on,
       // 关系条目的 element 已含双方角色名，再补 aspect 会重复
@@ -424,7 +425,8 @@
   /** 证据包 → 提示词文本块。坏数据返回空串，绝不阻断解读流程。 */
   function toPromptBlock(ev) {
     if (!ev || !ev.items || !ev.items.length) return '';
-    var L = [], facts = [], rules = [], syms = [], times = [], cals = [], reads = { condition: [], combination: [], relation: [] };
+    var L = [], facts = [], rules = [], syms = [], times = [], cals = [], ansNotes = [];
+    var reads = { condition: [], combination: [], relation: [] };
     var POL = { '+': '助', '-': '阻', '0': '中' };
     var STR = { high: '★强', medium: '★中', low: '★参考' };
     ev.items.forEach(function (x) {
@@ -453,7 +455,9 @@
       }
       else if (x.type === 'READING' && reads[x.scope]) {
         var revMark = x.revised ? '〔本机修订·' + (x.revised === 'mute' ? '停用' : x.revised === 'narrow' ? '已收窄' : '已调权') + '〕' : '';
-        reads[x.scope].push('  - [' + (POL[x.polarity] || '中') + '] ' + revMark + x.element +
+        if (x.answersNote && ansNotes.indexOf(x.answersNote) < 0) ansNotes.push(x.answersNote);
+        var ansMark = x.answers ? '〔只答：' + x.answers + '〕' : '';
+        reads[x.scope].push('  - [' + (POL[x.polarity] || '中') + '] ' + revMark + ansMark + x.element +
           (x.aspect ? '(' + x.aspect + ')' : '') + (x.gong ? '·' + x.gong + '宫' : '') +
           (x.trigger ? ' ' + x.trigger : '') +
           '：' + x.content.join('、') + '　（依据：' + x.basis + '）');
@@ -583,6 +587,12 @@
         L.push('  ⚠ 本次应用了 ' + xy.revisions.count + ' 条**本机经验修订**（修订集 ' + xy.revisions.hash +
           '）。修订只会收窄或降权，不会新造断法；标〔本机修订〕者即受其影响。' +
           '这些修订源自你自己的案例反推，**不是《解断方法纲要》**。');
+      }
+      // 实测里最常见的错不是规则错，是拿它去答了它不管的问题。故凡带范围限定的判读，
+      // 把「它只答什么、不答什么、别的该看哪里」原样铺出来。
+      if (ansNotes.length) {
+        L.push('  ⚠ **断语范围**（〔只答：×〕者，其结论只落在×上，不得挪去答别的问题）：');
+        ansNotes.forEach(function (n) { L.push('    · ' + n); });
       }
       if (xy && xy.notes && xy.notes.length) xy.notes.forEach(function (n) { L.push('  说明：' + n); });
     }
