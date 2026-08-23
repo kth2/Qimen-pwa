@@ -139,6 +139,17 @@
     </details>
     <div style="margin-top:8px;">
       <textarea id="aiQuestion" rows="2" style="width:100%;" placeholder="例：我的钥匙丢了，能找回吗？在哪里找？"></textarea>
+      <div style="margin-top:6px;font-size:13px;">
+        <label class="muted">占类
+          <select id="aiDomain"><option value="">跟随问句自动判定</option></select>
+        </label>
+        <span class="muted" id="aiDomainTag"></span>
+        <div class="muted" style="font-size:11px;margin-top:2px;">
+          占类决定取哪套用神与判读规则。留「自动判定」时按问句关键词猜——
+          「钱包丢了」会被猜成求财、「另找合作方」会被猜成失物。**猜错就整篇都错**，
+          这里看一眼，不对就改。
+        </div>
+      </div>
       <div style="margin-top:6px;">
         <label class="muted">年命天干(可选)
           <select id="aiNianMing">
