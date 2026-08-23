@@ -647,11 +647,16 @@
       ? `　<span style="color:#3c763d">应期命中 ${r.timingHits.hits.length} 条</span>` : '';
     const actual = fb && fb.actual ? `<div class="muted" style="margin-top:2px;">实况：${esc(fb.actual.slice(0, 80))}</div>` : '';
     const misTag = fb && (fb.misreads || []).length ? `　<span style="color:#a94442">断错分析 ${fb.misreads.length} 条</span>` : '';
+      const pn = (r.parts && r.parts.items) ? r.parts.items.length : 0;
+      const pd = fb && fb.partOutcomes ? Object.keys(fb.partOutcomes).length : 0;
+      const partTag = pn ? (r.parts.confirmed
+        ? `　<span style="color:#3c763d">逐问 ${pd}/${pn}</span>`
+        : `　<span class="muted">可拆 ${pn} 问</span>`) : '';
     const noAns = rec_hasAnswer(r) ? '' : '　<span class="muted">（未存解读全文）</span>';
     const marked = fb ? (Object.keys(fb.ruleVerdicts || {}).length + Object.keys(fb.symbolVerdicts || {}).length) : 0;
     return `<div style="border-bottom:1px solid #eee;padding:6px 0;font-size:13px;">
       <div><b>${esc(r.question || '(未填问题)')}</b> <span class="muted">${esc(r.domain || '')}　${esc(r.chartRef.siZhu || '')}</span></div>
-      <div class="muted">${esc((r.createdAt || '').slice(0, 10))}　判读 ${r.fired.rules.length} 条　锚点 ${r.fired.anchors.length} 个　${tag}${marked ? `　已逐条标注 ${marked} 条` : ''}${hit}${misTag}${noAns}</div>
+      <div class="muted">${esc((r.createdAt || '').slice(0, 10))}　判读 ${r.fired.rules.length} 条　锚点 ${r.fired.anchors.length} 个　${tag}${marked ? `　已逐条标注 ${marked} 条` : ''}${hit}${misTag}${partTag}${noAns}</div>
       ${actual}
       <div style="margin-top:4px;">
         <button class="btn" style="background:#3c763d;padding:3px 8px;font-size:12px;" data-open="${esc(r.id)}">${fb ? '查看/修改复盘' : '📝 填写实况并复盘'}</button>
@@ -805,8 +810,9 @@
             那样算出来的命中率是虚的。
           </div>
         </div>
+        ${partsFormHtml(rec)}
         <div style="margin-top:6px;">
-          <span class="muted">③ 整体判断</span>
+          <span class="muted">③ 整体判断${rec.parts && rec.parts.confirmed ? '（已按逐问自动推出，可手改）' : ''}</span>
           ${OUTCOME_BTNS.map(([k, label]) =>
             `<label style="margin-right:8px;font-size:12px;"><input type="radio" name="reviewOutcome" value="${k}"${fb.outcome === k ? ' checked' : ''}>${label}</label>`).join('')}
         </div>
@@ -836,6 +842,26 @@
     $('reviewTime').addEventListener('change', previewTimingHits);
     $('reviewAiBtn').addEventListener('click', aiReview);
     $('reviewFixBtn').addEventListener('click', askCorrection);
+    // 一卦多问：勾选后展开逐问，且逐问一改就把「整体判断」按规则推出来
+    const partsOn = $('partsOn');
+    if (partsOn) {
+      const sync = () => {
+        const on = partsOn.checked;
+        if ($('partsRows')) $('partsRows').style.display = on ? 'block' : 'none';
+        if (!on || !CB.deriveOutcome) return;
+        const items = ((_reviewRec.parts || {}).items || []).map(it => {
+          const sel = document.querySelector(`input[name="part${it.i}"]:checked`);
+          return { outcome: sel ? sel.value : '' };
+        });
+        const d = CB.deriveOutcome(items);
+        if (!d) return;
+        const r = document.querySelector(`input[name="reviewOutcome"][value="${d}"]`);
+        if (r) r.checked = true;
+      };
+      partsOn.addEventListener('change', sync);
+      document.querySelectorAll('input[name^="part"]').forEach(x => x.addEventListener('change', sync));
+      sync();
+    }
     $('reviewSaveBtn').addEventListener('click', saveReview);
     $('reviewCancelBtn').addEventListener('click', () => { $('reviewPanel').style.display = 'none'; _reviewRec = null; });
     previewTimingHits();
@@ -902,6 +928,43 @@
     return out;
   }
 
+  /** 一卦多问：把拆分提议摆出来，逐问各自回填。
+   *  拆与不拆由用户定——「①中医②西医③祝由④开刀」是选项不是子问题，硬拆会把选项拆成问题。 */
+  function partsFormHtml(rec) {
+    const p = rec.parts;
+    if (!p || !p.items || !p.items.length) return '';
+    const fb = rec.feedback || {};
+    const po = fb.partOutcomes || {};
+    const pa = fb.partActuals || {};
+    const rows = p.items.map(it => `
+      <div style="border-bottom:1px solid #f2f2f2;padding:4px 0;font-size:12px;">
+        <div><b>${it.i + 1}.</b> ${esc(it.text)}</div>
+        <div style="margin-top:2px;">
+          ${OUTCOME_BTNS.map(([k, label]) =>
+            `<label style="margin-right:6px;"><input type="radio" name="part${it.i}" value="${k}"${po[it.i] === k ? ' checked' : ''}>${label}</label>`).join('')}
+          <input data-partactual="${it.i}" placeholder="这一问的实况(可选)" value="${esc(pa[it.i] || '')}"
+                 style="width:44%;font-size:12px;padding:2px 4px;">
+        </div>
+      </div>`).join('');
+    return `
+      <div style="margin-top:8px;border:1px solid ${p.confirmed ? '#3c763d' : '#ddd'};border-radius:6px;padding:6px;">
+        <div><span class="muted">②b 一卦多问</span>
+          <label style="font-size:12px;margin-left:6px;">
+            <input type="checkbox" id="partsOn"${p.confirmed ? ' checked' : ''}> 按 ${p.items.length} 问分别回填
+          </label>
+          <span class="muted" style="font-size:11px;">　${esc(p.why)}</span>
+        </div>
+        ${p.looksLikeOptions ? `<div class="muted" style="font-size:11px;color:#8a6d3b;">
+          ⚠ 这几条看着像**选项**而不是子问题，默认不拆。确属多问再勾选。</div>` : ''}
+        <div id="partsRows" style="margin-top:4px;${p.confirmed ? '' : 'display:none;'}">${rows}
+          <div class="muted" style="font-size:11px;margin-top:4px;">
+            逐问回填后，「整体判断」会按各问自动推出；统计也改用各问平均分——
+            四问中三问应验记 0.75，而不是笼统的「部分＝0.5」。
+          </div>
+        </div>
+      </div>`;
+  }
+
   /** 应期反推：确定性比对，实时显示命中了哪条机制。 */
   function previewTimingHits() {
     if (!_reviewRec || !CB) return;
@@ -962,13 +1025,23 @@
     document.querySelectorAll('select[data-symverdict]').forEach(sel => {
       if (sel.value) { symbolVerdicts[sel.dataset.symverdict] = sel.value; anyManual = true; }
     });
+    const partsOnEl = $('partsOn');
+    const partOutcomes = {}, partActuals = {};
+    if (partsOnEl && partsOnEl.checked) {
+      ((_reviewRec.parts || {}).items || []).forEach(it => {
+        const sel = document.querySelector(`input[name="part${it.i}"]:checked`);
+        if (sel) partOutcomes[it.i] = sel.value;
+        const ta = document.querySelector(`input[data-partactual="${it.i}"]`);
+        if (ta && ta.value.trim()) partActuals[it.i] = ta.value.trim();
+      });
+    }
     const happenedAt = $('reviewDate').value;
     const happenedTime = $('reviewTime') ? $('reviewTime').value : '';
     try {
       let rec = CB.applyFeedback(_reviewRec, {
         outcome: picked.value,
         actual: $('reviewActual').value.trim(),
-        happenedAt, happenedTime,
+        happenedAt, happenedTime, partOutcomes, partActuals,
         ruleVerdicts: verdicts,
         symbolVerdicts,
         // 用户在界面上过目并可改动过，故一律记为 manual；AI 只是预填
@@ -979,6 +1052,9 @@
       });
       if (happenedAt) {
         rec = CB.applyTimingDerivation(rec, CB.deriveTimingHits(rec, actualSiZhu(happenedAt, happenedTime)));
+      }
+      if (rec.parts) {
+        rec.parts = Object.assign({}, rec.parts, { confirmed: !!(partsOnEl && partsOnEl.checked) });
       }
       if (_reviewRec._correction) rec = CB.applyCorrection(rec, _reviewRec._correction);
       delete rec._aiObservations; delete rec._aiMisreads; delete rec._correction;

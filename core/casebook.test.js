@@ -30,6 +30,7 @@ TM.load(require('../knowledge/timing-rules.json'));
 EV.load(require('../knowledge/symbols.json'));
 YS.load(require('../knowledge/domains.json'));
 
+var NOWT = '2024-05-20T00:00:00Z';
 var pass = 0, fail = 0;
 function t(name, fn) {
   try {
@@ -838,6 +839,105 @@ t('断错归因落到本案实际发的那一支上（basedOn 给的是规则 id
   var hit = cal.rules.filter(function (r) { return r.misreadN > 0; })[0];
   assert.ok(hit, '指错须能挂上');
   assert.strictEqual(hit.ruleId, rel.branchId, '须挂到本案实际发的那一支，而非笼统的规则 id');
+});
+
+console.log('== 一卦多问：拆分提议与逐问回填（Phase 12） ==');
+
+t('拆得出子问题，且把背景与各问分开', function () {
+  var r = CB.splitQuestion('辛未命女租房，房东要卖房。\n问：1.新房面积比旧房大还是小？\n2.属于什么类型？\n3.租金多少？');
+  assert.strictEqual(r.parts.length, 3, '实得：' + JSON.stringify(r.parts));
+  assert.ok(/房东要卖房/.test(r.lead), '背景须与子问分开');
+  assert.ok(!r.looksLikeOptions);
+  assert.ok(/子问题/.test(r.why));
+});
+
+t('选项不得被当成子问题——这是硬拆最容易犯的错', function () {
+  var r = CB.splitQuestion('用什么方法治疗比较靠谱：①中医②西医③祝由道法④开刀。');
+  assert.strictEqual(r.looksLikeOptions, true, '「①中医②西医」是选项不是子问题');
+  assert.ok(/选项/.test(r.why));
+  var r2 = CB.splitQuestion('测出现了什么事?\n①几个阿姨争吵。\n②有人喊抓小偷。\n③两个年轻仔打架。');
+  assert.strictEqual(r2.looksLikeOptions, true, '各行都是名词短语、非条条成问，仍属选项');
+});
+
+t('圈号子问题也能拆（①…？②…？）', function () {
+  var r = CB.splitQuestion('师姐让我起的卦，找物\n①丢的是什么东西？\n②有没有找到？');
+  assert.strictEqual(r.parts.length, 2);
+  assert.strictEqual(r.looksLikeOptions, false);
+});
+
+t('无多问标记 / 空问句时不产出，不硬拆', function () {
+  assert.strictEqual(CB.splitQuestion('今年财运如何？').parts.length, 0);
+  assert.strictEqual(CB.splitQuestion('').parts.length, 0);
+  assert.strictEqual(CB.splitQuestion(null).parts.length, 0);
+});
+
+t('makeCase 只**提议**拆分，confirmed 恒为 false', function () {
+  var rec = CB.makeCase({ id: 'p1', domain: 'wealth', chart: CHART, xiangyi: XYR,
+    question: '问：1.能不能成？\n2.何时成？\n3.在哪个方向？' });
+  assert.ok(rec.parts && rec.parts.items.length === 3);
+  assert.strictEqual(rec.parts.confirmed, false, '未经用户确认，不得自动生效');
+  assert.strictEqual(rec.parts.source, 'auto');
+});
+
+t('未确认拆分时，统计行为与从前逐字一致', function () {
+  var q = '问：1.能不能成？\n2.何时成？\n3.在哪个方向？';
+  var withParts = CB.applyFeedback(
+    CB.makeCase({ id: 'p2', domain: 'wealth', chart: CHART, xiangyi: XYR, question: q }),
+    { outcome: 'partial', now: NOWT });
+  var plain = CB.applyFeedback(
+    CB.makeCase({ id: 'p3', domain: 'wealth', chart: CHART, xiangyi: XYR, question: '能不能成？' }),
+    { outcome: 'partial', now: NOWT });
+  assert.strictEqual(CB.caseScore(withParts).from, 'case', '未确认就不得按逐问算');
+  assert.strictEqual(CB.caseScore(withParts).score, CB.caseScore(plain).score);
+});
+
+t('确认拆分并逐问回填后，改用各问平均分（四问中三问＝0.75，非「部分＝0.5」）', function () {
+  var rec = CB.makeCase({ id: 'p4', domain: 'wealth', chart: CHART, xiangyi: XYR,
+    question: '问：1.甲？\n2.乙？\n3.丙？\n4.丁？' });
+  assert.strictEqual(rec.parts.items.length, 4);
+  rec.parts = Object.assign({}, rec.parts, { confirmed: true });
+  rec = CB.applyFeedback(rec, {
+    outcome: 'partial', now: NOWT,
+    partOutcomes: { 0: 'happened', 1: 'happened', 2: 'happened', 3: 'not_happened' }
+  });
+  var s = CB.caseScore(rec);
+  assert.strictEqual(s.from, 'parts');
+  assert.strictEqual(s.score, 0.75, '实得 ' + s.score + '——笼统的「部分」只会记 0.5');
+  assert.strictEqual(s.n, 4);
+});
+
+t('整卦档位由逐问推出：全中/全不中/有中有不中', function () {
+  assert.strictEqual(CB.deriveOutcome([{ outcome: 'happened' }, { outcome: 'happened' }]), 'happened');
+  assert.strictEqual(CB.deriveOutcome([{ outcome: 'happened' }, { outcome: 'not_happened' }]), 'partial');
+  assert.strictEqual(CB.deriveOutcome([{ outcome: 'not_happened' }, { outcome: 'not_happened' }]), 'not_happened');
+  assert.strictEqual(CB.deriveOutcome([{ outcome: 'opposite' }, { outcome: 'opposite' }]), 'opposite');
+  assert.strictEqual(CB.deriveOutcome([]), null, '一问未填则不推');
+  assert.strictEqual(CB.deriveOutcome([{ outcome: '' }]), null);
+});
+
+t('非法逐问档位被丢弃，不进统计', function () {
+  var rec = CB.makeCase({ id: 'p5', domain: 'wealth', chart: CHART, xiangyi: XYR,
+    question: '问：1.甲？\n2.乙？' });
+  rec = CB.applyFeedback(rec, { outcome: 'partial', now: NOWT, partOutcomes: { 0: 'happened', 1: '瞎填' } });
+  assert.strictEqual(rec.feedback.partOutcomes['0'], 'happened');
+  assert.ok(!('1' in rec.feedback.partOutcomes), '非法档位不得进入统计');
+});
+
+t('逐问平均分确实影响校准（同一批案例，拆与不拆得分不同）', function () {
+  function batch(confirm) {
+    var out = [];
+    for (var i = 0; i < 8; i++) {
+      var rec = CB.makeCase({ id: 'q' + i, domain: 'wealth', chart: CHART, xiangyi: XYR,
+        question: '问：1.甲？\n2.乙？\n3.丙？\n4.丁？' });
+      if (confirm) rec.parts = Object.assign({}, rec.parts, { confirmed: true });
+      out.push(CB.applyFeedback(rec, { outcome: 'partial', now: NOWT,
+        partOutcomes: { 0: 'happened', 1: 'happened', 2: 'happened', 3: 'not_happened' } }));
+    }
+    return CB.calibrate(out).rules[0];
+  }
+  var off = batch(false), on = batch(true);
+  assert.strictEqual(off.rate, 0.5, '不拆时按「部分＝0.5」');
+  assert.strictEqual(on.rate, 0.75, '拆后按各问平均分，实得 ' + on.rate);
 });
 
 console.log('== 存储：只在本机、导入不覆盖 ==');
