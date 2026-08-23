@@ -464,6 +464,19 @@
         siZhu: [sz.year, sz.month, sz.day, sz.time].filter(Boolean).join(' ')
       },
       question: a.question || '',
+      // 多问拆分提议（Phase 12）。只是**提议**：confirmed=false 时统计一律照旧按整卦算，
+      // 直到用户在复盘表单里确认要拆。绝不静默拆开去改统计。
+      parts: (function () {
+        var sp = splitQuestion(a.question || '');
+        if (!sp.parts.length) return null;
+        return {
+          marker: sp.marker, lead: sp.lead, looksLikeOptions: sp.looksLikeOptions, why: sp.why,
+          confirmed: false, source: 'auto',
+          items: sp.parts.map(function (p, i) {
+            return { i: i, text: String(p).slice(0, 200), outcome: '', actual: '' };
+          })
+        };
+      })(),
       domain: a.domain || '',
       // 预测侧：本次触发的规则与应期锚点，反馈将落到这些 id 上
       fired: fired,
@@ -503,6 +516,17 @@
       outcome: fb.outcome,
       label: outcomeLabel(fb.outcome),
       happenedAt: fb.happenedAt || '',
+      // 逐问档位（Phase 12）：{ i: outcome }，另有 partActuals { i: 实况文本 }
+      partOutcomes: (function () {
+        var o = {}, m = fb.partOutcomes || {};
+        for (var k in m) if (OUTCOMES[m[k]]) o[k] = m[k];
+        return o;
+      })(),
+      partActuals: (function () {
+        var o = {}, m = fb.partActuals || {};
+        for (var k in m) if (m[k]) o[k] = String(m[k]).slice(0, 400);
+        return o;
+      })(),
       happenedTime: fb.happenedTime || '',        // 可选。填了才核对「时辰」一级，见 deriveTimingHits
       // actual＝用户用自己的话写下的实际发生情况。四档太粗，真正能拿来反推的是这段文字。
       actual: fb.actual || fb.note || '',
@@ -539,6 +563,114 @@
     return t ? r.id + '#' + t : r.id;
   }
 
+
+  /* ================= 多问拆分（Phase 12） =================
+   * 实测案例本里 32% 的题带多问标记，整卦只给一个应验档位，结果几乎必然是「部分应验」——
+   * 36% 的部分应验率有相当一部分是这么来的，既丢信息，也把规则统计拖成一锅粥。
+   * 但有个陷阱：「①中医②西医③祝由④开刀」是**选项**不是子问题，硬拆会把选项拆成问题。
+   * 故本层只**提议**拆法并给出判据，是否采纳由用户在复盘表单里定——绝不静默拆开去改统计。 */
+  var SPLIT_MARKERS = [
+    { name: 'circled', src: '[\u2460-\u2469]' },
+    { name: 'numbered', src: '(?:^|[\n\uFF1B;\u3002\uFF1A:])\s*[1-9\uFF11-\uFF19][\.\uFF0E\u3001\uFF0C\)\uFF09]' },
+    { name: 'paren', src: '[\uFF08(]\s*[1-9\u4E00-\u4E5D]\s*[\uFF09)]' },
+    { name: 'cn', src: '(?:^|[\n\uFF1B;\u3002\uFF1A:])\s*[\u4E00-\u4E5D][\u3001\uFF0E]' }
+  ];
+  var Q_HINT = /[？?]|能否|是否|会不会|能不能|可否|多少|几时|何时|哪|什么|吗|如何|怎样|谁|测/;
+  var SKIP_CH = /[\s\n；;。：:]/;
+
+  /**
+   * 把一段问句提议拆成若干子问。
+   * @returns {object} { parts:[string], lead:string, marker, looksLikeOptions, why }
+   *   looksLikeOptions=true 时表示「这多半是选项而非子问题」，界面据此默认不拆。
+   */
+  function splitQuestion(text) {
+    var t = String(text || '');
+    if (!t.trim()) return { parts: [], lead: '', marker: '', looksLikeOptions: false, why: '问句为空' };
+    for (var i = 0; i < SPLIT_MARKERS.length; i++) {
+      var re = new RegExp(SPLIT_MARKERS[i].src, 'g'), at = [], m;
+      while ((m = re.exec(t)) !== null) {
+        var s = m.index;
+        while (s < t.length && SKIP_CH.test(t.charAt(s))) s++;
+        at.push(s);
+        if (re.lastIndex === m.index) re.lastIndex++;
+      }
+      if (at.length < 2) continue;
+      var lead = t.slice(0, at[0]).trim();
+      var parts = [];
+      for (var k = 0; k < at.length; k++) {
+        parts.push(t.slice(at[k], k + 1 < at.length ? at[k + 1] : t.length).trim());
+      }
+      parts = parts.filter(Boolean);
+      if (parts.length < 2) continue;
+      var qn = 0;
+      parts.forEach(function (p) { if (Q_HINT.test(p)) qn++; });
+      var sameLine = parts.every(function (p) { return p.indexOf('\n') < 0; });
+      var optionish = qn * 2 < parts.length || (sameLine && qn < parts.length);
+      return {
+        marker: SPLIT_MARKERS[i].name, lead: lead, parts: parts, questionish: qn,
+        looksLikeOptions: optionish,
+        why: optionish
+          ? (qn * 2 < parts.length ? '过半不像问句，多半是选项而非子问题' : '并列于同一行且非条条成问，多半是选项')
+          : '各自成句且多含疑问，多半是子问题'
+      };
+    }
+    return { parts: [], lead: '', marker: '', looksLikeOptions: false, why: '未见多问标记' };
+  }
+
+  /** 由各子问的档位推出整卦档位：全中=完全应验，全不中=未应验，有中有不中=部分应验。 */
+  function deriveOutcome(parts) {
+    var graded = (parts || []).filter(function (p) { return p && p.outcome && OUTCOMES[p.outcome]; });
+    if (!graded.length) return null;
+    var hit = 0, opp = 0;
+    graded.forEach(function (p) {
+      var s = OUTCOMES[p.outcome].score;
+      if (s >= 1) hit++;
+      if (p.outcome === 'opposite') opp++;
+    });
+    if (hit === graded.length) return 'happened';
+    if (opp === graded.length) return 'opposite';
+    if (hit === 0 && opp === 0) return 'not_happened';
+    return 'partial';
+  }
+
+  /** 各子问档位的平均分。用于校准：四问中三问应验应记 0.75，而不是笼统的「部分＝0.5」。 */
+  function partsScore(parts) {
+    var graded = (parts || []).filter(function (p) { return p && p.outcome && OUTCOMES[p.outcome]; });
+    if (!graded.length) return null;
+    var sum = 0;
+    graded.forEach(function (p) { sum += OUTCOMES[p.outcome].score; });
+    return { score: sum / graded.length, n: graded.length, total: (parts || []).length };
+  }
+
+  /**
+   * 整卦记分。**已确认拆问且逐问回填过**的，用各问平均分——四问中三问应验记 0.75，
+   * 而不是笼统的「部分＝0.5」。其余一律照旧按整卦档位，行为与从前逐字一致。
+   * @returns {object} { score, from:'parts'|'case', n, total, outcome }
+   */
+  function caseScore(rec) {
+    var fb = (rec && rec.feedback) || null;
+    if (!fb || !fb.outcome) return null;
+    var p = partsOf(rec);
+    if (p) {
+      var ps = partsScore(p);
+      if (ps && ps.n) {
+        return { score: ps.score, from: 'parts', n: ps.n, total: ps.total, outcome: fb.outcome };
+      }
+    }
+    return { score: OUTCOMES[fb.outcome].score, from: 'case', n: 1, total: 1, outcome: fb.outcome };
+  }
+
+  /** 已确认要拆、且带上了逐问档位的子问清单；否则返回 null（表示按整卦算）。 */
+  function partsOf(rec) {
+    var ps = rec && rec.parts;
+    if (!ps || !ps.confirmed || !ps.items || !ps.items.length) return null;
+    var po = (rec.feedback && rec.feedback.partOutcomes) || {};
+    var out = ps.items.map(function (it) {
+      return { i: it.i, text: it.text, outcome: po[it.i] || it.outcome || '' };
+    });
+    return out.some(function (x) { return x.outcome; }) ? out : null;
+  }
+
   function graded(rec) { return !!(rec && rec.feedback && isOutcome(rec.feedback.outcome)); }
 
   /**
@@ -559,12 +691,15 @@
       if (!graded(rec)) return;
       totals.graded++;
       var caseOutcome = rec.feedback.outcome;
+      // 已确认拆问且逐问回填者，整案归因用逐问平均分（四问中三问应验＝0.75），
+      // 而不是笼统的「部分＝0.5」。未拆问者行为逐字不变。
+      var cs_ = caseScore(rec), caseScoreVal = cs_ ? cs_.score : OUTCOMES[caseOutcome].score;
       totals.byOutcome[caseOutcome]++;
 
       var d = rec.domain || 'unknown';
       if (!byDomain[d]) byDomain[d] = { domain: d, n: 0, score: 0, opposite: 0 };
       byDomain[d].n++;
-      byDomain[d].score += OUTCOMES[caseOutcome].score;
+      byDomain[d].score += caseScoreVal;
       if (caseOutcome === 'opposite') byDomain[d].opposite++;
 
       ((rec.fired && rec.fired.rules) || []).forEach(function (r) {
@@ -586,7 +721,7 @@
           s.ruleN++; s.ruleScore += OUTCOMES[v].score;
           if (v === 'opposite') s.ruleOpposite++;
         } else {
-          s.caseN++; s.caseScore += OUTCOMES[caseOutcome].score;
+          s.caseN++; s.caseScore += caseScoreVal;
           if (caseOutcome === 'opposite') s.caseOpposite++;
         }
       });
@@ -646,6 +781,9 @@
     (records || []).forEach(function (rec) {
       if (!graded(rec)) return;
       var caseOutcome = rec.feedback.outcome;
+      // 已确认拆问且逐问回填者，整案归因用逐问平均分（四问中三问应验＝0.75），
+      // 而不是笼统的「部分＝0.5」。未拆问者行为逐字不变。
+      var cs_ = caseScore(rec), caseScoreVal = cs_ ? cs_.score : OUTCOMES[caseOutcome].score;
       ((rec.fired && rec.fired.symbols) || []).forEach(function (s) {
         if (!bySym[s.key]) {
           bySym[s.key] = { key: s.key, label: s.label, name: s.name, gong: s.gong, aspect: s.aspect,
@@ -657,7 +795,7 @@
           st.symN++; st.symScore += OUTCOMES[v].score;
           if (v === 'opposite') st.symOpposite++;
         } else {
-          st.caseN++; st.caseScore += OUTCOMES[caseOutcome].score;
+          st.caseN++; st.caseScore += caseScoreVal;
           if (caseOutcome === 'opposite') st.caseOpposite++;
         }
       });
@@ -801,6 +939,8 @@
     isOutcome: isOutcome, outcomeLabel: outcomeLabel,
     firedRules: firedRules, chartSymbols: chartSymbols,
     makeCase: makeCase, applyFeedback: applyFeedback, graded: graded,
+    splitQuestion: splitQuestion, deriveOutcome: deriveOutcome, partsScore: partsScore,
+    caseScore: caseScore,
     calibrate: calibrate, proposals: proposals,
     deriveTimingHits: deriveTimingHits, applyTimingDerivation: applyTimingDerivation,
     applyCorrection: applyCorrection,
