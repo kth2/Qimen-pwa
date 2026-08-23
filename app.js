@@ -6,6 +6,7 @@
   const XY = window.XiangYi;    // 占类象义推理层（Phase 2；缺则证据包不含 READING，其余照旧）
   const TM = window.Timing;     // 应期时间线层（Phase 4；缺则不含 TIMING，yingqi 块照常承载应期）
   const LX = window.LeiXiang;   // 类象取用层（Phase 8；转盘专有，缺则不含类象用神）
+  const SV = window.Severity;   // 力量校验层（Phase 9；缺则不含禁令，力量仍由 wangshuai 块承载）
   const CB = window.Casebook;   // 案例本·经验层（Phase 5；只统计与建议，绝不改写教义规则）
   const CSTORE = window.CaseStore;
   const RV = window.Revise;     // 复盘正解与规则修订（Phase 6）
@@ -232,6 +233,7 @@
   let _rulesReady = false;      // 象义规则库单独计：它缺席只减 READING，不该拖垮整个证据层
   let _timingReady = false;     // 应期规则库同理：缺席只减 TIMING
   let _leixiangReady = false;   // 类象库同理：缺席只减类象用神，占类用神照常
+  let _severityReady = false;   // 力量校验库同理：缺席只减禁令段
   async function loadKnowledge() {
     if (!YS || !EV) return false;
     const get = (p) => fetch(p).then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)));
@@ -258,6 +260,11 @@
     if (_kbReady && LX && !_leixiangReady) {
       try { _leixiangReady = LX.load(await get('knowledge/leixiang.json')); }
       catch (e) { console.warn('[leixiang] 类象库加载失败，本次不取类象用神：', e.message); _leixiangReady = false; }
+    }
+    // 力量校验库同样单独计：缺席只减禁令段，力量数据仍由 wangshuai 块承载
+    if (_kbReady && SV && !_severityReady) {
+      try { _severityReady = SV.load(await get('knowledge/severity-rules.json')); }
+      catch (e) { console.warn('[severity] 力量校验库加载失败，本次不作力量校验：', e.message); _severityReady = false; }
     }
     return _kbReady;
   }
@@ -304,6 +311,23 @@
     // 以下三条对应 Phase 2 的 READING 层。要点：判读是"该占类下这个符号怎么读"，不是结论；
     // 权重决定详略；"规则未建"不等于"盘上无碍"——这三处一旦被模型误读，本层反成噪音。
     'E10. READING 是本占类下的象义判读（已注明依据），凡涉及其所断元素，须优先采用其读法，不得改用与占类无关的泛化解释；其 [助]/[阻] 只表倾向，**不是成败断语**，成败仍须结合引擎吉凶与全盘旺衰自行推断，不得以"助多于阻"直接下结论。',
+    // Phase 9：力量校验与断语范围。以下四条全部出自实测案例本的失败复盘，逐条对应一类真实误判。
+    'E9a. 证据包若给出【力量校验】，其中每一条**禁令都是硬约束**，逐条照办。'
+      + '尤其：引擎判某宫为「吉」而该宫力量不足时，**不得**据以写「有转机/可成/可控/无碍」；'
+      + '「衰死又入墓」者**不可强断为吉**。纲要原话：吉凶定方向，旺衰定成败大小；**不可只看吉凶不看旺衰**。'
+      + '实测吃过亏：某宫引擎判「小吉」而力量仅 0.08（门迫+入墓），解读照断「病有转机」，次日即噩耗。',
+    'E9b. **生克关系只断成败向背，不断迟速、不断幅度、不断程度。**'
+      + '「日干宫克时干宫→我能制事、谋为可成(但费些气力)」说的是**能不能成**，不是「会延误」「要久等」'
+      + '「幅度不大」「只是小胜」。迟速另有其法（应期一节：得令旺相则应速，休囚墓绝则应迟），'
+      + '大小与程度看旺衰力量。实测中这条被反复误用：断「延误概率极高」实际准点、断「需耐心等待」'
+      + '实际一小时即好、断「微降」实际大降、断「小胜」实际平局。',
+    'E9c. 时干宫代表的是**本次所占的那一件事**。问句若含多件事（如既问通话能否接通、又问某人病情），'
+      + '须先点明时干宫所主是哪一件，**其结论不得跨到另一件上**。'
+      + '实测吃过亏：时干宫断「事在掌握之中」本指通话可成，却被写成「病情在掌控之中」。',
+    'E9d. 凡问病情、安危、生死一类，**不得作宽慰之辞**：不得断「医疗手段有效」「病有转机」「可控」，'
+      + '除非盘上确有明证且须同时写出凶象；见凶象叠加或力量极弱时必须照实写重。'
+      + '同时仍不得作医学诊断（不说患何病、不劝停药、不劝不就医）——两个方向都要守住。'
+      + '亦不得以「可待某日再占」代替本次该给的判断：那是回避，不是回答。',
     // Phase 8：类象用神。用户实测反馈——「用神与关键宫位逐宫详析」永远只写值符值使日干时干，
     // 所问的那件东西（钥匙、钱、尸体…）在解读里根本没有代表。纲要二节表尾本就写了要取象。
     'E10b. 证据包若给出【类象用神】，「② 用神与关键宫位逐宫详析」一节**必须把每一个类象用神的落宫也逐一展开**——'
@@ -391,8 +415,8 @@
       // 按次作用域收集本轮的结构化产物。**不能靠 window._xiangyi 之类的全局量**：
       // 知识库加载失败或证据构建抛错时那些全局量不会被更新，仍留着上一次解读的值，
       // 存案例就会把「别的盘」的象义记进这一条里——统计从此全错。
-      const runOut = { yongshen: null, xiangyi: null, timing: null, leixiang: null, evidence: null, domain: '' };
-      window._evidence = window._xiangyi = window._timing = window._leixiang = null;   // 先清干净，宁可为空也不串盘
+      const runOut = { yongshen: null, xiangyi: null, timing: null, leixiang: null, severity: null, evidence: null, domain: '' };
+      window._evidence = window._xiangyi = window._timing = window._leixiang = window._severity = null;   // 先清干净，宁可为空也不串盘
       if (await loadKnowledge()) {
         try {
           // 占类优先取引擎按问句识别的结果（比下拉框更贴合实际所问），识别不出再回落界面「目的」
@@ -433,7 +457,13 @@
                   school: 'zhuanpan',
                   locate: YS.locate,                       // 定宫复用 yongshen，不另写一套
                   actors: yongshen.actors,
-                  domainNames: (yongshen.examine || []).map(m => m.name)
+                  domain,
+                  domainNames: (yongshen.examine || []).map(m => m.name),
+                  // 取到的象若正是某占类的主用神，而本次占类却落在「其他」，提示之
+                  domainsForHint: YS.domainIds().map(id => {
+                    const dd = YS.getDomain(id) || {};
+                    return { name: id, label: dd.label, yongshen: dd.yongshen };
+                  })
                 }
               });
             } catch (le) { console.warn('[leixiang] 类象取用失败，本次不含类象用神：', le.message); leixiang = null; }
@@ -471,17 +501,32 @@
               calibration = CB.calibrationFor(overlay, xiangyi);
             } catch (ce) { console.warn('[casebook] 读取经验层失败，本次不附经验：', ce.message); }
           }
+          // 力量校验（Phase 9）：把纲要「不可只看吉凶不看旺衰」「衰死又入墓不可强断为吉」
+          // 等本就写死、却从未被执行的禁令，做成确定性检查。实测吃过亏：某宫引擎判「小吉」、
+          // 力量却只有 0.08（门迫+入墓），解读照断「有转机」。
+          let severity = null;
+          if (_severityReady && SV) {
+            try {
+              const wsAll = (window.WangShuai && window.WangShuai.analyze) ? window.WangShuai.analyze(pan) : null;
+              severity = SV.analyze({
+                chart: pan, wangshuai: wsAll, xiangyi, leixiang, yongshen,
+                yongShenGongs: ysGongs,
+                options: { school: school === 'feipan' ? 'feipan' : 'zhuanpan' }
+              });
+            } catch (se) { console.warn('[severity] 力量校验失败，本次不含禁令段：', se.message); severity = null; }
+          }
           const evidence = EV.build({
-            question: q, domain, chart: pan, yongshen, xiangyi, timing, leixiang, calibration,
+            question: q, domain, chart: pan, yongshen, xiangyi, timing, leixiang, severity, calibration,
             wangshuai: wsBlock, yingqi: yqBlock
           });
           runOut.yongshen = yongshen; runOut.xiangyi = xiangyi;
-          runOut.timing = timing; runOut.leixiang = leixiang;
+          runOut.timing = timing; runOut.leixiang = leixiang; runOut.severity = severity;
           runOut.evidence = evidence; runOut.domain = domain;
           window._evidence = evidence;                 // 便于在控制台核对喂给模型的内容
           window._xiangyi = xiangyi;                   // 同上：逐条核对判读命中了哪些规则
           window._timing = timing;                     // 同上：核对应期锚点与其机制
           window._leixiang = leixiang;                 // 同上：核对所问之物取了哪个象作用神
+          window._severity = severity;                 // 同上：核对触发了哪几条力量禁令
           evBlock = EV.toPromptBlock(evidence);
           if (evBlock) sysExtra = '\n' + EVIDENCE_DISCIPLINE;
         } catch (ee) {

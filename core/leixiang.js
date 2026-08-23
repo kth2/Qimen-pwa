@@ -117,7 +117,7 @@
 
     var base = {
       version: VERSION, school: school, applicable: false, reason: '',
-      candidates: [], unmatched: false, fallbackNote: '', notes: [],
+      candidates: [], unmatched: false, fallbackNote: '', notes: [], suggestedDomains: [],
       tablesNote: '', bagua: null
     };
 
@@ -179,6 +179,31 @@
 
     base.candidates = out;
     base.unmatched = out.length === 0;
+
+    /* 占类提示：取到的象若正是某占类的**主用神**，而本次占类却落在「其他(general)」，
+     * 那多半是问句没被引擎归对类——实测吃过亏：问大伯病情，占类判成 general，
+     * health 的判读规则一条没跑，天芮(病符)只作为一个符号出现、毫无权重。
+     * 此处只**提示**，不代为改写占类：改占类会连带换掉一整套用神与规则，须由人定夺。 */
+    var idx = options.domainsForHint;
+    if (idx && idx.length && (options.domain === 'general' || !options.domain)) {
+      var hit = {};
+      out.forEach(function (c) {
+        idx.forEach(function (d) {
+          var prim = (d.yongshen && d.yongshen.primary) || [];
+          if (d.name === 'general') return;
+          if (prim.indexOf(c.symbol) < 0) return;
+          if (!hit[d.name]) hit[d.name] = { domain: d.name, label: d.label || '', symbols: [] };
+          if (hit[d.name].symbols.indexOf(c.symbol) < 0) hit[d.name].symbols.push(c.symbol);
+        });
+      });
+      base.suggestedDomains = Object.keys(hit).sort().map(function (k) { return hit[k]; });
+      if (base.suggestedDomains.length) {
+        base.notes.push('问句取到的象（' +
+          base.suggestedDomains.map(function (s) { return s.symbols.join('/') + '→' + (s.label || s.domain); }).join('；') +
+          '）正是该占类的主用神，而本次占类为「其他」，该占类的判读规则并未启用。' +
+          '请据其用神一并合参；若确属该类，可在界面「目的」里改选后重占。');
+      }
+    }
     base.fallbackNote = DB.fallbackNote || '';
     base.bagua = DB.bagua || null;
     base.tablesNote = '类象表逐字取自' + ((DB.tables['十干'] || {}).basis || '').split('：')[0] + ' 等四表。';

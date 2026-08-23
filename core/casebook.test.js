@@ -311,11 +311,14 @@ function fullCase(domain, opts) {
   var ev = EV.build({ domain: domain, chart: CHART, yongshen: ys, xiangyi: xy });
   return CB.makeCase({ id: 'f', domain: domain, chart: CHART, yongshen: ys, xiangyi: xy, evidence: ev });
 }
-t('规则库未覆盖的占类（综合）仍有象义可标——这正是原 bug', function () {
+t('综合占类既有象义可标、也确有判读可标（原 bug 回归 + 补齐后的新下限）', function () {
   var rec = fullCase('general');
-  assert.ok(rec.fired.rules.length <= 1, '前提：综合占类规则库近乎空白');
+  // 原 bug：综合类规则近乎空白时，标注清单里连盘面象义都没有。象义这一条永远要成立。
   assert.ok(rec.fired.symbols.length >= 3,
     '综合占类也须给出盘面象义，实得 ' + rec.fired.symbols.length + ' 条——否则标注清单名不副实');
+  // 补齐后的新下限：综合类占了实测案例的四成，不能再只发一条关系而无判读。
+  assert.ok(rec.fired.rules.length >= 2,
+    '综合类已按纲要一节补齐日干/时干/值符/值使的旺衰空亡四害判读，实得 ' + rec.fired.rules.length + ' 条');
 });
 t('飞盘（象义层整层停用）同样有象义可标', function () {
   // 真实调用中 app.js 必传 engineYong（引擎自算的用神）；零串味会排除转盘占类取用，

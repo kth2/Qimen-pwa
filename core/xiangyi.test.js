@@ -63,7 +63,26 @@ t('六大占类规则均已建成（Phase 2 求财 + Phase 2.3 五类）', funct
   ['wealth', 'career', 'relationship', 'health', 'lawsuit', 'lost_item'].forEach(function (id) {
     assert.strictEqual(XY.domainStatus(id), 'complete', id + ' 应已建成');
   });
-  assert.strictEqual(XY.domainStatus('general'), 'minimal');
+  // general 曾是空壳（0 条件/0 组合/1 关系），却占了实测案例的四成——纲要一节
+  // 「断局总纲」本就写了诸占通用的一层，只是没收进来。现已补齐，不得再退回空壳。
+  assert.strictEqual(XY.domainStatus('general'), 'core');
+  var gen = RULES.domains.general;
+  assert.ok((gen.conditions || []).length >= 12,
+    'general 须覆盖日干/时干/值符/值使的旺衰、空亡、门迫、入墓、击刑，实得 ' + (gen.conditions || []).length);
+  ['general.时干.空亡', 'general.日干.空亡', 'general.值符.宫旺相', 'general.值使.空亡'].forEach(function (id) {
+    assert.ok((gen.conditions || []).some(function (c) { return c.id === id; }), '缺 ' + id);
+  });
+});
+t('综合类的生克关系只断成败倾向，不得拿去断迟速与幅度', function () {
+  // 实测：「谋为可成(但费些气力)」屡被读成「会延误/需久等/幅度不大/只是小胜」，
+  // 而实况反而更快更大更顺——那是把成败之辞挪去答了迟速与幅度之问。
+  var rel = RULES.domains.general.relations[0];
+  assert.strictEqual(rel.scope, '成败倾向');
+  assert.ok(/不断迟速/.test(rel.scopeNote) && /不断幅度/.test(rel.scopeNote));
+  assert.ok(/应期5/.test(rel.scopeNote), '须指明迟速另有其法');
+  Object.keys(rel.map).forEach(function (k) {
+    assert.strictEqual(rel.map[k].scope, '成败倾向', k + ' 缺 scope');
+  });
 });
 t('标 complete 者必须真有规则（不得空壳冒充已建成）', function () {
   Object.keys(RULES.domains).forEach(function (id) {
