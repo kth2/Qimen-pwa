@@ -197,6 +197,7 @@
     var xy = (args.xiangyi && args.xiangyi.version) ? args.xiangyi : null;
     var tm = (args.timing && args.timing.version) ? args.timing : null;
     var lx = (args.leixiang && args.leixiang.version) ? args.leixiang : null;
+    var sv = (args.severity && args.severity.version) ? args.severity : null;
     var domain = args.domain || (ys && ys.domain) || 'general';
     var items = [];
     // 用神清单按占类权重重排：SYMBOL 与关键词池皆据此取用，截断时先保重点
@@ -403,6 +404,12 @@
         byUnit: tm.byUnit, units: tm.units,
         pace: tm.pace, horizon: tm.horizon, numbers: tm.numbers, notes: tm.notes
       } : null,
+      // 力量校验层元信息。findings 是纲要的硬禁令，提示词里另起一段前置呈现。
+      severity: sv ? {
+        version: sv.version, applicable: sv.applicable, reason: sv.reason,
+        thresholds: sv.thresholds, findings: sv.findings, verdict: sv.verdict,
+        mustDo: sv.mustDo, gongs: sv.gongs
+      } : null,
       // 类象取用层元信息。候选本身也进了 FACT，此处记出处与未匹配时的交代。
       leixiang: lx ? {
         version: lx.version, applicable: lx.applicable, school: lx.school, reason: lx.reason,
@@ -534,6 +541,31 @@
     } else if (xy && !xy.applicable && xy.status === 'pending') {
       L.push('· 本占类的象义规则尚未建成，无判读条目——这是「规则未建」而非「盘上无碍」，不得据此认定无阻。');
     }
+    /* ---------- 力量校验：必须排在 FACT / READING 之前 ----------
+     * 实测教训：这几条禁令若放在包尾，模型读到时早已按「引擎判小吉」写完了「有转机」。
+     * 纲要把称量力量列为解读流程的 3.5 步（必做），本段就是那一步的产物。 */
+    var svi = ev.severity;
+    if (svi && svi.applicable && svi.findings && svi.findings.length) {
+      var SMARK = { critical: '‼', high: '⚠', medium: '·' };
+      L.push('· 【力量校验·先看这一段】纲要把这件事写得很死：**吉凶定方向，旺衰定成败大小；' +
+        '不可只看吉凶不看旺衰**。下列是本盘触发的**禁令**——不是叫你断凶，是这几种说法纲要不许下：');
+      svi.findings.forEach(function (f) {
+        L.push('  ' + (SMARK[f.severity] || '·') + ' [' + f.check + '] ' + f.gong + '宫（' + f.roles.join('、') + '）：' + f.detail);
+        L.push('      → ' + f.verdict + '。' + f.prohibition);
+      });
+      if (svi.verdict) {
+        L.push('  整盘口径：关注宫 ' + svi.verdict.total + ' 处，其中 ' + svi.verdict.impaired + ' 处已受重折' +
+          (svi.verdict.impairedGongs.length ? '（' + svi.verdict.impairedGongs.join('、') + '宫）' : '') +
+          '。' + svi.verdict.note);
+      }
+      (svi.mustDo || []).forEach(function (m) { L.push('  · ' + m); });
+      var svb = [];
+      svi.findings.forEach(function (f) { if (svb.indexOf(f.basis) < 0) svb.push(f.basis); });
+      L.push('  依据：' + svb.join(' ／ '));
+    } else if (svi && !svi.applicable && svi.reason) {
+      L.push('· 力量校验：' + svi.reason);
+    }
+
     if (facts.length) { L.push('· FACT（引擎算得的盘面事实，不得改写）：'); L = L.concat(facts); }
     if (rules.length) { L.push('· RULE（应用确定性分析，优先于模型自身判断）：'); L = L.concat(rules); }
     if (syms.length) { L.push('· SYMBOL（知识库通用象义，与占类无关的原料；优先采用，可组合，不可替换为自创象义）：'); L = L.concat(syms); }
