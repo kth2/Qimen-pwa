@@ -480,6 +480,26 @@
       domain: a.domain || '',
       // 预测侧：本次触发的规则与应期锚点，反馈将落到这些 id 上
       fired: fired,
+      // 证据合流的档位与弃权（Phase 13/A）。存它是为了日后能算**校准曲线**：
+      // 「说是 A 级的，后来对了几成？」——不存下来，这个指标永远算不了。
+      converge: (function () {
+        var cv = a.converge;
+        if (!cv || !cv.version || !cv.applicable) return null;
+        return {
+          version: cv.version,
+          dims: (cv.dimensions || []).map(function (d) {
+            var top = (d.candidates || [])[0] || null;
+            return {
+              dim: d.dim, top: top ? top.value : '', tier: top ? top.tier : 'D',
+              independent: top ? top.independent : 0, contested: !!d.contested
+            };
+          }),
+          // 弃权项两种形态都认：converge 给的是 {dim,why} 对象，外部注入时可能只给维度名
+          abstained: (cv.abstained || []).map(function (x) {
+            return (x && typeof x === 'object') ? x.dim : String(x || '');
+          }).filter(Boolean)
+        };
+      })(),
       tally: (a.xiangyi && a.xiangyi.tally) || null,
       pace: (a.timing && a.timing.pace) ? { speed: a.timing.pace.speed, from: a.timing.pace.from } : null,
       // AI 全文另存（可能很长，由调用方决定是否截断）
@@ -516,6 +536,12 @@
       outcome: fb.outcome,
       label: outcomeLabel(fb.outcome),
       happenedAt: fb.happenedAt || '',
+      // 逐维度标注（Phase A）：{ 维度名: outcome }。有了它，「A 级的后来对了几成」才算得出来
+      dimVerdicts: (function () {
+        var o = {}, m = fb.dimVerdicts || {};
+        for (var k in m) if (OUTCOMES[m[k]]) o[k] = m[k];
+        return o;
+      })(),
       // 逐问档位（Phase 12）：{ i: outcome }，另有 partActuals { i: 实况文本 }
       partOutcomes: (function () {
         var o = {}, m = fb.partOutcomes || {};

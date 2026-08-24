@@ -191,7 +191,14 @@
     </div>
     <div id="caseListView"></div>
     <div id="caseArchiveView" style="display:none;"></div>
-    <div id="caseStatsView" style="display:none;"></div>
+    <div id="caseStatsView" style="display:none;">
+      <div style="margin-bottom:8px;">
+        <button class="btn" id="caseEvalBtn" style="background:#666;padding:4px 12px;font-size:13px;">📊 生成评估报告</button>
+        <span class="muted" style="font-size:11px;">整本跑一张成绩单，含「本报告算不了什么、为什么」</span>
+      </div>
+      <pre id="caseEvalOut" style="white-space:pre-wrap;font-size:11px;background:#fafafa;border-radius:6px;padding:8px;margin:0 0 10px;"></pre>
+      <div id="caseStatsBody"></div>
+    </div>
     <div id="caseRevView" style="display:none;"></div>
   </div>
 
@@ -214,6 +221,8 @@
   <script src="core/evidence.js"></script>
   <!-- 案例本：经验层。与教义层(knowledge/*.json)严格分离，反馈永不改写规则 -->
   <script src="core/casebook.js"></script>
+  <!-- 案例本评估器：把整本跑成可重复、可比对的成绩单 -->
+  <script src="core/evaluate.js"></script>
   <script src="core/casestore.js"></script>
   <script src="core/revise.js"></script>
   <script src="llm.js"></script>
