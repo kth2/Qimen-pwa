@@ -7,6 +7,7 @@
   const TM = window.Timing;     // 应期时间线层（Phase 4；缺则不含 TIMING，yingqi 块照常承载应期）
   const LX = window.LeiXiang;   // 类象取用层（Phase 8；转盘专有，缺则不含类象用神）
   const SV = window.Severity;   // 力量校验层（Phase 9；缺则不含禁令，力量仍由 wangshuai 块承载）
+  const CV = window.Converge;   // 证据合流层（Phase 13；缺则不含档位与弃权）
   const CB = window.Casebook;   // 案例本·经验层（Phase 5；只统计与建议，绝不改写教义规则）
   const CSTORE = window.CaseStore;
   const RV = window.Revise;     // 复盘正解与规则修订（Phase 6）
@@ -234,6 +235,7 @@
   let _timingReady = false;     // 应期规则库同理：缺席只减 TIMING
   let _leixiangReady = false;   // 类象库同理：缺席只减类象用神，占类用神照常
   let _severityReady = false;   // 力量校验库同理：缺席只减禁令段
+  let _convergeReady = false;   // 维度表同理：缺席只减合流段
   async function loadKnowledge() {
     if (!YS || !EV) return false;
     const get = (p) => fetch(p).then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)));
@@ -265,6 +267,10 @@
     if (_kbReady && SV && !_severityReady) {
       try { _severityReady = SV.load(await get('knowledge/severity-rules.json')); }
       catch (e) { console.warn('[severity] 力量校验库加载失败，本次不作力量校验：', e.message); _severityReady = false; }
+    }
+    if (_kbReady && CV && !_convergeReady) {
+      try { _convergeReady = CV.load(await get('knowledge/dimensions.json')); }
+      catch (e) { console.warn('[converge] 维度表加载失败，本次不作证据合流：', e.message); _convergeReady = false; }
     }
     return _kbReady;
   }
@@ -311,6 +317,14 @@
     // 以下三条对应 Phase 2 的 READING 层。要点：判读是"该占类下这个符号怎么读"，不是结论；
     // 权重决定详略；"规则未建"不等于"盘上无碍"——这三处一旦被模型误读，本层反成噪音。
     'E10. READING 是本占类下的象义判读（已注明依据），凡涉及其所断元素，须优先采用其读法，不得改用与占类无关的泛化解释；其 [助]/[阻] 只表倾向，**不是成败断语**，成败仍须结合引擎吉凶与全盘旺衰自行推断，不得以"助多于阻"直接下结论。',
+    'E19. 证据包若给出【证据合流】，其档位是**硬约束**：A级可写进结论；B级只能作次要可能且须并列写出；'
+      + 'C级只能标「参考」；**D级与「须弃权的维度」不得出现在结论里**。'
+      + '凡被判为弃权的维度（方位/场所/高低/显隐等），请照实写「此项证据不足，不锁定」——'
+      + '**不要凭一条孤证编出一个确指**。实测里最伤的一次：凭「离九＝明亮处」一条孤证断成'
+      + '「正南明亮处、炉灶电器旁」，而实物在床下、被衣物压住；同盘的九地(藏纳)、杜门(隐藏)'
+      + '三路指向「藏」，反倒没被采信。',
+    'E20. 数证据数的是**互不相干的路数**，不是象义条数。同一个元素的多个别名（如玄武的'
+      + '「盗/失物/暗昧/欺诈」）只算**一路**；五条同源的话不等于五路旁证，不得据此说「多重印证」。',
     // Phase 9：力量校验与断语范围。以下四条全部出自实测案例本的失败复盘，逐条对应一类真实误判。
     'E9a. 证据包若给出【力量校验】，其中每一条**禁令都是硬约束**，逐条照办。'
       + '尤其：引擎判某宫为「吉」而该宫力量不足时，**不得**据以写「有转机/可成/可控/无碍」；'
@@ -518,8 +532,33 @@
               });
             } catch (se) { console.warn('[severity] 力量校验失败，本次不含禁令段：', se.message); severity = null; }
           }
+          // 证据合流（Phase 13）：数「有几路互不相干的证据指向同一结论」，据此定档与弃权。
+          // 关注宫＝占类用神宫（primary，方位以它为准）+ 类象用神宫（旁证）。
+          let converge = null;
+          if (_convergeReady && CV) {
+            try {
+              const focus = [];
+              if (xiangyi && xiangyi.applicable) {
+                xiangyi.focus.forEach(f => focus.push({
+                  gong: String(f.gong), roles: [f.name + (f.aspect ? '(' + f.aspect + ')' : '')], primary: true
+                }));
+              } else {
+                ysGongs.forEach(g => focus.push({ gong: String(g), roles: ['用神'], primary: true }));
+              }
+              if (leixiang && leixiang.applicable) {
+                leixiang.candidates.filter(c => c.located).forEach(c => focus.push({
+                  gong: String(c.gong), roles: [c.symbol + '〔类象·所问「' + (c.terms || []).join('/') + '」〕'], primary: false
+                }));
+              }
+              converge = CV.analyze({
+                chart: pan, focus,
+                wangshuai: (window.WangShuai && window.WangShuai.analyze) ? window.WangShuai.analyze(pan) : null,
+                options: { school: school === 'feipan' ? 'feipan' : 'zhuanpan' }
+              });
+            } catch (ce2) { console.warn('[converge] 证据合流失败，本次不含合流段：', ce2.message); converge = null; }
+          }
           const evidence = EV.build({
-            question: q, domain, chart: pan, yongshen, xiangyi, timing, leixiang, severity, calibration,
+            question: q, domain, chart: pan, yongshen, xiangyi, timing, leixiang, severity, converge, calibration,
             wangshuai: wsBlock, yingqi: yqBlock
           });
           runOut.yongshen = yongshen; runOut.xiangyi = xiangyi;
@@ -530,6 +569,7 @@
           window._timing = timing;                     // 同上：核对应期锚点与其机制
           window._leixiang = leixiang;                 // 同上：核对所问之物取了哪个象作用神
           window._severity = severity;                 // 同上：核对触发了哪几条力量禁令
+          window._converge = converge;                 // 同上：核对各维度有几路独立证据
           evBlock = EV.toPromptBlock(evidence);
           if (evBlock) sysExtra = '\n' + EVIDENCE_DISCIPLINE;
         } catch (ee) {
