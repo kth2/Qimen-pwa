@@ -199,6 +199,7 @@
     var tm = (args.timing && args.timing.version) ? args.timing : null;
     var lx = (args.leixiang && args.leixiang.version) ? args.leixiang : null;
     var sv = (args.severity && args.severity.version) ? args.severity : null;
+    var cv = (args.converge && args.converge.version) ? args.converge : null;
     var domain = args.domain || (ys && ys.domain) || 'general';
     var items = [];
     // 用神清单按占类权重重排：SYMBOL 与关键词池皆据此取用，截断时先保重点
@@ -405,6 +406,11 @@
         byUnit: tm.byUnit, units: tm.units,
         pace: tm.pace, horizon: tm.horizon, numbers: tm.numbers, notes: tm.notes
       } : null,
+      // 证据合流层元信息：各维度有几路独立证据、哪些维度证据不足须弃权。
+      converge: cv ? {
+        version: cv.version, applicable: cv.applicable, reason: cv.reason,
+        dimensions: cv.dimensions, abstained: cv.abstained
+      } : null,
       // 力量校验层元信息。findings 是纲要的硬禁令，提示词里另起一段前置呈现。
       severity: sv ? {
         version: sv.version, applicable: sv.applicable, reason: sv.reason,
@@ -568,6 +574,32 @@
       L.push('  依据：' + svb.join(' ／ '));
     } else if (svi && !svi.applicable && svi.reason) {
       L.push('· 力量校验：' + svi.reason);
+    }
+
+    /* ---------- 证据合流：与力量校验同样前置 ----------
+     * 「有几路互不相干的证据指向同一结论」必须在模型动笔之前摆出来，否则它会先挑一个
+     * 看着顺眼的孤证写成结论，再回头给它找理由。 */
+    var cvi = ev.converge;
+    if (cvi && cvi.applicable && cvi.dimensions.length) {
+      L.push('· 【证据合流·先看这一段】数的是「有几路**互不相干**的证据指向同一结论」，不是象义多少。' +
+        '同一元素的多个别名只算**一路**。');
+      L.push('  档位：**A级**（≥3 路）可写进结论；**B级**（2 路或多路相争）可作次要可能，须并列写出；' +
+        '**C级**（孤证或两路相争）只能标「参考」；**D级**（无据或自相矛盾）**不得出现在结论里**。');
+      cvi.dimensions.forEach(function (d) {
+        L.push('  · ' + d.label + (d.contested ? '　⚠ 两说相争' : '') + '：' +
+          d.candidates.map(function (c) {
+            return '[' + c.tierLabel + '｜' + c.independent + '路] ' + c.value +
+              (c.contested ? '(与「' + c.contestedBy + '」相争·已降档)' : '') +
+              '←' + c.sources.map(function (s) { return s.show; }).join('/');
+          }).join('　；　'));
+      });
+      if (cvi.abstained && cvi.abstained.length) {
+        L.push('  ⚠ **本次须弃权的维度**（证据不足，不得硬编一个具体说法）：' +
+          cvi.abstained.map(function (a) { return a.dim + '（' + a.why + '）'; }).join('；'));
+        L.push('  这几项请照实写「证据不足，不锁定」，**不要凭一条孤证编出一个确指**——' +
+          '实测里最伤的一次就是凭「离九＝明亮处」一条孤证断成「正南明亮处、炉灶电器旁」，' +
+          '而实物在床下、被衣物压住。');
+      }
     }
 
     if (facts.length) { L.push('· FACT（引擎算得的盘面事实，不得改写）：'); L = L.concat(facts); }
