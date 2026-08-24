@@ -596,6 +596,7 @@
           school, mode, chart: pan, dateISO: $('inDate').value + ' ' + $('inTime').value,
           yongshen: runOut.yongshen, xiangyi: runOut.xiangyi,
           timing: runOut.timing, evidence: runOut.evidence,
+          converge: runOut.converge,          // 存下档位，日后才算得出「A 级准不准」
           answer: String(answer || '').slice(0, 8000)
         };
         $('caseSaveBar').style.display = 'block';
@@ -851,6 +852,7 @@
           </div>
         </div>
         ${partsFormHtml(rec)}
+        ${dimsFormHtml(rec)}
         <div style="margin-top:6px;">
           <span class="muted">③ 整体判断${rec.parts && rec.parts.confirmed ? '（已按逐问自动推出，可手改）' : ''}</span>
           ${OUTCOME_BTNS.map(([k, label]) =>
@@ -968,6 +970,28 @@
     return out;
   }
 
+  /** 逐维度标注：说是 A 级的，后来对了几成——不标这一栏，档位校准永远算不出来。 */
+  function dimsFormHtml(rec) {
+    const cv = rec.converge;
+    if (!cv || !cv.dims || !cv.dims.length) return '';
+    const dv = (rec.feedback || {}).dimVerdicts || {};
+    const rows = cv.dims.map(d => {
+      const ab = (cv.abstained || []).indexOf(d.dim) >= 0;
+      return `<div style="border-bottom:1px solid #f2f2f2;padding:3px 0;font-size:12px;">
+        <b>${esc(d.dim)}</b>　<span class="muted">当时断「${esc(d.top || '—')}」
+        ${esc(d.tier)}级·${d.independent} 路${d.contested ? '·两说相争' : ''}${ab ? '　<b>已弃权</b>' : ''}</span>
+        ${ab ? '<span class="muted">（弃权项无需标注）</span>'
+             : VERDICT_OPTS.map(([v, label]) =>
+                `<label style="margin-left:6px;"><input type="radio" name="dim_${esc(d.dim)}" value="${v}"${(dv[d.dim] || '') === v ? ' checked' : ''}>${label}</label>`).join('')}
+      </div>`;
+    }).join('');
+    return `<div style="margin-top:8px;border:1px solid #ddd;border-radius:6px;padding:6px;">
+      <div><span class="muted">②c 逐维度标注</span>
+        <span class="muted" style="font-size:11px;">　标了这一栏，「档位准不准」才算得出来——A 级若不比 C 级准，档位就是摆设</span></div>
+      ${rows}
+    </div>`;
+  }
+
   /** 一卦多问：把拆分提议摆出来，逐问各自回填。
    *  拆与不拆由用户定——「①中医②西医③祝由④开刀」是选项不是子问题，硬拆会把选项拆成问题。 */
   function partsFormHtml(rec) {
@@ -1075,13 +1099,17 @@
         if (ta && ta.value.trim()) partActuals[it.i] = ta.value.trim();
       });
     }
+    const dimVerdicts = {};
+    document.querySelectorAll('input[name^="dim_"]:checked').forEach(x => {
+      dimVerdicts[x.name.slice(4)] = x.value;
+    });
     const happenedAt = $('reviewDate').value;
     const happenedTime = $('reviewTime') ? $('reviewTime').value : '';
     try {
       let rec = CB.applyFeedback(_reviewRec, {
         outcome: picked.value,
         actual: $('reviewActual').value.trim(),
-        happenedAt, happenedTime, partOutcomes, partActuals,
+        happenedAt, happenedTime, partOutcomes, partActuals, dimVerdicts,
         ruleVerdicts: verdicts,
         symbolVerdicts,
         // 用户在界面上过目并可改动过，故一律记为 manual；AI 只是预填
@@ -1117,9 +1145,21 @@
     } catch (e) { console.warn('[casebook] 重建经验层失败：', e.message); return null; }
   }
 
+  /** 评估报告：把整本案例本跑成一张可重复、可比对的成绩单。
+   *  刻意把「算不了的指标」也印出来——免得没测过的东西被当成测过了。 */
+  async function renderEvalReport() {
+    const host = $('caseEvalOut');
+    if (!host || !window.Evaluate || !store) return;
+    host.textContent = '正在评估…';
+    try {
+      const rows = (await store.list()).filter(r => r.id !== REV_ID);
+      host.textContent = window.Evaluate.toReport(window.Evaluate.evaluate(rows));
+    } catch (e) { host.textContent = '评估失败：' + e.message; }
+  }
+
   async function renderStats() {
     if (!store || !CB) return;
-    const host = $('caseStatsView');
+    const host = $('caseStatsBody') || $('caseStatsView');
     const rows = (await store.list()).filter(r => r.id !== REV_ID);
     const cal = CB.calibrate(rows);
     const ps = CB.proposals(cal);
@@ -1394,6 +1434,7 @@
         if (f) importCases(f);
         e.target.value = '';                       // 允许连续导入同一文件
       });
+      if ($('caseEvalBtn')) $('caseEvalBtn').addEventListener('click', renderEvalReport);
       $('caseTabSeg').addEventListener('click', async (e) => {
         const b = e.target.closest('button[data-tab]'); if (!b) return;
         _caseTab = b.dataset.tab;
