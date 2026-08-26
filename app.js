@@ -178,6 +178,7 @@
     $('cfgOllamaUrl').value = c.ollamaUrl || ''; $('cfgOllamaModel').value = c.ollamaModel || '';
     $('cfgCustomUrl').value = c.customUrl || ''; $('cfgCustomKey').value = c.customKey || ''; $('cfgCustomModel').value = c.customModel || '';
     $('cfgGeminiFallbackModel').value = c.geminiFallbackModel || '';
+    $('cfgGeminiThinkingBudget').value = (c.geminiThinkingBudget === 0 || c.geminiThinkingBudget) ? c.geminiThinkingBudget : '';
     $('cfgCustomFallbackModel').value = c.customFallbackModel || '';
     // 超时与重试：留空即用 LLM.DEF 的默认值，故此处不回填默认数字（placeholder 已示意）
     const sec = (ms) => (ms ? String(Math.round(ms / 1000)) : '');
@@ -199,6 +200,9 @@
       ollamaUrl: $('cfgOllamaUrl').value.trim() || 'http://localhost:11434', ollamaModel: $('cfgOllamaModel').value.trim() || 'qwen3:latest',
       customUrl: $('cfgCustomUrl').value.trim(), customKey: $('cfgCustomKey').value.trim(), customModel: $('cfgCustomModel').value.trim() || 'gpt-3.5-turbo',
       geminiFallbackModel: $('cfgGeminiFallbackModel').value.trim(),
+      // 空串＝不指定，交模型自定；0 是有效值（关闭思考），故不能用真值判断
+      geminiThinkingBudget: $('cfgGeminiThinkingBudget').value.trim() === ''
+        ? '' : Number($('cfgGeminiThinkingBudget').value),
       customFallbackModel: $('cfgCustomFallbackModel').value.trim(),
       fallbackProvider: $('cfgFallbackProvider').value,
       // 秒 → 毫秒；留空存 0，LLM 侧 numOr() 会回落默认值
@@ -1486,6 +1490,17 @@
       $('inPurpose').addEventListener('change', previewDomain);
       previewDomain();
     }
+    if ($('cfgProbeBtn')) $('cfgProbeBtn').addEventListener('click', async () => {
+      const btn = $('cfgProbeBtn'), out = $('cfgProbeOut');
+      btn.disabled = true; out.textContent = '自检中…';
+      try {
+        const rows = await LLM.probe(t => { out.textContent = t; });
+        out.textContent = rows.map(r =>
+          `${r.ok ? '✅' : '❌'} ${r.step}（${r.mode}）　HTTP ${r.status || '—'}　${r.ms}ms\n    ${r.detail}`
+        ).join('\n') + '\n\n把这一段原样发给开发者，比「暂时失败」有用得多。';
+      } catch (e) { out.textContent = '自检本身出错：' + e.message; }
+      finally { btn.disabled = false; }
+    });
     loadCfgForm();
     cast();
   }
