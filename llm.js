@@ -54,6 +54,24 @@ const LLM = (() => {
     return !!e && (e.status === 503 || e.status === 429 ||
       /high demand|overloaded|rate limit|quota/i.test(e.message || ''));
   }
+  /**
+   * 一句话说清「这次为什么失败」。状态行与最终报错都用它——
+   * 「暂时失败」四个字把唯一的线索吞掉了，是此前一个真实的排障障碍。
+   */
+  function reasonOf(e) {
+    if (!e) return '未知错误';
+    const s = e.status;
+    if (s === 429) return '配额/频率受限(429)';
+    if (s === 503) return '服务方过载(503)';
+    if (s === 500) return '服务方内部错误(500)';
+    if (s === 502) return '网关错误(502)';
+    if (s === 504) return '网关超时(504)';
+    if (s) return `HTTP ${s}`;
+    if (/Failed to fetch|NetworkError|network error/i.test(e.message || '')) return '网络不通或被拦截';
+    if (/无任何输出/.test(e.message || '')) return '等待超时（未收到任何内容）';
+    return (e.message || '未知错误').slice(0, 40);
+  }
+
   /** 配置类：重试与换 provider 都没意义，应当立刻报给用户改。 */
   function isFatalConfig(e) {
     return !!e && (e.status === 400 || e.status === 401 || e.status === 403 || e.status === 404 ||
@@ -358,7 +376,10 @@ const LLM = (() => {
           if (isFatalConfig(e)) throw e;
           if (!isTransient(e) || attempt >= maxRetries) break;
           const wait = backoffMs(attempt, e.retryAfter);
-          say(`${step.label} ${isOverloaded(e) ? '繁忙' : '暂时失败'}，${Math.round(wait / 1000)} 秒后第 ${attempt + 1} 次重试…`);
+          // 必须把**真实原因**说出来。此前只写「暂时失败」，用户与开发者都无从判断
+          // 到底是 500 还是断网——那等于把唯一的线索吞掉了。
+          say(`${step.label} ${reasonOf(e)}，${Math.round(wait / 1000)} 秒后第 ${attempt + 1} 次重试…`);
+          try { console.warn('[llm] 重试前的原始错误：', e.status || '(无状态码)', e.message); } catch (_) {}
           await new Promise(r => setTimeout(r, wait));
         }
       }
@@ -371,7 +392,82 @@ const LLM = (() => {
       throw new Error((lastErr.message || '模型繁忙') +
         `\n—— 这是服务方临时过载，与你的 Key 或配置无关；已自动重试 ${maxRetries} 次。${tip}`);
     }
+    if (lastErr && (lastErr.status === 500 || lastErr.status === 502 || lastErr.status === 504)) {
+      throw new Error((lastErr.message || 'AI 调用失败') +
+        `\n—— ${reasonOf(lastErr)}：这是服务方那一侧的故障，不是你的 Key 或配置错。` +
+        `已重试 ${maxRetries} 次仍未成功。可试：① 换一个模型（同厂的 lite 版往往更稳）；` +
+        `② 若用的是思考型模型，在设置里把「思考预算」调小或设 0；` +
+        `③ 填一个「备用模型」或「备用 Provider」，下次自动接管。`);
+    }
     throw lastErr || new Error('AI 调用失败');
+  }
+
+  /**
+   * 连接自检：对当前配置发一次**最小**请求，把原始 HTTP 状态与响应体原样交还。
+   * 这是把「暂时失败，重试中…」变成「HTTP 500，原文如下」的唯一办法——
+   * 排障时先跑它，别猜。
+   * @returns {Promise<Array>} 每项 { step, mode, ok, status, ms, detail }
+   */
+  async function probe(onStatus) {
+    const cfg = getCfg();
+    const say = (t) => { try { if (onStatus) onStatus(t); } catch (_) {} };
+    const out = [];
+    const chain = buildChain(cfg);
+    for (const step of chain) {
+      for (const mode of ['非流式', '流式']) {
+        const t0 = Date.now();
+        say(`自检 ${step.label}（${mode}）…`);
+        try {
+          const r = await oneProbe(step, cfg, mode === '流式');
+          out.push(Object.assign({ step: step.label, mode: mode, ms: Date.now() - t0 }, r));
+        } catch (e) {
+          out.push({
+            step: step.label, mode: mode, ms: Date.now() - t0, ok: false,
+            status: e.status || 0, detail: (e.message || String(e)).slice(0, 300)
+          });
+        }
+      }
+    }
+    return out;
+  }
+
+  async function oneProbe(step, cfg, stream) {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 30000);
+    try {
+      let url, headers, body;
+      if (step.kind === 'gemini') {
+        if (!cfg.geminiKey) throw new Error('未填写 Gemini API Key');
+        const m = step.model || cfg.geminiModel || 'gemini-3.5-flash';
+        url = `https://generativelanguage.googleapis.com/v1beta/models/${m}:` +
+          (stream ? 'streamGenerateContent?alt=sse' : 'generateContent');
+        headers = { 'Content-Type': 'application/json', 'x-goog-api-key': cfg.geminiKey };
+        const gc = { maxOutputTokens: 16 };
+        if (cfg.geminiThinkingBudget != null && cfg.geminiThinkingBudget !== '')
+          gc.thinkingConfig = { thinkingBudget: Number(cfg.geminiThinkingBudget) };
+        body = { contents: [{ role: 'user', parts: [{ text: '回一个字：好' }] }], generationConfig: gc };
+      } else if (step.kind === 'custom') {
+        if (!cfg.customUrl) throw new Error('未填写自定义端点 URL');
+        const base = cfg.customUrl.replace(/\/$/, '');
+        url = base.endsWith('/chat/completions') ? base : base + '/chat/completions';
+        headers = { 'Content-Type': 'application/json' };
+        if (cfg.customKey) headers.Authorization = 'Bearer ' + cfg.customKey;
+        body = { model: step.model || cfg.customModel, stream: !!stream, max_tokens: 16,
+          messages: [{ role: 'user', content: '回一个字：好' }] };
+      } else {
+        const base = (cfg.ollamaUrl || 'http://localhost:11434').replace(/\/$/, '');
+        url = base + '/api/chat';
+        headers = { 'Content-Type': 'application/json' };
+        body = { model: cfg.ollamaModel, stream: !!stream, think: false,
+          messages: [{ role: 'user', content: '回一个字：好' }] };
+      }
+      const r = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal: ctl.signal });
+      const text = await r.text().catch(() => '');
+      return {
+        ok: r.ok, status: r.status,
+        detail: r.ok ? ('正常，返回 ' + text.length + ' 字节') : text.slice(0, 300)
+      };
+    } finally { clearTimeout(timer); }
   }
 
   function info() {
@@ -381,9 +477,9 @@ const LLM = (() => {
   }
 
   return {
-    getCfg, saveCfg, chat, info, DEF,
+    getCfg, saveCfg, chat, info, probe, DEF,
     // 供单测与诊断使用的纯函数（不参与业务流程）
-    _internals: { isTransient, isOverloaded, isFatalConfig, backoffMs, parseRetryAfter, buildChain, labelOf }
+    _internals: { isTransient, isOverloaded, isFatalConfig, backoffMs, parseRetryAfter, buildChain, labelOf, reasonOf }
   };
 })();
 

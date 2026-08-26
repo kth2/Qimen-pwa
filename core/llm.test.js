@@ -143,5 +143,68 @@ t('超时文案指向界面上真实存在的设置项', function () {
   });
 });
 
+console.log('== 失败原因必须说得出口（实测报障：只写「暂时失败」，无从判断） ==');
+var reasonOf = LLM._internals.reasonOf;
+
+t('各状态码各有其说法，且 429/503 与 500/502/504 分得开', function () {
+  function E(s) { var e = new Error('x'); e.status = s; return e; }
+  assert.ok(/429/.test(reasonOf(E(429))) && /配额|频率/.test(reasonOf(E(429))));
+  assert.ok(/503/.test(reasonOf(E(503))) && /过载/.test(reasonOf(E(503))));
+  assert.ok(/500/.test(reasonOf(E(500))) && /服务方内部/.test(reasonOf(E(500))));
+  assert.ok(/502/.test(reasonOf(E(502))));
+  assert.ok(/504/.test(reasonOf(E(504))));
+  // 这一条正是实测那次报障的判据：显示「暂时失败」而非「繁忙」，说明不是 429/503
+  assert.notStrictEqual(reasonOf(E(500)), reasonOf(E(503)));
+});
+
+t('网络层失败与「等了很久没有输出」分得开', function () {
+  assert.ok(/网络不通|拦截/.test(reasonOf(new Error('Failed to fetch'))));
+  assert.ok(/等待超时/.test(reasonOf(new Error('Gemini 等待 90 秒无任何输出（对方可能过载或未开启流式）'))));
+});
+
+t('未知错误不编造原因，截断原文即可', function () {
+  assert.ok(reasonOf(new Error('某个没见过的错')).indexOf('某个没见过的错') >= 0);
+  assert.strictEqual(reasonOf(null), '未知错误');
+});
+
+t('reasonOf 绝不返回「暂时失败」这类无信息量的词', function () {
+  [429, 500, 502, 503, 504, 404, 0].forEach(function (s) {
+    var e = new Error('x'); if (s) e.status = s;
+    assert.ok(!/^暂时失败$/.test(reasonOf(e)), s + ' 的说法太空泛');
+  });
+});
+
+console.log('== 连接自检 ==');
+
+t('probe 已导出，且不依赖业务流程', function () {
+  assert.strictEqual(typeof LLM.probe, 'function');
+});
+
+t('probe 对每个环节都跑「非流式」与「流式」两次——二者行为可能不同', function () {
+  // llm.js 面向浏览器，saveCfg 走 localStorage；Node 下补一个最小垫片即可，不为测试改生产代码
+  if (typeof global.localStorage === 'undefined') {
+    var mem = {};
+    global.localStorage = {
+      getItem: function (k) { return Object.prototype.hasOwnProperty.call(mem, k) ? mem[k] : null; },
+      setItem: function (k, v) { mem[k] = String(v); },
+      removeItem: function (k) { delete mem[k]; }
+    };
+  }
+  // 不实际发请求：只验证它按链路×模式展开。用一个必然失败的配置，看回了几行。
+  var saved = LLM.getCfg();
+  LLM.saveCfg({ provider: 'gemini', geminiKey: '', geminiModel: 'm', fallbackProvider: 'none' });
+  return LLM.probe(function () {}).then(function (rows) {
+    assert.strictEqual(rows.length, 2, '一个环节应有非流式与流式两行，实得 ' + rows.length);
+    var modes = rows.map(function (r) { return r.mode; }).sort();
+    assert.deepStrictEqual(modes, ['流式', '非流式']);
+    rows.forEach(function (r) {
+      assert.strictEqual(r.ok, false);
+      assert.ok(/Key/.test(r.detail), '缺 Key 须如实说明：' + r.detail);
+      assert.ok(typeof r.ms === 'number');
+    });
+    LLM.saveCfg(saved);
+  });
+});
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

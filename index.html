@@ -111,6 +111,8 @@
         <div class="prov prov-custom"><label>端点 URL</label><input id="cfgCustomUrl" placeholder="https://api.groq.com/openai/v1"></div>
         <div class="prov prov-custom"><label>API Key</label><input id="cfgCustomKey" type="password" placeholder="Bearer key"></div>
         <div class="prov prov-custom"><label>模型</label><input id="cfgCustomModel" placeholder="llama-3.1-8b-instant"></div>
+        <div class="prov prov-gemini"><label>思考预算</label><input id="cfgGeminiThinkingBudget" type="number" min="0" placeholder="留空=模型自定；0=关闭思考">
+          <span class="muted">思考型模型（如 gemini-flash-latest）遇 500/超时，把它设 0 或调小往往能绕过</span></div>
         <div class="prov prov-gemini"><label>备用模型</label><input id="cfgGeminiFallbackModel" placeholder="留空=不启用。主模型 503 繁忙时自动接力"></div>
         <div class="prov prov-custom"><label>备用模型</label><input id="cfgCustomFallbackModel" placeholder="留空=不启用。主模型失败时自动接力"></div>
         <details style="margin-top:6px;">
@@ -134,7 +136,13 @@
           </div>
         </details>
         <button class="btn" id="cfgSaveBtn" style="margin-top:6px;">保存设置</button>
+        <button class="btn" id="cfgProbeBtn" style="margin-top:6px;background:#666;">🔌 连接自检</button>
         <span class="muted" id="cfgSavedTag"></span>
+        <pre id="cfgProbeOut" style="white-space:pre-wrap;font-size:11px;background:#fafafa;border-radius:6px;padding:6px;margin:6px 0 0;"></pre>
+        <div class="muted" style="font-size:11px;">
+          自检会用当前配置发一次**最小**请求，把原始 HTTP 状态码与响应体原样列出——
+          「暂时失败，重试中…」看不出是 500 还是断网，先跑这个，别猜。
+        </div>
       </div>
     </details>
     <div style="margin-top:8px;">
