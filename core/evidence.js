@@ -202,6 +202,7 @@
     var cv = (args.converge && args.converge.version) ? args.converge : null;
     var yj = (args.yinju && args.yinju.version) ? args.yinju : null;
     var gj = (args.geju && args.geju.version) ? args.geju : null;
+    var sg = (args.shige && args.shige.version) ? args.shige : null;
     var domain = args.domain || (ys && ys.domain) || 'general';
     var items = [];
     // 用神清单按占类权重重排：SYMBOL 与关键词池皆据此取用，截断时先保重点
@@ -417,6 +418,11 @@
       yinju: yj ? {
         version: yj.version, school: yj.school, ju: yj.ju, layers: yj.layers,
         timing: yj.timing, notes: yj.notes
+      } : null,
+      // 时格层元信息（五不遇时／天显时格）。分量随条带出——「增加几率」不是「必然如此」。
+      shige: sg ? {
+        version: sg.version, riGan: sg.riGan, shiGan: sg.shiGan,
+        dayPillar: sg.dayPillar, timePillar: sg.timePillar, hits: sg.hits, notes: sg.notes
       } : null,
       // 八十一格层元信息。focus/rest 分列，引擎异名随条附上。
       geju: gj ? {
@@ -683,6 +689,24 @@
       L.push('  〔' + (gji.provenance && gji.provenance.level || '用户所供 81 格表') + '〕' +
         (gji.provenance && gji.provenance.text || ''));
       (gji.notes || []).forEach(function (nt) { L.push('  ※ ' + nt); });
+    }
+
+    /* ---------- 时格：五不遇时／天显时格 ----------
+     * 与前几段不同，这一段是**倾向**不是禁令。分量必须随条写死，
+     * 否则「增加几率」会被读成「必然如此」——那正是这类传统说法最容易被用坏的地方。 */
+    var sgi = ev.shige;
+    if (sgi && sgi.hits && sgi.hits.length) {
+      var SGM = { tendency: '倾向', weak: '**分量很轻**' };
+      L.push('· 【时格】' + sgi.dayPillar + '日 ／ ' + sgi.timePillar + '时' +
+        '　—— 出的是**几率上的倾向，不是禁令，也不是定论**。');
+      sgi.hits.forEach(function (h) {
+        L.push('  · **' + h.name + '**（' + h.test + '）：' + h.detail);
+        L.push('      义：' + h.meaning + '　【' + (SGM[h.strength] || h.strength) + '】');
+        L.push('      用法：' + h.howToUse);
+        L.push('      〔' + h.provenance.level + '〕' + h.provenance.text);
+      });
+      L.push('  ※ 本仓**从未测过**时格与实际应验率的关系（案例本未按时格分层），' +
+        '故不得声称「此类盘更准／更不准」，也不得据时格调整你对自己判断的把握度。');
     }
 
     if (facts.length) { L.push('· FACT（引擎算得的盘面事实，不得改写）：'); L = L.concat(facts); }
