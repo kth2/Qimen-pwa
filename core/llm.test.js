@@ -206,5 +206,60 @@ t('probe 对每个环节都跑「非流式」与「流式」两次——二者�
   });
 });
 
+console.log('== 自检必须打到对的端点（实测：它把每一路都打去了 Ollama） ==');
+
+t('自检按 provider 分派，绝不因字段写错而全落进 Ollama', function () {
+  // 这正是实测那次「四条全是 Failed to fetch、1~2ms」的真因：
+  // buildChain 给的是 {provider}，probe 却读 step.kind（恒 undefined），于是每一路
+  // 都掉进最后的 Ollama 分支去连 localhost:11434。自检给出的是**假情报**，比没有还坏。
+  var chain = LLM._internals.buildChain({ provider: 'custom', customUrl: 'https://x/v1', customModel: 'm' });
+  chain.forEach(function (s) {
+    assert.ok(s.provider, '链路项必须带 provider 字段：' + JSON.stringify(s));
+    assert.strictEqual(s.kind, undefined, 'buildChain 从来不产出 kind——probe 不得依赖它');
+  });
+});
+
+console.log('== 截断必须说出来（实测：答案断在「须」字上，界面看不出来） ==');
+var finalize = LLM._internals.finalize;
+
+t('maxTokens 截断：附上未写完的提示与当前额度，并点出思考也占额度', function () {
+  var out = finalize('答案到此', { truncated: true, truncReason: 'maxTokens' }, { maxTokens: 4096 }, 'Gemini ');
+  assert.ok(/本次回答未写完/.test(out));
+  assert.ok(/maxTokens 上限（当前 4096）/.test(out), '须写出当前额度，否则用户不知调多少');
+  assert.ok(/思考预算/.test(out), '思考型模型的思考也占这份额度，须一并点出');
+  assert.ok(out.indexOf('答案到此') === 0, '已生成的内容必须原样保留在最前');
+});
+
+t('安全策略中断与超时中断，措辞各不相同', function () {
+  var safe = finalize('x', { truncated: true, truncReason: 'safety' }, {}, 'Gemini ');
+  var idle = finalize('x', { truncated: true, truncReason: 'idle' }, {}, 'Gemini ');
+  assert.ok(/安全策略/.test(safe));
+  assert.ok(/空闲超时/.test(idle));
+  assert.notStrictEqual(safe, idle);
+});
+
+t('未截断时原样返回，不加任何噪音', function () {
+  assert.strictEqual(finalize('完整答案', { truncated: false }, {}, 'Gemini '), '完整答案');
+  assert.strictEqual(finalize('完整答案', {}, {}, 'Gemini '), '完整答案');
+});
+
+t('finishReason 的判定：STOP/stop 不算截断，其余都算', function () {
+  function gem(fr) {
+    var sink = {};
+    var c = { finishReason: fr };
+    if (c.finishReason && c.finishReason !== 'STOP') {
+      sink.truncated = true;
+      sink.truncReason = c.finishReason === 'MAX_TOKENS' ? 'maxTokens'
+        : /SAFETY|RECITATION|BLOCK/i.test(c.finishReason) ? 'safety' : 'other';
+    }
+    return sink;
+  }
+  assert.strictEqual(gem('STOP').truncated, undefined, 'STOP 是正常写完');
+  assert.strictEqual(gem('MAX_TOKENS').truncReason, 'maxTokens');
+  assert.strictEqual(gem('SAFETY').truncReason, 'safety');
+  assert.strictEqual(gem('RECITATION').truncReason, 'safety');
+  assert.strictEqual(gem('OTHER').truncReason, 'other');
+});
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

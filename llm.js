@@ -173,12 +173,30 @@ const LLM = (() => {
     return e;
   }
 
+  /**
+   * 收尾：把「这答案没写完」这件事**说出来**。
+   * 此前 sink.truncated 只被写、从未被读，于是截断的答案与完整的答案在界面上一模一样——
+   * 实测里一次回答断在「须」字上，用户无从知道那是被截断而非模型写完了。
+   */
+  function finalize(text, sink, cfg, label) {
+    if (!sink.truncated) return text;
+    const cur = numOr(cfg.maxTokens, DEF.maxTokens);
+    const why = sink.truncReason === 'maxTokens'
+      ? `已写满 maxTokens 上限（当前 ${cur}）。请在「AI 设置 → 超时与重试」里调大 maxTokens 后重试；` +
+        '若用的是思考型模型，思考也占这份额度，可一并把「思考预算」调小或设 0。'
+      : sink.truncReason === 'safety'
+        ? '被模型的安全策略中断。可换个说法重问，或改用别的模型。'
+        : '连接中断或等待超时，只取回了已生成的部分。可调大「空闲超时」后重试。';
+    return String(text || '') + `\n\n⚠ **本次回答未写完**（${label.trim() || 'AI'}）：${why}`;
+  }
+
   /** 中止时的统一处理：有内容就交还内容，没内容才报超时。 */
   function abortOutcome(guard, sink, label, cfg) {
     const why = guard.reasonOf();
     if (sink.full && sink.full.trim()) {
       sink.truncated = true;
-      return sink.full;   // 已生成的部分照常交还，界面会标明未写完
+      sink.truncReason = sink.truncReason || (why === 'total' ? 'total' : 'idle');
+      return sink.full;   // 已生成的部分照常交还，收尾时会明确标出「未写完」
     }
     const idleSec = Math.round(numOr(cfg.idleTimeoutMs, DEF.idleTimeoutMs) / 1000);
     throw new Error(label + (why === 'total'
@@ -224,9 +242,9 @@ const LLM = (() => {
           }
         }
       }
-      return stripThink(sink.full);
+      return finalize(stripThink(sink.full), sink, cfg, 'Ollama ');
     } catch (e) {
-      if (e.name === 'AbortError') return stripThink(abortOutcome(guard, sink, 'Ollama ', cfg));
+      if (e.name === 'AbortError') return finalize(stripThink(abortOutcome(guard, sink, 'Ollama ', cfg)), sink, cfg, 'Ollama ');
       if (/Failed to fetch|NetworkError/i.test(e.message)) {
         throw new Error('无法连接 Ollama(' + url + ')。手机端通常无本机 Ollama，请改用 Gemini 或自定义端点。');
       }
@@ -263,11 +281,19 @@ const LLM = (() => {
       if (!r.ok) throw await httpError(r, 'Gemini');
       await readSSE(r, onToken, (obj) => {
         const c = obj.candidates && obj.candidates[0];
-        return c && c.content && c.content.parts ? c.content.parts.map(p => p.text || '').join('') : '';
+        if (!c) return '';
+        // finishReason 必须看：MAX_TOKENS 时答案是被截断的，与写完了长得一模一样
+        if (c.finishReason && c.finishReason !== 'STOP') {
+          sink.truncated = true;
+          sink.truncReason = c.finishReason === 'MAX_TOKENS' ? 'maxTokens'
+            : /SAFETY|RECITATION|BLOCK/i.test(c.finishReason) ? 'safety' : 'other';
+          sink.finishReason = c.finishReason;
+        }
+        return c.content && c.content.parts ? c.content.parts.map(p => p.text || '').join('') : '';
       }, guard, sink);
-      return stripThink(sink.full);
+      return finalize(stripThink(sink.full), sink, cfg, 'Gemini ');
     } catch (e) {
-      if (e.name === 'AbortError') return stripThink(abortOutcome(guard, sink, 'Gemini ', cfg));
+      if (e.name === 'AbortError') return finalize(stripThink(abortOutcome(guard, sink, 'Gemini ', cfg)), sink, cfg, 'Gemini ');
       throw e;
     } finally { guard.done(); }
   }
@@ -300,18 +326,31 @@ const LLM = (() => {
         await readSSE(r, onToken, (obj) => {
           const c = obj.choices && obj.choices[0];
           if (!c) return '';
+          // finish_reason='length' 即被 max_tokens 截断；与写完了(stop)必须分得开
+          if (c.finish_reason && c.finish_reason !== 'stop') {
+            sink.truncated = true;
+            sink.truncReason = c.finish_reason === 'length' ? 'maxTokens'
+              : /content_filter|safety/i.test(c.finish_reason) ? 'safety' : 'other';
+            sink.finishReason = c.finish_reason;
+          }
           // 流式取 delta.content；个别端点在流里回 message.content，一并兼容
           return (c.delta && c.delta.content) || (c.message && c.message.content) || '';
         }, guard, sink);
       } else {
         // 端点忽略了 stream:true，按普通 JSON 解析——不能因此报错，能出结果就行
         const d = await r.json();
-        sink.full = (d.choices && d.choices[0] && d.choices[0].message && d.choices[0].message.content) || '';
+        const ch = (d.choices && d.choices[0]) || null;
+        sink.full = (ch && ch.message && ch.message.content) || '';
+        if (ch && ch.finish_reason && ch.finish_reason !== 'stop') {
+          sink.truncated = true;
+          sink.truncReason = ch.finish_reason === 'length' ? 'maxTokens' : 'other';
+          sink.finishReason = ch.finish_reason;
+        }
         if (onToken && sink.full) onToken(sink.full);
       }
-      return stripThink(sink.full);
+      return finalize(stripThink(sink.full), sink, cfg, '自定义端点 ');
     } catch (e) {
-      if (e.name === 'AbortError') return stripThink(abortOutcome(guard, sink, '自定义端点 ', cfg));
+      if (e.name === 'AbortError') return finalize(stripThink(abortOutcome(guard, sink, '自定义端点 ', cfg)), sink, cfg, '自定义端点 ');
       throw e;
     } finally { guard.done(); }
   }
@@ -436,7 +475,11 @@ const LLM = (() => {
     const timer = setTimeout(() => ctl.abort(), 30000);
     try {
       let url, headers, body;
-      if (step.kind === 'gemini') {
+      // buildChain 返回的是 { provider, model, label }。此前这里误写成 step.kind，
+      // 恒为 undefined，于是每一次自检都落进最后的 Ollama 分支去连 localhost:11434，
+      // 无论用户配的是什么，都在 1~2ms 内报「Failed to fetch」——自检给出的是**假情报**，
+      // 比没有还坏。改用 step.provider，并与 callOne 的分派保持同一套判断。
+      if (step.provider === 'gemini') {
         if (!cfg.geminiKey) throw new Error('未填写 Gemini API Key');
         const m = step.model || cfg.geminiModel || 'gemini-3.5-flash';
         url = `https://generativelanguage.googleapis.com/v1beta/models/${m}:` +
@@ -446,7 +489,7 @@ const LLM = (() => {
         if (cfg.geminiThinkingBudget != null && cfg.geminiThinkingBudget !== '')
           gc.thinkingConfig = { thinkingBudget: Number(cfg.geminiThinkingBudget) };
         body = { contents: [{ role: 'user', parts: [{ text: '回一个字：好' }] }], generationConfig: gc };
-      } else if (step.kind === 'custom') {
+      } else if (step.provider === 'custom') {
         if (!cfg.customUrl) throw new Error('未填写自定义端点 URL');
         const base = cfg.customUrl.replace(/\/$/, '');
         url = base.endsWith('/chat/completions') ? base : base + '/chat/completions';
@@ -479,7 +522,7 @@ const LLM = (() => {
   return {
     getCfg, saveCfg, chat, info, probe, DEF,
     // 供单测与诊断使用的纯函数（不参与业务流程）
-    _internals: { isTransient, isOverloaded, isFatalConfig, backoffMs, parseRetryAfter, buildChain, labelOf, reasonOf }
+    _internals: { isTransient, isOverloaded, isFatalConfig, backoffMs, parseRetryAfter, buildChain, labelOf, reasonOf, finalize }
   };
 })();
 
