@@ -261,5 +261,59 @@ t('finishReason 的判定：STOP/stop 不算截断，其余都算', function () 
   assert.strictEqual(gem('OTHER').truncReason, 'other');
 });
 
+
+/* ---------- probeRead：自检要看「有没有正文」，不能只看字节数 ---------- */
+var probeRead = LLM._internals.probeRead;
+
+t('probeRead：Gemini 非流式取正文与 finishReason', function () {
+  var r = probeRead(JSON.stringify({
+    candidates: [{ content: { parts: [{ text: '好' }] }, finishReason: 'STOP' }]
+  }));
+  assert.strictEqual(r.text, '好');
+  assert.strictEqual(r.finish, 'STOP');
+});
+
+t('probeRead：Gemini SSE 流式逐块拼接', function () {
+  var raw = 'data: ' + JSON.stringify({ candidates: [{ content: { parts: [{ text: '你' }] } }] }) + '\n' +
+            'data: ' + JSON.stringify({ candidates: [{ content: { parts: [{ text: '好' }] }, finishReason: 'STOP' }] }) + '\n';
+  var r = probeRead(raw);
+  assert.strictEqual(r.text, '你好');
+  assert.strictEqual(r.finish, 'STOP');
+});
+
+t('probeRead：思考型模型额度被思考吃光——200 但正文为空', function () {
+  var r = probeRead(JSON.stringify({ candidates: [{ finishReason: 'MAX_TOKENS' }] }));
+  assert.strictEqual(r.text, '', '没有 parts 就是一个字都没返回');
+  assert.strictEqual(r.finish, 'MAX_TOKENS', '空正文的原因必须留下来，否则自检等于什么也没查出');
+});
+
+t('probeRead：thought:true 的思考片段不算正文', function () {
+  var r = probeRead(JSON.stringify({
+    candidates: [{ content: { parts: [{ text: '我先想想', thought: true }, { text: '好' }] }, finishReason: 'STOP' }]
+  }));
+  assert.strictEqual(r.text, '好', '把思考当正文会让空答案看起来像正常答案');
+});
+
+t('probeRead：OpenAI 兼容端点，非流式与流式两种形状', function () {
+  var a = probeRead(JSON.stringify({ choices: [{ message: { content: '好' }, finish_reason: 'stop' }] }));
+  assert.strictEqual(a.text, '好');
+  assert.strictEqual(a.finish, 'stop');
+  var b = probeRead('data: ' + JSON.stringify({ choices: [{ delta: { content: '好' } }] }) + '\ndata: [DONE]\n');
+  assert.strictEqual(b.text, '好');
+});
+
+t('probeRead：Ollama 的 NDJSON', function () {
+  var raw = JSON.stringify({ message: { content: '你' } }) + '\n' +
+            JSON.stringify({ message: { content: '好' }, done_reason: 'stop' }) + '\n';
+  var r = probeRead(raw);
+  assert.strictEqual(r.text, '你好');
+  assert.strictEqual(r.finish, 'stop');
+});
+
+t('probeRead：空体与坏 JSON 不抛异常', function () {
+  assert.deepStrictEqual(probeRead(''), { text: '', finish: '' });
+  assert.deepStrictEqual(probeRead('<html>502</html>'), { text: '', finish: '' });
+});
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

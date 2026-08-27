@@ -506,11 +506,60 @@ const LLM = (() => {
       }
       const r = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal: ctl.signal });
       const text = await r.text().catch(() => '');
-      return {
-        ok: r.ok, status: r.status,
-        detail: r.ok ? ('正常，返回 ' + text.length + ' 字节') : text.slice(0, 300)
-      };
+      if (!r.ok) return { ok: false, status: r.status, detail: text.slice(0, 300) };
+      // HTTP 200 不等于「拿到了答案」。自检只给 16 token 的额度，思考型模型会把
+      // 这点额度全花在思考上，返回 finishReason=MAX_TOKENS 且正文一个字也没有。
+      // 若此处只数字节数就报「正常」，自检恰好会漏掉用户真正遇到的那个故障。
+      const got = probeRead(text);
+      const vis = got.text.replace(/\s+/g, '');
+      const fin = got.finish || '';
+      if (vis) {
+        return { ok: true, status: r.status,
+          detail: '正常，返回正文 ' + vis.length + ' 字' + (fin && !/^stop$/i.test(fin) ? '（' + fin + '）' : '') };
+      }
+      return { ok: true, warn: true, status: r.status,
+        detail: '连通正常，但没有返回任何正文' + (fin ? '（finishReason=' + fin + '）' : '') +
+          (/MAX_TOKENS|length/i.test(fin)
+            ? '。自检只给 16 token，思考型模型会把额度全用在思考上，正文一个字也剩不下——'
+              + '这与正式提问时「答案空白／写一半就断」是同一个成因：把「思考预算」设 0，或把 maxTokens 调大。'
+            : /SAFETY|RECITATION|BLOCK/i.test(fin) ? '。被对方的安全策略拦下了。'
+            : '。响应体前 160 字：' + text.slice(0, 160)) };
     } finally { clearTimeout(timer); }
+  }
+
+  /**
+   * 把探测响应读成「正文」+「结束原因」。三种 provider、流式与非流式共用一套解析：
+   * 整体 JSON 解不动就按行拆（SSE 的 data: 行 / Ollama 的 NDJSON），逐个对象取值。
+   * Gemini 的思考片段带 thought:true，不算正文。
+   */
+  function probeRead(raw) {
+    const s = String(raw || '').trim();
+    if (!s) return { text: '', finish: '' };
+    const objs = [];
+    try { objs.push(JSON.parse(s)); } catch (_) {
+      s.split('\n').forEach((line) => {
+        line = line.trim();
+        if (line.indexOf('data:') === 0) line = line.slice(5).trim();
+        if (!line || line === '[DONE]') return;
+        try { objs.push(JSON.parse(line)); } catch (_) {}
+      });
+    }
+    let text = '', finish = '';
+    objs.forEach((o) => {
+      if (!o || typeof o !== 'object') return;
+      const arr = o.candidates || o.choices;
+      if (Array.isArray(arr)) arr.forEach((c) => {
+        if (!c) return;
+        finish = c.finishReason || c.finish_reason || finish;
+        if (c.content && Array.isArray(c.content.parts))                                  // Gemini
+          c.content.parts.forEach((p) => { if (!p.thought) text += p.text || ''; });
+        if (c.message && typeof c.message.content === 'string') text += c.message.content; // OpenAI 非流式
+        if (c.delta && typeof c.delta.content === 'string') text += c.delta.content;       // OpenAI 流式
+      });
+      if (o.message && typeof o.message.content === 'string') text += o.message.content;   // Ollama
+      if (o.done_reason) finish = o.done_reason;
+    });
+    return { text: text, finish: finish };
   }
 
   function info() {
@@ -522,7 +571,7 @@ const LLM = (() => {
   return {
     getCfg, saveCfg, chat, info, probe, DEF,
     // 供单测与诊断使用的纯函数（不参与业务流程）
-    _internals: { isTransient, isOverloaded, isFatalConfig, backoffMs, parseRetryAfter, buildChain, labelOf, reasonOf, finalize }
+    _internals: { isTransient, isOverloaded, isFatalConfig, backoffMs, parseRetryAfter, buildChain, labelOf, reasonOf, finalize, probeRead }
   };
 })();
 

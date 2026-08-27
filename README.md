@@ -951,8 +951,8 @@ node core/casebook.test.js   # 31 项：样本门槛、归因诚实、不改教�
 ### 验证
 
 ```bash
-node core/llm.test.js      # 24 项：错误分类、退避、Retry-After、备用链、请求体形状、
-                          #        逐码文案、connect probe 的链路×模式展开
+node core/llm.test.js      # 36 项：错误分类、退避、Retry-After、备用链、请求体形状、
+                          #        逐码文案、connect probe 的链路×模式展开、probeRead 三家响应解析
 ```
 
 浏览器内用 stub fetch 实测四种情形：500 与 503/429 文案各异且下一步不同、
@@ -968,6 +968,31 @@ node core/llm.test.js      # 24 项：错误分类、退避、Retry-After、备�
 1–2ms 就是线索：那点时间根本出不了浏览器。**一个会说谎的诊断工具比没有诊断工具更坏**，
 所以补了单测：`buildChain` 的链路项必须带 `provider`，且断言它**从不产出 `kind`**，
 probe 不得依赖一个不存在的字段。
+
+### HTTP 200 也可能一个字都没返回
+
+自检原先只数返回了多少**字节**，`ok` 就跟着 `r.ok` 走。这在思考型模型上会给出
+反向的假情报：自检只给 16 token 的额度，思考型模型把这点额度全花在思考上，
+于是返回 **HTTP 200、`finishReason=MAX_TOKENS`、正文一个字也没有**——
+而自检会报「✅ 正常，返回 217 字节」。用户真正遇到的那个故障（答案空白／写一半就断），
+自检恰好绕开了它。
+
+现在自检解析响应体，报的是**正文有几个字**，并把结果分成三态：
+
+```
+⚠ Gemini/gemini-flash-latest（非流式）　HTTP 200　2ms
+    连通正常，但没有返回任何正文（finishReason=MAX_TOKENS）。自检只给 16 token，
+    思考型模型会把额度全用在思考上，正文一个字也剩不下——这与正式提问时
+    「答案空白／写一半就断」是同一个成因：把「思考预算」设 0，或把 maxTokens 调大。
+✅ Gemini/gemini-flash-latest（流式）　HTTP 200　1ms
+    正常，返回正文 1 字
+
+✅ 通且有正文　⚠ 通但没正文　❌ 没通。
+```
+
+解析走同一个纯函数 `probeRead`，三家 provider、流式与非流式共用：整体 JSON 解不动
+就按行拆（SSE 的 `data:` 行 / Ollama 的 NDJSON）。Gemini 带 `thought: true` 的思考片段
+**不计入正文**——把思考当正文，空答案又会看起来像正常答案，等于换个地方再骗一次。
 
 ### 截断的答案，从前和写完的答案长得一模一样
 
