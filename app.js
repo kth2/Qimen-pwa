@@ -1495,9 +1495,11 @@
       btn.disabled = true; out.textContent = '自检中…';
       try {
         const rows = await LLM.probe(t => { out.textContent = t; });
+        // 三态而非两态：HTTP 通了却没吐出正文，既不是 ✅ 也不是 ❌，
+        // 它恰恰是「答案空白／写一半就断」的现场，必须单独看得见。
         out.textContent = rows.map(r =>
-          `${r.ok ? '✅' : '❌'} ${r.step}（${r.mode}）　HTTP ${r.status || '—'}　${r.ms}ms\n    ${r.detail}`
-        ).join('\n') + '\n\n把这一段原样发给开发者，比「暂时失败」有用得多。';
+          `${r.ok ? (r.warn ? '⚠' : '✅') : '❌'} ${r.step}（${r.mode}）　HTTP ${r.status || '—'}　${r.ms}ms\n    ${r.detail}`
+        ).join('\n') + '\n\n✅ 通且有正文　⚠ 通但没正文　❌ 没通。把这一段原样发给开发者，比「暂时失败」有用得多。';
       } catch (e) { out.textContent = '自检本身出错：' + e.message; }
       finally { btn.disabled = false; }
     });
