@@ -227,7 +227,7 @@
     // 就抄在 timing-rules.json 的 basis 里，却一直无人执行——因为从没有代码判过伏吟。
     // 现由 core/yinju.js 判出后传入，只抬升马星一条，不触碰其余机制。
     var yj = (args.yinju && args.yinju.version) ? args.yinju : null;
-    var fuyinHere = !!(yj && yj.ju.concat(yj.gong).some(function (i) { return i.kind === 'fuyin'; }));
+    var fuyinHere = !!(yj && yj.layers && yj.layers.some(function (i) { return i.kind === 'fuyin'; }));
     var school = options.school || detectSchool(chart);
     var domain = options.domain || (xy && xy.domain) || '';
 

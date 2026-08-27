@@ -414,8 +414,8 @@
       } : null,
       // 伏吟／反吟层元信息。局与宫分列，两级出处随条附上。
       yinju: yj ? {
-        version: yj.version, school: yj.school, ju: yj.ju, gong: yj.gong,
-        combos: yj.combos, timing: yj.timing, notes: yj.notes
+        version: yj.version, school: yj.school, ju: yj.ju, layers: yj.layers,
+        timing: yj.timing, notes: yj.notes
       } : null,
       // 力量校验层元信息。findings 是纲要的硬禁令，提示词里另起一段前置呈现。
       severity: sv ? {
@@ -612,23 +612,40 @@
      * 「事动不动」是断成败与断应期共同的前提：伏吟主静则久拖，反吟主动则反复。
      * 若排在包尾，模型早已按别的线索写完了「近日可成」。 */
     var yji = ev.yinju;
-    if (yji && (yji.ju.length || yji.gong.length)) {
+    if (yji && yji.layers && yji.layers.length) {
       L.push('· 【伏吟／反吟·先看这一段】判的是「事动不动」，不是吉凶。' +
         '伏吟主静——事在原处不动、久拖难成；反吟主动——动荡反复、速而不久。' +
-        '**下列各条已逐条标明出处等级，〔纲要原文〕与〔非本纲要·通行法〕不可等同看待。**');
-      function yjLine(i, prefix) {
-        var p = i.provenance || {};
-        L.push('  ' + prefix + ' ' + i.name + '（' + i.scopeLabel + '）：' + i.test +
-          '　命中宫 ' + i.gongs.join('、'));
-        L.push('      义：' + i.meaning);
-        L.push('      〔' + (p.level || '未注明') + '〕' + (p.text || ''));
-      }
-      if (yji.ju.length) { L.push('  ▍成局（全盘之象，笼罩通篇）：'); yji.ju.forEach(function (i) { yjLine(i, '‼'); }); }
-      if (yji.gong.length) { L.push('  ▍未成局，只在该宫论（**不得当作全盘之象**）：'); yji.gong.forEach(function (i) { yjLine(i, '·'); }); }
-      (yji.combos || []).forEach(function (c) {
-        L.push('  ▍' + c.name + '：' + c.meaning);
-        L.push('      〔' + c.provenance.level + '〕' + c.provenance.text);
+        '**下列各条已逐条标明出处等级，〔纲要原文〕与〔用户所定〕不可等同看待。**');
+      (yji.ju || []).forEach(function (j) {
+        L.push('  ‼ **' + j.name + '**（全盘之象，笼罩通篇）：' + j.test);
+        L.push('      据：' + j.basedOn.map(function (b) {
+          return b.name + '（' + b.checkable + ' 宫中 ' + b.count + ' 宫：' + b.gongs.join('、') + '）';
+        }).join(' ＋ '));
+        L.push('      义：' + j.meaning);
+        L.push('      〔' + j.provenance.level + '〕' + j.provenance.text);
       });
+      function yjLine(i) {
+        L.push('  · ' + i.name + '（' + i.scopeLabel + '）：' + i.test +
+          '　' + i.checkable + ' 宫中 ' + i.count + ' 宫（' + i.gongs.join('、') + '）');
+        L.push('      义：' + i.meaning);
+        L.push('      〔' + i.provenance.level + '〕' + i.provenance.text);
+      }
+      // 星／门两层：已并入局者不再单列（同一件事不说两遍），未成局者另节并警其不得以局论
+      var sm = (yji.layers || []).filter(function (i) {
+        return (i.layer === 'xing' || i.layer === 'men') && !(yji.ju || []).some(function (j) {
+          return j.kind === i.kind && i.scope === 'full';
+        });
+      });
+      if (sm.length) {
+        L.push('  ▍星门之吟未成局（**不得以局论**——局须星、门俱全，此处只在所命中之宫上说）：');
+        sm.forEach(yjLine);
+      }
+      // 干层是干加干之格，本就不参与局，另节列出免得与「未成局」混为一谈
+      var gan = (yji.layers || []).filter(function (i) { return i.layer === 'gan'; });
+      if (gan.length) {
+        L.push('  ▍干加干之格（**不参与局的判定**，局只论星门；此层按宫论）：');
+        gan.forEach(yjLine);
+      }
       (yji.timing || []).forEach(function (tt) {
         L.push('  ▍应期联动：' + (tt.effect === 'raise'
           ? '伏吟主静，静中以马星为动机，故「' + tt.target + '」一条锚点在本盘升为**高**。'

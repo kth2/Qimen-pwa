@@ -46,7 +46,7 @@ t('未加载时不抛异常，只声明跳过', function () {
   // 用一个不合格的对象把 DB 打回 null，再复原
   assert.strictEqual(Y2.load({}), false);
   var r = Y2.analyze({ chart: zhuanpan('2026-01-01T15:00:00') });
-  assert.strictEqual(r.ju.length, 0);
+  assert.strictEqual(r.layers.length, 0);
   assert.ok(/未加载/.test(r.notes.join('')), '应说明本层被跳过');
   Y2.load(RULES);
 });
@@ -87,7 +87,7 @@ t('实盘扫描：转盘绝不出现「中宫干伏吟」', function () {
       { type: '四柱', method: '时家', purpose: '综合', location: '默认位置' });
     if (!p || p.error) continue;
     var r = Y.analyze({ chart: p });
-    r.ju.concat(r.gong).forEach(function (it) {
+    r.layers.forEach(function (it) {
       if (it.layer === 'gan' && it.kind === 'fuyin' && it.gongs.indexOf('5') >= 0) bad++;
     });
   }
@@ -116,11 +116,22 @@ t('星反吟：天蓬(本位坎一)落离九', function () {
   var r = Y.analyze({ chart: fake({ '9': { xing: '天蓬' } }), school: 'zhuanpan' });
   assert.strictEqual(r._counts['xing.fanyin'], 1);
 });
-t('天禽寄芮：「禽芮」归一为天禽，本位中五，恒不命中', function () {
-  assert.strictEqual(Y._internals.normXing('禽芮'), '天禽');
-  var r = Y.analyze({ chart: fake({ '2': { xing: '禽芮' } }), school: 'zhuanpan' });
-  assert.strictEqual(r._counts['xing.fuyin'], 0);
-  assert.strictEqual(r._counts['xing.fanyin'], 0);
+t('【回归】引擎的「禽芮」须归为天芮——v1 归成了天禽，致天芮从不参与判定', function () {
+  assert.strictEqual(Y._internals.normXing('禽芮'), '天芮');
+  // 天芮本位坤2、对宫艮8。这两条 v1.0.0 全判不出来
+  assert.strictEqual(Y.analyze({ chart: fake({ '2': { xing: '禽芮' } }), school: 'zhuanpan' })._counts['xing.fuyin'], 1);
+  assert.strictEqual(Y.analyze({ chart: fake({ '8': { xing: '禽芮' } }), school: 'zhuanpan' })._counts['xing.fanyin'], 1);
+});
+t('天禽不参与吟的判定：用户所定之表只列八星，禽寄中宫随芮而行', function () {
+  var r = Y.analyze({ chart: fake({ '5': { xing: '天禽' } }), school: 'feipan' });
+  assert.strictEqual(r._counts['xing.fuyin'], 0, '天禽落中五不作伏吟');
+  assert.ok(!('天禽' in require('../knowledge/yinju-rules.json').homes.xing), '本位表里不该有天禽');
+});
+t('【回归】转盘星层可判宫数应为 8 而非 7', function () {
+  var r = Y.analyze({ chart: zhuanpan('2026-01-01T15:00:00') });
+  var x = r.layers.filter(function (i) { return i.layer === 'xing'; })[0];
+  assert.strictEqual(x.checkable, 8, 'v1 因漏掉天芮只认得 7 宫');
+  assert.strictEqual(x.count, 8, '该盘八星俱归本位');
 });
 t('门伏吟／门反吟：休门本位坎一，落离九为反', function () {
   assert.strictEqual(Y.analyze({ chart: fake({ '1': { men: '休门' } }) })._counts['men.fuyin'], 1);
@@ -132,23 +143,45 @@ t('中五宫无门，门层不会因中宫产生命中', function () {
 });
 t('无法判定者一律不成立（空字段、生造星名）', function () {
   var r = Y.analyze({ chart: fake({ '1': { xing: '天某', men: '', tianGan: '', diGan: '丙' } }) });
-  assert.strictEqual(r.ju.length + r.gong.length, 0);
+  assert.strictEqual(r.ju.length + r.layers.length, 0);
 });
 
 console.log('\n== 局与宫分开 ==');
-t('单宫命中报「宫」，不升格为全盘', function () {
+t('单宫命中只报该层，不升格为全盘', function () {
   var r = Y.analyze({ chart: fake({ '1': { xing: '天蓬' } }), school: 'zhuanpan' });
   assert.strictEqual(r.ju.length, 0);
-  assert.strictEqual(r.gong.length, 1);
-  assert.strictEqual(r.gong[0].scope, 'gong');
+  assert.strictEqual(r.layers.length, 1);
+  assert.strictEqual(r.layers[0].scope, 'partial');
 });
-t('达阈值报「局」', function () {
-  var cells = { '1': { xing: '天蓬' }, '2': { xing: '天芮' }, '3': { xing: '天冲' },
-                '4': { xing: '天辅' }, '6': { xing: '天心' }, '7': { xing: '天柱' } };
+t('只有星全伏、门不伏，**不成局**——局须星门俱全', function () {
+  var cells = {};
+  ['1','2','3','4','6','7','8','9'].forEach(function (g, i) {
+    cells[g] = { xing: ['天蓬','天芮','天冲','天辅','天心','天柱','天任','天英'][i] };
+  });
+  var r = Y.analyze({ chart: fake(cells), school: 'zhuanpan' });
+  assert.strictEqual(r.layers.filter(function (i) { return i.scope === 'full'; }).length, 1, '星层成全盘');
+  assert.strictEqual(r.ju.length, 0, '门未伏，不得称伏吟局');
+});
+t('星门俱全盘方成伏吟局', function () {
+  var cells = {};
+  ['1','2','3','4','6','7','8','9'].forEach(function (g, i) {
+    cells[g] = { xing: ['天蓬','天芮','天冲','天辅','天心','天柱','天任','天英'][i],
+                 men: ['休门','死门','伤门','杜门','开门','惊门','生门','景门'][i] };
+  });
   var r = Y.analyze({ chart: fake(cells), school: 'zhuanpan' });
   assert.strictEqual(r.ju.length, 1);
-  assert.strictEqual(r.ju[0].scope, 'ju');
-  assert.strictEqual(r.ju[0].count, 6);
+  assert.strictEqual(r.ju[0].name, '伏吟局');
+  assert.strictEqual(r.ju[0].basedOn.length, 2);
+});
+t('星门俱落对宫方成反吟局', function () {
+  var cells = {};
+  // 蓬→离9 任→坤2 冲→兑7 辅→乾6 英→坎1 芮→艮8 柱→震3 心→巽4（用户原表）
+  var X = { '9':'天蓬','2':'天任','7':'天冲','6':'天辅','1':'天英','8':'天芮','3':'天柱','4':'天心' };
+  var M = { '9':'休门','2':'生门','7':'伤门','6':'杜门','1':'景门','8':'死门','3':'惊门','4':'开门' };
+  Object.keys(X).forEach(function (g) { cells[g] = { xing: X[g], men: M[g] }; });
+  var r = Y.analyze({ chart: fake(cells), school: 'zhuanpan' });
+  assert.strictEqual(r.ju.length, 1);
+  assert.strictEqual(r.ju[0].name, '反吟局');
 });
 t('阈值取自规则库而非硬编码', function () {
   assert.strictEqual(Number(RULES.juThreshold), 6);
@@ -158,17 +191,20 @@ t('阈值取自规则库而非硬编码', function () {
 console.log('\n== 两级出处不得混同 ==');
 t('干层标【纲要原文】', function () {
   var r = Y.analyze({ chart: fake({ '3': { tianGan: '庚', diGan: '庚' } }), school: 'zhuanpan' });
-  assert.strictEqual(r.gong[0].provenance.level, '纲要原文');
+  assert.strictEqual(r.layers[0].provenance.level, '纲要原文');
 });
-t('星层与门层标【非本纲要·通行法】', function () {
-  var rx = Y.analyze({ chart: fake({ '1': { xing: '天蓬' } }) });
-  var rm = Y.analyze({ chart: fake({ '1': { men: '休门' } }) });
-  assert.strictEqual(rx.gong[0].provenance.level, '非本纲要·通行法');
-  assert.strictEqual(rm.gong[0].provenance.level, '非本纲要·通行法');
+t('星层与门层标【用户所定】，不冒充纲要', function () {
+  assert.strictEqual(Y.analyze({ chart: fake({ '1': { xing: '天蓬' } }) }).layers[0].provenance.level, '用户所定');
+  assert.strictEqual(Y.analyze({ chart: fake({ '1': { men: '休门' } }) }).layers[0].provenance.level, '用户所定');
+});
+t('局本身也标【用户所定】，并写明可回溯重议', function () {
+  var r = Y.analyze({ chart: zhuanpan('2026-01-01T15:00:00') });
+  assert.strictEqual(r.ju[0].provenance.level, '用户所定');
+  assert.ok(/重议|不可诿为纲要/.test(r.ju[0].provenance.text));
 });
 t('干反吟标明系用户裁定取义，不冒充纯纲要', function () {
   var r = Y.analyze({ chart: fake({ '3': { tianGan: '丙', diGan: '壬' } }), school: 'zhuanpan' });
-  var p = r.gong[0].provenance;
+  var p = r.layers[0].provenance;
   assert.ok(/裁定/.test(p.level + p.text), '「对冲」的取义来自用户裁定，必须写明');
   assert.ok(/引擎/.test(p.text), '须记下与引擎命名不合这一事实，供日后重议');
 });
@@ -176,7 +212,13 @@ t('排版块把出处逐条带出，不只在抬头写一句', function () {
   var r = Y.analyze({ chart: fake({ '1': { xing: '天蓬' }, '3': { tianGan: '庚', diGan: '庚' } }) });
   var blk = Y.toPromptBlock(r);
   assert.ok(blk.indexOf('〔纲要原文〕') >= 0);
-  assert.ok(blk.indexOf('〔非本纲要·通行法〕') >= 0);
+  assert.ok(blk.indexOf('〔用户所定〕') >= 0);
+});
+t('成局时星门两层不再单列，同一件事不说两遍', function () {
+  var blk = Y.toPromptBlock(Y.analyze({ chart: zhuanpan('2026-01-01T15:00:00') }));
+  assert.ok(blk.indexOf('伏吟局') >= 0);
+  assert.strictEqual((blk.match(/星伏吟（全盘）/g) || []).length, 0, '已并入局就不该再单列一条');
+  assert.ok(/星伏吟（8 宫中 8 宫/.test(blk), '但须在「据」里交代它由哪两层构成');
 });
 t('排版块声明本层不下吉凶断语', function () {
   var r = Y.analyze({ chart: fake({ '1': { xing: '天蓬' } }) });
@@ -207,19 +249,39 @@ t('反吟只作提示，不改锚点强弱', function () {
 });
 
 console.log('\n== 星门同吟 ==');
-t('星门俱成局才报同吟，只成一层不报', function () {
-  var only = {};
-  ['1','2','3','4','6','7','8','9'].forEach(function (g, i) {
-    only[g] = { xing: ['天蓬','天芮','天冲','天辅','天心','天柱','天任','天英'][i] };
-  });
-  var r1 = Y.analyze({ chart: fake(only), school: 'zhuanpan' });
-  assert.strictEqual(r1.combos.length, 0, '只有星伏吟，不该报星门同吟');
-  ['1','2','3','4','6','7','8','9'].forEach(function (g, i) {
-    only[g].men = ['休门','死门','伤门','杜门','开门','惊门','生门','景门'][i];
-  });
-  var r2 = Y.analyze({ chart: fake(only), school: 'zhuanpan' });
-  assert.strictEqual(r2.combos.length, 1);
-  assert.ok(/星门同吟（伏）/.test(r2.combos[0].name));
+t('【对拍】与用户所列十六条逐字硬编的表完全一致', function () {
+  var G = { 坎:'1', 坤:'2', 震:'3', 巽:'4', 乾:'6', 兑:'7', 艮:'8', 离:'9' };
+  var FANX = { 天蓬:'离', 天任:'坤', 天冲:'兑', 天辅:'乾', 天英:'坎', 天芮:'艮', 天柱:'震', 天心:'巽' };
+  var FANM = { 休门:'离', 生门:'坤', 伤门:'兑', 杜门:'乾', 景门:'坎', 死门:'艮', 惊门:'震', 开门:'巽' };
+  var FUX  = { 天蓬:'坎', 天任:'艮', 天冲:'震', 天辅:'巽', 天英:'离', 天芮:'坤', 天柱:'兑', 天心:'乾' };
+  var FUM  = { 休门:'坎', 生门:'艮', 伤门:'震', 杜门:'巽', 景门:'离', 死门:'坤', 惊门:'兑', 开门:'乾' };
+  function alias(x) { x = String(x || ''); return (x === '禽芮' || x === '天禽芮') ? '天芮' : x; }
+  function byTable(pan) {
+    var jg = pan.jiuGongAnalysis || {}, xf = 0, xr = 0, mf = 0, mr = 0, xn = 0, mn = 0;
+    ['1','2','3','4','5','6','7','8','9'].forEach(function (g) {
+      var c = jg[g]; if (!c) return;
+      var x = alias(c.xing), m = String(c.men || '');
+      if (FUX[x]) { xn++; if (G[FUX[x]] === g) xf++; if (G[FANX[x]] === g) xr++; }
+      if (FUM[m]) { mn++; if (G[FUM[m]] === g) mf++; if (G[FANM[m]] === g) mr++; }
+    });
+    return { fu: xn > 0 && mn > 0 && xf === xn && mf === mn,
+             fan: xn > 0 && mn > 0 && xr === xn && mr === mn, xf: xf, xr: xr, mf: mf, mr: mr };
+  }
+  var t0 = new Date('2026-01-01T00:00:00').getTime(), n = 0, bad = 0;
+  for (var i = 0; i < 500; i++) {
+    [['zhuanpan', zhuanpan], ['feipan', feipan]].forEach(function (pair) {
+      var p = pair[1](new Date(t0 + i * 3600 * 1000 * 3).toISOString());
+      if (!p || p.error) return;
+      n++;
+      var w = byTable(p), r = Y.analyze({ chart: p, school: pair[0] });
+      if (r.ju.some(function (j) { return j.kind === 'fuyin'; }) !== w.fu) bad++;
+      else if (r.ju.some(function (j) { return j.kind === 'fanyin'; }) !== w.fan) bad++;
+      else if (r._counts['xing.fuyin'] !== w.xf || r._counts['xing.fanyin'] !== w.xr) bad++;
+      else if (r._counts['men.fuyin'] !== w.mf || r._counts['men.fanyin'] !== w.mr) bad++;
+    });
+  }
+  assert.ok(n > 500, '样本足够，实得 ' + n);
+  assert.strictEqual(bad, 0, n + ' 盘中有 ' + bad + ' 盘与用户原表不符');
 });
 
 console.log('\n== 两派与确定性 ==');
@@ -231,17 +293,17 @@ t('同盘两次分析结果完全一致（确定性）', function () {
   var p = zhuanpan('2026-01-01T15:00:00');
   assert.strictEqual(JSON.stringify(Y.analyze({ chart: p })), JSON.stringify(Y.analyze({ chart: p })));
 });
-t('实盘：星门皆伏吟之盘确被判出，且干层同时成局', function () {
+t('实盘：2026-01-01 15:00 判为伏吟局，星门各 8 宫中 8 宫', function () {
   var r = Y.analyze({ chart: zhuanpan('2026-01-01T15:00:00') });
-  var names = r.ju.map(function (i) { return i.name; }).sort().join(',');
-  assert.strictEqual(names, '干伏吟,星伏吟,门伏吟', '实得：' + names);
-  assert.strictEqual(r.ju.filter(function (i) { return i.name === '星伏吟'; })[0].count, 7,
-    '天禽寄芮不占宫，故八宫中命中七宫');
+  assert.strictEqual(r.ju.map(function (i) { return i.name; }).join(','), '伏吟局');
+  r.ju[0].basedOn.forEach(function (b) {
+    assert.strictEqual(b.count, 8, b.name + ' 应中 8 宫，实得 ' + b.count);
+    assert.strictEqual(b.checkable, 8);
+  });
 });
-t('实盘：星门皆反吟之盘确被判出', function () {
+t('实盘：2026-01-07 18:00 判为反吟局', function () {
   var r = Y.analyze({ chart: zhuanpan('2026-01-07T18:00:00') });
-  var names = r.ju.map(function (i) { return i.name; }).sort().join(',');
-  assert.ok(/星反吟/.test(names) && /门反吟/.test(names), '实得：' + names);
+  assert.strictEqual(r.ju.map(function (i) { return i.name; }).join(','), '反吟局');
 });
 t('伏吟与反吟不会在同一层同时成局', function () {
   var t0 = new Date('2026-05-01T00:00:00').getTime(), bad = 0;
@@ -251,8 +313,8 @@ t('伏吟与反吟不会在同一层同时成局', function () {
     if (!p || p.error) continue;
     var r = Y.analyze({ chart: p });
     ['xing', 'men'].forEach(function (L) {
-      var f = r.ju.some(function (x) { return x.layer === L && x.kind === 'fuyin'; });
-      var n = r.ju.some(function (x) { return x.layer === L && x.kind === 'fanyin'; });
+      var f = r.layers.some(function (x) { return x.layer === L && x.kind === 'fuyin' && x.scope === 'full'; });
+      var n = r.layers.some(function (x) { return x.layer === L && x.kind === 'fanyin' && x.scope === 'full'; });
       if (f && n) bad++;
     });
   }
@@ -274,7 +336,7 @@ t('证据包带出伏吟块，且两级出处都在', function () {
   var blk = EV.toPromptBlock(EV.build({ chart: p, school: 'zhuanpan', domain: 'general', yinju: yj }));
   assert.ok(blk.indexOf('【伏吟／反吟·先看这一段】') >= 0, '伏吟块应出现在证据包里');
   assert.ok(blk.indexOf('〔纲要原文〕') >= 0, '干层出处');
-  assert.ok(blk.indexOf('〔非本纲要·通行法〕') >= 0, '星门层出处');
+  assert.ok(blk.indexOf('〔用户所定〕') >= 0, '星门层出处');
 });
 t('伏吟块排在 FACT 之前——排在包尾等于没有', function () {
   var p = zhuanpan('2026-01-01T15:00:00');
@@ -299,12 +361,17 @@ t('局与宫在证据包里分列，单宫不得冒充全盘', function () {
     var c = zhuanpan(new Date(t0 + i * 3600 * 1000 * 3).toISOString());
     if (!c || c.error) continue;
     var r = Y.analyze({ chart: c });
-    if (!r.ju.length && r.gong.length) p = c;   // 只有逐宫、未成局
+    // 要的是「星或门有命中但未成局」之盘；只有干层命中的不算——干层本就不参与局
+    if (!r.ju.length && r.layers.some(function (x) {
+      return (x.layer === 'xing' || x.layer === 'men');
+    })) p = c;
   }
-  assert.ok(p, '八百盘内未找到「只有逐宫命中、未成局」之盘');
+  assert.ok(p, '八百盘内未找到「星门有命中但未成局」之盘');
   var blk = EV.toPromptBlock(EV.build({ chart: p, school: 'zhuanpan', domain: 'general', yinju: Y.analyze({ chart: p }) }));
-  assert.ok(/不得当作全盘之象/.test(blk), '逐宫条目须带此告诫');
-  assert.strictEqual(blk.indexOf('成局（全盘之象'), -1, '未成局就不该出现成局小节');
+  assert.ok(/不得以局论/.test(blk), '星门未成局者须带此告诫');
+  assert.ok(/干加干之格（\*\*不参与局的判定\*\*/.test(blk) || blk.indexOf('干加干之格') < 0,
+    '干层若列出，须说明它不参与局，不可与「未成局」混为一谈');
+  assert.strictEqual(blk.indexOf('（全盘之象，笼罩通篇）'), -1, '未成局就不该出现成局小节');
 });
 
 console.log('\n== 接入应期：伏吟抬升马星 ==');
@@ -339,7 +406,7 @@ t('不见伏吟之盘，马星不被抬升', function () {
     var iso = new Date(t0 + i * 3600 * 1000 * 3).toISOString();
     var p = zhuanpan(iso);
     var yj = Y.analyze({ chart: p });
-    if (yj.ju.concat(yj.gong).some(function (x) { return x.kind === 'fuyin'; })) continue;
+    if (yj.layers.some(function (x) { return x.kind === 'fuyin'; })) continue;
     var r = TM.analyze({ chart: p, yingqi: YQ.analyze(p), yinju: yj,
       xiangyi: XY.analyze({ chart: p, domain: 'lost_item', school: 'zhuanpan' }),
       options: { school: 'zhuanpan', domain: 'lost_item' } });
