@@ -201,6 +201,7 @@
     var sv = (args.severity && args.severity.version) ? args.severity : null;
     var cv = (args.converge && args.converge.version) ? args.converge : null;
     var yj = (args.yinju && args.yinju.version) ? args.yinju : null;
+    var gj = (args.geju && args.geju.version) ? args.geju : null;
     var domain = args.domain || (ys && ys.domain) || 'general';
     var items = [];
     // 用神清单按占类权重重排：SYMBOL 与关键词池皆据此取用，截断时先保重点
@@ -416,6 +417,11 @@
       yinju: yj ? {
         version: yj.version, school: yj.school, ju: yj.ju, layers: yj.layers,
         timing: yj.timing, notes: yj.notes
+      } : null,
+      // 八十一格层元信息。focus/rest 分列，引擎异名随条附上。
+      geju: gj ? {
+        version: gj.version, focus: gj.focus, rest: gj.rest, notes: gj.notes,
+        provenance: gj.provenance || null
       } : null,
       // 力量校验层元信息。findings 是纲要的硬禁令，提示词里另起一段前置呈现。
       severity: sv ? {
@@ -653,6 +659,30 @@
         L.push('      〔' + tt.provenanceLevel + '〕' + (tt.why || ''));
       });
       L.push('  ※ 本层只给倾向与出处，**不下吉凶断语**；成败仍须结合用神、旺衰与全盘。');
+    }
+
+    /* ---------- 八十一格：紧随吟局，同样前置 ----------
+     * 引擎早就认得格名，却只把四个字裸露在宫格行里。模型看见「日奇伏吟」
+     * 而不知其义，等于没给。此段把名与断语一并摆出。 */
+    var gji = ev.geju;
+    if (gji && (gji.focus.length || gji.rest.length)) {
+      L.push('· 【八十一格（干加干）】格名与断语出自用户所供之 81 格表。' +
+        '**格之名不等于宫之吉凶**——宫位吉凶另由引擎给出，二者分开看，不得混为一谈。');
+      gji.focus.forEach(function (i) {
+        L.push('  · ' + i.gong + '宫' + (i.gongName ? '(' + i.gongName + ')' : '') +
+          (i.roles.length ? '〔' + i.roles.join('、') + '〕' : '') +
+          '　天盘' + i.tianGan + ' 加 地盘' + i.diGan + ' —— **' + i.name + '**' +
+          (i.engineName ? '（引擎作「' + i.engineName + '」，两说并存）' : ''));
+        L.push('      ' + i.text + (i.gongJiXiong ? '　｜　该宫吉凶(引擎)：' + i.gongJiXiong : ''));
+      });
+      if (gji.rest.length) {
+        L.push('  · 其余各宫：' + gji.rest.map(function (i) {
+          return i.gong + '宫' + i.tianGan + '加' + i.diGan + '「' + i.name + '」';
+        }).join('　'));
+      }
+      L.push('  〔' + (gji.provenance && gji.provenance.level || '用户所供 81 格表') + '〕' +
+        (gji.provenance && gji.provenance.text || ''));
+      (gji.notes || []).forEach(function (nt) { L.push('  ※ ' + nt); });
     }
 
     if (facts.length) { L.push('· FACT（引擎算得的盘面事实，不得改写）：'); L = L.concat(facts); }

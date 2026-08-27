@@ -9,6 +9,7 @@
   const SV = window.Severity;   // 力量校验层（Phase 9；缺则不含禁令，力量仍由 wangshuai 块承载）
   const CV = window.Converge;   // 证据合流层（Phase 13；缺则不含档位与弃权）
   const YJ = window.YinJu;      // 伏吟／反吟层（Phase 14；缺则不含吟局判定）
+  const GJ = window.GeJu;       // 八十一格层（Phase 15；缺则格名仍只是宫格行里的裸标签）
   const CB = window.Casebook;   // 案例本·经验层（Phase 5；只统计与建议，绝不改写教义规则）
   const CSTORE = window.CaseStore;
   const RV = window.Revise;     // 复盘正解与规则修订（Phase 6）
@@ -242,6 +243,7 @@
   let _severityReady = false;   // 力量校验库同理：缺席只减禁令段
   let _convergeReady = false;   // 维度表同理：缺席只减合流段
   let _yinjuReady = false;      // 吟局规则库同理：缺席只是不判伏吟反吟，不影响其余各层
+  let _gejuReady = false;       // 81 格表同理：缺席只是不带格之断语
   async function loadKnowledge() {
     if (!YS || !EV) return false;
     const get = (p) => fetch(p).then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)));
@@ -281,6 +283,10 @@
     if (_kbReady && YJ && !_yinjuReady) {
       try { _yinjuReady = YJ.load(await get('knowledge/yinju-rules.json')); }
       catch (e) { console.warn('[yinju] 吟局规则库加载失败，本次不判伏吟反吟：', e.message); _yinjuReady = false; }
+    }
+    if (_kbReady && GJ && !_gejuReady) {
+      try { _gejuReady = GJ.load(await get('knowledge/geju-81.json')); }
+      catch (e) { console.warn('[geju] 81 格表加载失败，本次不带格之断语：', e.message); _gejuReady = false; }
     }
     return _kbReady;
   }
@@ -333,6 +339,22 @@
       + '**不要凭一条孤证编出一个确指**。实测里最伤的一次：凭「离九＝明亮处」一条孤证断成'
       + '「正南明亮处、炉灶电器旁」，而实物在床下、被衣物压住；同盘的九地(藏纳)、杜门(隐藏)'
       + '三路指向「藏」，反倒没被采信。',
+    // Phase 14/15：吟局与八十一格。此前两层的内容都进了证据包，却没有任何一条 E 规则
+    // 叫模型必须用它——力量校验有 E9a、证据合流有 E19/E20，这两层是空的。
+    'E21. 证据包若给出【伏吟／反吟】，先据它定「事动不动」，再谈成败：'
+      + '**伏吟局**（星、门俱归本位）主静——事在原处不动、久拖难成、进展迟滞，'
+      + '不得写成「近日可成/进展顺利」；宜守成、宜就近、宜循旧例的话要说出来。'
+      + '**反吟局**（星、门俱落对宫）主动荡反复——纵然应验亦「速而不久」，'
+      + '不得断为定局，须写明其反复之性。'
+      + '未成局者（只星或只门、或只若干宫）**不得以局论**，只在所命中之宫上说。'
+      + '各条已标出处等级：〔纲要原文〕与〔用户所定〕不可等同看待，'
+      + '引用时请说明该条依据来自哪一级。',
+    'E22. 证据包若给出【八十一格】，用神宫与关注宫之格名与断语须落到解读里，'
+      + '不得只报格名而不说其义（此前正是如此：提示词里只有「日奇伏吟」四个字，模型无从用起）。'
+      + '两条硬约束：① **格之名不等于宫之吉凶**——某宫格名凶而引擎判该宫吉，或反之，'
+      + '都要照实并陈，不得拿格名去覆盖宫位吉凶，也不得反过来；'
+      + '② 标「引擎作『×』，两说并存」者，是本表与引擎命名不同的 20 格之一，'
+      + '**不要只挑一个说成定论**，如该格对结论要紧，请说明两说并存。',
     'E20. 数证据数的是**互不相干的路数**，不是象义条数。同一个元素的多个别名（如玄武的'
       + '「盗/失物/暗昧/欺诈」）只算**一路**；五条同源的话不等于五路旁证，不得据此说「多重印证」。',
     // Phase 9：力量校验与断语范围。以下四条全部出自实测案例本的失败复盘，逐条对应一类真实误判。
@@ -575,13 +597,32 @@
               });
             } catch (ce2) { console.warn('[converge] 证据合流失败，本次不含合流段：', ce2.message); converge = null; }
           }
+          // 八十一格（Phase 15）：查出各宫干加干之格名与断语。关注宫沿用象义／类象
+          // 已定的那几宫——与力量校验同一套口径，免得两处各说各的「哪宫要紧」。
+          let geju = null;
+          if (_gejuReady && GJ) {
+            try {
+              const gjRoles = {};
+              const addRole = (g, r) => { g = String(g); (gjRoles[g] = gjRoles[g] || []).push(r); };
+              if (xiangyi && xiangyi.applicable) {
+                xiangyi.focus.forEach(f => addRole(f.gong, f.name + (f.aspect ? '(' + f.aspect + ')' : '')));
+              } else {
+                ysGongs.forEach(g => addRole(g, '用神'));
+              }
+              if (leixiang && leixiang.applicable) {
+                leixiang.candidates.filter(c => c.located)
+                  .forEach(c => addRole(c.gong, c.symbol + '〔类象〕'));
+              }
+              geju = GJ.analyze({ chart: pan, focusGongs: Object.keys(gjRoles), focusRoles: gjRoles });
+            } catch (ge) { console.warn('[geju] 查 81 格失败，本次不含格之断语：', ge.message); geju = null; }
+          }
           const evidence = EV.build({
-            question: q, domain, chart: pan, yongshen, xiangyi, timing, leixiang, severity, converge, yinju, calibration,
+            question: q, domain, chart: pan, yongshen, xiangyi, timing, leixiang, severity, converge, yinju, geju, calibration,
             wangshuai: wsBlock, yingqi: yqBlock
           });
           runOut.yongshen = yongshen; runOut.xiangyi = xiangyi;
           runOut.timing = timing; runOut.leixiang = leixiang; runOut.severity = severity;
-          runOut.yinju = yinju;
+          runOut.yinju = yinju; runOut.geju = geju;
           runOut.evidence = evidence; runOut.domain = domain;
           window._evidence = evidence;                 // 便于在控制台核对喂给模型的内容
           window._xiangyi = xiangyi;                   // 同上：逐条核对判读命中了哪些规则
@@ -589,6 +630,7 @@
           window._leixiang = leixiang;                 // 同上：核对所问之物取了哪个象作用神
           window._severity = severity;                 // 同上：核对触发了哪几条力量禁令
           window._converge = converge;                 // 同上：核对各维度有几路独立证据
+          window._geju = geju;                         // 同上：核对逐宫查到了哪个格
           evBlock = EV.toPromptBlock(evidence);
           if (evBlock) sysExtra = '\n' + EVIDENCE_DISCIPLINE;
         } catch (ee) {
