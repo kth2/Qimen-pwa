@@ -8,6 +8,7 @@
   const LX = window.LeiXiang;   // 类象取用层（Phase 8；转盘专有，缺则不含类象用神）
   const SV = window.Severity;   // 力量校验层（Phase 9；缺则不含禁令，力量仍由 wangshuai 块承载）
   const CV = window.Converge;   // 证据合流层（Phase 13；缺则不含档位与弃权）
+  const YJ = window.YinJu;      // 伏吟／反吟层（Phase 14；缺则不含吟局判定）
   const CB = window.Casebook;   // 案例本·经验层（Phase 5；只统计与建议，绝不改写教义规则）
   const CSTORE = window.CaseStore;
   const RV = window.Revise;     // 复盘正解与规则修订（Phase 6）
@@ -240,6 +241,7 @@
   let _leixiangReady = false;   // 类象库同理：缺席只减类象用神，占类用神照常
   let _severityReady = false;   // 力量校验库同理：缺席只减禁令段
   let _convergeReady = false;   // 维度表同理：缺席只减合流段
+  let _yinjuReady = false;      // 吟局规则库同理：缺席只是不判伏吟反吟，不影响其余各层
   async function loadKnowledge() {
     if (!YS || !EV) return false;
     const get = (p) => fetch(p).then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)));
@@ -275,6 +277,10 @@
     if (_kbReady && CV && !_convergeReady) {
       try { _convergeReady = CV.load(await get('knowledge/dimensions.json')); }
       catch (e) { console.warn('[converge] 维度表加载失败，本次不作证据合流：', e.message); _convergeReady = false; }
+    }
+    if (_kbReady && YJ && !_yinjuReady) {
+      try { _yinjuReady = YJ.load(await get('knowledge/yinju-rules.json')); }
+      catch (e) { console.warn('[yinju] 吟局规则库加载失败，本次不判伏吟反吟：', e.message); _yinjuReady = false; }
     }
     return _kbReady;
   }
@@ -489,6 +495,14 @@
               });
             } catch (le) { console.warn('[leixiang] 类象取用失败，本次不含类象用神：', le.message); leixiang = null; }
           }
+          // 伏吟／反吟（Phase 14）：必须排在应期之前算——纲要「伏吟主静，静中以马星为动机」
+          // 要由本层判出伏吟，应期层才谈得上把马星锚点升格。次序颠倒则该条又成一句空文。
+          let yinju = null;
+          if (_yinjuReady && YJ) {
+            try {
+              yinju = YJ.analyze({ chart: pan, school: school === 'feipan' ? 'feipan' : 'zhuanpan' });
+            } catch (ye) { console.warn('[yinju] 伏吟反吟判定失败，本次不含吟局：', ye.message); yinju = null; }
+          }
           // 应期时间线（Phase 4）：把 yingqi 已算好的干支按「与本占用神的关系」筛选、定强弱、排先后。
           // 干支一律取自上面同一份 yingqi 计算，绝不重算——两处若各推一套，模型必然选错日子。
           let timing = null;
@@ -505,7 +519,7 @@
               timing = TM.analyze({
                 chart: pan,
                 yingqi: window.YingQi.analyze(pan, { yongShenGongs: ysGongsForTiming }),
-                xiangyi, leixiang,
+                xiangyi, leixiang, yinju,
                 wangshuai: (window.WangShuai && window.WangShuai.analyze) ? window.WangShuai.analyze(pan) : null,
                 options: { domain, school: school === 'feipan' ? 'feipan' : 'zhuanpan', yongShenGongs: ysGongsForTiming }
               });
@@ -562,11 +576,12 @@
             } catch (ce2) { console.warn('[converge] 证据合流失败，本次不含合流段：', ce2.message); converge = null; }
           }
           const evidence = EV.build({
-            question: q, domain, chart: pan, yongshen, xiangyi, timing, leixiang, severity, converge, calibration,
+            question: q, domain, chart: pan, yongshen, xiangyi, timing, leixiang, severity, converge, yinju, calibration,
             wangshuai: wsBlock, yingqi: yqBlock
           });
           runOut.yongshen = yongshen; runOut.xiangyi = xiangyi;
           runOut.timing = timing; runOut.leixiang = leixiang; runOut.severity = severity;
+          runOut.yinju = yinju;
           runOut.evidence = evidence; runOut.domain = domain;
           window._evidence = evidence;                 // 便于在控制台核对喂给模型的内容
           window._xiangyi = xiangyi;                   // 同上：逐条核对判读命中了哪些规则

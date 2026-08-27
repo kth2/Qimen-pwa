@@ -223,6 +223,11 @@
     var xy = args.xiangyi || null;
     var ws = (args.wangshuai && args.wangshuai.gongs) ? args.wangshuai : null;
     var lx = (args.leixiang && args.leixiang.version && args.leixiang.applicable) ? args.leixiang : null;
+    // 伏吟主静，静中以马星为动机（转盘纲要·三节应期3 原文后半句）。此句自 v5.0.0 起
+    // 就抄在 timing-rules.json 的 basis 里，却一直无人执行——因为从没有代码判过伏吟。
+    // 现由 core/yinju.js 判出后传入，只抬升马星一条，不触碰其余机制。
+    var yj = (args.yinju && args.yinju.version) ? args.yinju : null;
+    var fuyinHere = !!(yj && yj.ju.concat(yj.gong).some(function (i) { return i.kind === 'fuyin'; }));
     var school = options.school || detectSchool(chart);
     var domain = options.domain || (xy && xy.domain) || '';
 
@@ -281,6 +286,13 @@
       // 强弱＝机制与用神的关系，非打分。级别由规则库显式声明（mechanism.onTarget），
       // 不由描述字段的有无去推断——落到用神宫才谈得上强弱，否则一律 low。
       var strength = tg.length ? (m.onTarget || 'medium') : 'low';
+      // 伏吟局中马星升格：纲要既言「静中以马星为动机」，则此盘之动机全系于马星一条。
+      // 只在落用神宫（已谈得上强弱）时升，且只升 medium→high，不无中生有。
+      var raised = '';
+      if (fuyinHere && mechName === '马星' && strength === 'medium' && enabled('马星')) {
+        strength = 'high';
+        raised = '本盘见伏吟，主静；纲要「伏吟主静，静中以马星为动机」，故此锚点由中升为高。';
+      }
       var order = kind === 'gan' ? GAN : ZHI;
       // offset 仍是**日**一级的位次：既是本层原有语义，也是下游案例本对轨所依赖的那一个
       var offset = offsetIn(order, kind === 'gan' ? base.dayGan : base.dayZhi, value);
@@ -291,6 +303,7 @@
         mechanism: mechName, label: m.label || mechName,
         kind: kind, value: value, display: value + '日',
         unit: unit, why: tg.length ? (m.onTargetWhy || '') : '所指之宫非本占用神宫',
+        raisedBy: raised,
         gong: gong ? String(gong) : '',
         targets: tg, weight: maxWeight(tg), strength: strength,
         offset: offset, cycle: order.length,
@@ -504,6 +517,7 @@
         : '非用神宫';
       L.push('  - [' + (SPEED[a.strength] || '') + '] ' + a.label + '：' + a.value +
         (a.gong ? '　(' + a.gong + '宫)' : '') + '　用神：' + who + (a.note ? '　—— ' + a.note : ''));
+      if (a.raisedBy) L.push('      ⤴ ' + a.raisedBy);
       var reads = (a.reads || []).filter(function (r) { return r.offset != null; });
       var nat = reads.filter(function (r) { return r.source === 'native'; });
       var hor = reads.filter(function (r) { return r.source === 'horizon'; });
