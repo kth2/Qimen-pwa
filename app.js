@@ -643,6 +643,10 @@
           runOut.yongshen = yongshen; runOut.xiangyi = xiangyi;
           runOut.timing = timing; runOut.leixiang = leixiang; runOut.severity = severity;
           runOut.yinju = yinju; runOut.geju = geju; runOut.shige = shige;
+          // converge 此前一直漏在这里没赋值：_lastReading 取的是 runOut.converge，
+          // 于是自 Phase 13 起**每一条存下的案例其 converge 都是 null**——
+          // 「说是 A 级的后来对了几成」这条校准曲线因此从未有过数据。
+          runOut.converge = converge;
           runOut.evidence = evidence; runOut.domain = domain;
           window._evidence = evidence;                 // 便于在控制台核对喂给模型的内容
           window._xiangyi = xiangyi;                   // 同上：逐条核对判读命中了哪些规则
@@ -650,6 +654,7 @@
           window._leixiang = leixiang;                 // 同上：核对所问之物取了哪个象作用神
           window._severity = severity;                 // 同上：核对触发了哪几条力量禁令
           window._converge = converge;                 // 同上：核对各维度有几路独立证据
+          window._yinju = yinju;                       // 同上：核对本盘成了什么吟局
           window._geju = geju;                         // 同上：核对逐宫查到了哪个格
           window._shige = shige;                       // 同上：核对本时辰是否五不遇／天显
           evBlock = EV.toPromptBlock(evidence);
@@ -679,6 +684,9 @@
           yongshen: runOut.yongshen, xiangyi: runOut.xiangyi,
           timing: runOut.timing, evidence: runOut.evidence,
           converge: runOut.converge,          // 存下档位，日后才算得出「A 级准不准」
+          // 同理：这四层不存进案例，「伏吟局的盘是不是更容易久拖」之类就永远无从考核。
+          // 之前漏了它们——层做好了、也确实喂给了 AI，却没有一条案例带得上这些标记。
+          yinju: runOut.yinju, geju: runOut.geju, shige: runOut.shige, severity: runOut.severity,
           answer: String(answer || '').slice(0, 8000)
         };
         $('caseSaveBar').style.display = 'block';
