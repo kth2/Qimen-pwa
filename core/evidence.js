@@ -680,6 +680,9 @@
           '　天盘' + i.tianGan + ' 加 地盘' + i.diGan + ' —— **' + i.name + '**' +
           (i.engineName ? '（引擎作「' + i.engineName + '」，两说并存）' : ''));
         L.push('      ' + i.text + (i.gongJiXiong ? '　｜　该宫吉凶(引擎)：' + i.gongJiXiong : ''));
+        // 经裁定改从纲要/引擎的个别格，出处与整层不同，须逐条另标
+        if (i.provenance) L.push('      〔' + i.provenance.level + '〕' + i.provenance.text);
+        if (i.supersededTableName) L.push('      （本格经裁定，原表作「' + i.supersededTableName + '」）');
       });
       if (gji.rest.length) {
         L.push('  · 其余各宫：' + gji.rest.map(function (i) {
