@@ -200,6 +200,7 @@
     var lx = (args.leixiang && args.leixiang.version) ? args.leixiang : null;
     var sv = (args.severity && args.severity.version) ? args.severity : null;
     var cv = (args.converge && args.converge.version) ? args.converge : null;
+    var yj = (args.yinju && args.yinju.version) ? args.yinju : null;
     var domain = args.domain || (ys && ys.domain) || 'general';
     var items = [];
     // 用神清单按占类权重重排：SYMBOL 与关键词池皆据此取用，截断时先保重点
@@ -411,6 +412,11 @@
         version: cv.version, applicable: cv.applicable, reason: cv.reason,
         dimensions: cv.dimensions, abstained: cv.abstained
       } : null,
+      // 伏吟／反吟层元信息。局与宫分列，两级出处随条附上。
+      yinju: yj ? {
+        version: yj.version, school: yj.school, ju: yj.ju, gong: yj.gong,
+        combos: yj.combos, timing: yj.timing, notes: yj.notes
+      } : null,
       // 力量校验层元信息。findings 是纲要的硬禁令，提示词里另起一段前置呈现。
       severity: sv ? {
         version: sv.version, applicable: sv.applicable, reason: sv.reason,
@@ -600,6 +606,36 @@
           '实测里最伤的一次就是凭「离九＝明亮处」一条孤证断成「正南明亮处、炉灶电器旁」，' +
           '而实物在床下、被衣物压住。');
       }
+    }
+
+    /* ---------- 伏吟／反吟：与前两段同样前置 ----------
+     * 「事动不动」是断成败与断应期共同的前提：伏吟主静则久拖，反吟主动则反复。
+     * 若排在包尾，模型早已按别的线索写完了「近日可成」。 */
+    var yji = ev.yinju;
+    if (yji && (yji.ju.length || yji.gong.length)) {
+      L.push('· 【伏吟／反吟·先看这一段】判的是「事动不动」，不是吉凶。' +
+        '伏吟主静——事在原处不动、久拖难成；反吟主动——动荡反复、速而不久。' +
+        '**下列各条已逐条标明出处等级，〔纲要原文〕与〔非本纲要·通行法〕不可等同看待。**');
+      function yjLine(i, prefix) {
+        var p = i.provenance || {};
+        L.push('  ' + prefix + ' ' + i.name + '（' + i.scopeLabel + '）：' + i.test +
+          '　命中宫 ' + i.gongs.join('、'));
+        L.push('      义：' + i.meaning);
+        L.push('      〔' + (p.level || '未注明') + '〕' + (p.text || ''));
+      }
+      if (yji.ju.length) { L.push('  ▍成局（全盘之象，笼罩通篇）：'); yji.ju.forEach(function (i) { yjLine(i, '‼'); }); }
+      if (yji.gong.length) { L.push('  ▍未成局，只在该宫论（**不得当作全盘之象**）：'); yji.gong.forEach(function (i) { yjLine(i, '·'); }); }
+      (yji.combos || []).forEach(function (c) {
+        L.push('  ▍' + c.name + '：' + c.meaning);
+        L.push('      〔' + c.provenance.level + '〕' + c.provenance.text);
+      });
+      (yji.timing || []).forEach(function (tt) {
+        L.push('  ▍应期联动：' + (tt.effect === 'raise'
+          ? '伏吟主静，静中以马星为动机，故「' + tt.target + '」一条锚点在本盘升为**高**。'
+          : tt.text));
+        L.push('      〔' + tt.provenanceLevel + '〕' + (tt.why || ''));
+      });
+      L.push('  ※ 本层只给倾向与出处，**不下吉凶断语**；成败仍须结合用神、旺衰与全盘。');
     }
 
     if (facts.length) { L.push('· FACT（引擎算得的盘面事实，不得改写）：'); L = L.concat(facts); }
