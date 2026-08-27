@@ -500,6 +500,53 @@
           }).filter(Boolean)
         };
       })(),
+      /* 吟局 / 八十一格 / 时格 / 力量校验的快照（Phase 14-16）。
+       * 与 converge 同一个道理，也是同一个教训：**不存下来，这几层准不准就永远算不出来**。
+       * 存的都是极短的摘要（成了什么局、关注宫是什么格、时格有无、触发了几条禁令），
+       * 不存整层输出——案例本要能长期堆在手机上。 */
+      yinju: (function () {
+        var y = a.yinju;
+        if (!y || !y.version) return null;
+        if (!y.ju.length && !y.layers.length) return { version: y.version, ju: [], layers: [] };
+        return {
+          version: y.version, school: y.school,
+          ju: y.ju.map(function (j) { return j.name; }),
+          layers: y.layers.map(function (i) {
+            return { name: i.name, scope: i.scope, count: i.count, checkable: i.checkable };
+          })
+        };
+      })(),
+      geju: (function () {
+        var g = a.geju;
+        if (!g || !g.version || !g.items.length) return null;
+        // 只留关注宫那几格：全九宫会让每条案例都胖一圈，而要考核的正是用神宫之格
+        return {
+          version: g.version,
+          focus: (g.focus || []).map(function (i) {
+            return { gong: i.gong, gan: i.tianGan + '+' + i.diGan, name: i.name, roles: i.roles };
+          })
+        };
+      })(),
+      shige: (function () {
+        var sg = a.shige;
+        if (!sg || !sg.version) return null;
+        return {
+          version: sg.version, riGan: sg.riGan, shiGan: sg.shiGan,
+          hits: (sg.hits || []).map(function (h) { return h.id; })
+        };
+      })(),
+      severity: (function () {
+        var sv = a.severity;
+        if (!sv || !sv.version || !sv.applicable) return null;
+        return {
+          version: sv.version,
+          findings: (sv.findings || []).map(function (f) {
+            return { check: f.check, gong: f.gong, severity: f.severity };
+          }),
+          impaired: (sv.verdict && sv.verdict.impaired) || 0,
+          total: (sv.verdict && sv.verdict.total) || 0
+        };
+      })(),
       tally: (a.xiangyi && a.xiangyi.tally) || null,
       pace: (a.timing && a.timing.pace) ? { speed: a.timing.pace.speed, from: a.timing.pace.from } : null,
       // AI 全文另存（可能很长，由调用方决定是否截断）

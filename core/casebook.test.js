@@ -1053,6 +1053,85 @@ ta('案例列表不含任何联网写出口（隐私）', function () {
 });
 
 chain.then(function () {
-  console.log('\n' + pass + ' passed, ' + fail + ' failed');
+  
+/* ---------- Phase 14-16 各层是否被记进案例（否则永远考核不了） ---------- */
+console.log('\n== 新增各层的快照 ==');
+t('吟局、81格、时格、力量校验都随案例存下', function () {
+  var rec = CB.makeCase({
+    question: '测试', domain: 'general', chart: { siZhu: { day: '乙亥', time: '辛巳' } },
+    yinju: { version: '2.0.0', school: 'zhuanpan',
+      ju: [{ name: '伏吟局', kind: 'fuyin' }],
+      layers: [{ layer: 'xing', name: '星伏吟', scope: 'full', count: 8, checkable: 8 }] },
+    geju: { version: '1.1.0', items: [1],
+      focus: [{ gong: '3', tianGan: '乙', diGan: '乙', name: '日奇伏吟', roles: ['玄武'] }] },
+    shige: { version: '1.0.0', riGan: '乙', shiGan: '辛', hits: [{ id: 'wubuyu' }] },
+    severity: { version: '1.0.0', applicable: true,
+      findings: [{ check: '衰死入墓', gong: '3', severity: 'high' }],
+      verdict: { impaired: 1, total: 4 } }
+  });
+  assert.deepStrictEqual(rec.yinju.ju, ['伏吟局']);
+  assert.strictEqual(rec.yinju.layers[0].name, '星伏吟');
+  assert.strictEqual(rec.geju.focus[0].name, '日奇伏吟');
+  assert.strictEqual(rec.geju.focus[0].gan, '乙+乙');
+  assert.deepStrictEqual(rec.shige.hits, ['wubuyu']);
+  assert.strictEqual(rec.severity.findings[0].check, '衰死入墓');
+  assert.strictEqual(rec.severity.impaired, 1);
+});
+t('各层缺席时存 null，不留空壳', function () {
+  var rec = CB.makeCase({ question: '测试', domain: 'general', chart: {} });
+  assert.strictEqual(rec.geju, null);
+  assert.strictEqual(rec.shige, null);
+  assert.strictEqual(rec.severity, null);
+  assert.strictEqual(rec.yinju, null);
+});
+t('81 格只存关注宫，不把九宫全存进去（案例本要能长期堆在手机上）', function () {
+  var many = [];
+  for (var i = 1; i <= 9; i++) many.push({ gong: String(i), tianGan: '乙', diGan: '乙', name: 'x', roles: [] });
+  var rec = CB.makeCase({
+    question: '测试', domain: 'general', chart: {},
+    geju: { version: '1.1.0', items: many, focus: many.slice(0, 2) }
+  });
+  assert.strictEqual(rec.geju.focus.length, 2, '只该存关注宫那几格');
+});
+t('存的是摘要不是整层输出：单条案例不因新层显著变胖', function () {
+  var rec = CB.makeCase({
+    question: '测试', domain: 'general', chart: {},
+    yinju: { version: '2.0.0', school: 'zhuanpan',
+      ju: [{ name: '伏吟局', meaning: '很长的一段义'.repeat(50), provenance: { text: 'x'.repeat(500) } }],
+      layers: [{ layer: 'xing', name: '星伏吟', scope: 'full', count: 8, checkable: 8,
+                 meaning: 'y'.repeat(500), provenance: { text: 'z'.repeat(500) } }] }
+  });
+  var size = JSON.stringify(rec.yinju).length;
+  assert.ok(size < 200, '吟局快照应很小，实得 ' + size + ' 字节——存了不该存的长文本');
+});
+
+
+/* ---------- 源码级守卫：存案例时读的字段，必须真的被赋过值 ----------
+ * 实测吃过亏：app.js 里 _lastReading 取 runOut.converge，而 runOut.converge
+ * 从未被赋值——自 Phase 13 起每一条案例的 converge 都是 null，
+ * 「说是 A 级的后来对了几成」这条校准曲线因此一直没有数据，直到 Phase 16 才被发现。
+ * 漏一个字段不会报错、不会红，只会让某个指标永远算不出来——正因如此才需要这条守卫。 */
+console.log('\n== 源码守卫：runOut 无漏赋值 ==');
+t('app.js 中 runOut 被读取的每个字段都曾被赋值', function () {
+  var fs = require('fs');
+  var src = fs.readFileSync(require('path').join(__dirname, '..', 'app.js'), 'utf8');
+  var assigned = {}, used = {}, m;
+  var reA = /runOut\.([A-Za-z_]\w*)\s*=/g;
+  while ((m = reA.exec(src))) assigned[m[1]] = true;
+  var reU = /runOut\.([A-Za-z_]\w*)\s*(?!=)/g;
+  while ((m = reU.exec(src))) used[m[1]] = true;
+  var missing = Object.keys(used).filter(function (k) { return !assigned[k]; });
+  assert.deepStrictEqual(missing, [], '这些字段被读却从未赋值：' + missing.join('、'));
+});
+t('五层都在 _lastReading 里被带上（否则永远考核不了）', function () {
+  var fs = require('fs');
+  var src = fs.readFileSync(require('path').join(__dirname, '..', 'app.js'), 'utf8');
+  var seg = src.slice(src.indexOf('_lastReading = {'), src.indexOf('_lastReading = {') + 900);
+  ['converge', 'yinju', 'geju', 'shige', 'severity'].forEach(function (k) {
+    assert.ok(new RegExp(k + ':\\s*runOut\\.' + k).test(seg), '_lastReading 未带上 ' + k);
+  });
+});
+
+console.log('\n' + pass + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
 });
