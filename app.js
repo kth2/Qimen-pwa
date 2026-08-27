@@ -10,6 +10,7 @@
   const CV = window.Converge;   // 证据合流层（Phase 13；缺则不含档位与弃权）
   const YJ = window.YinJu;      // 伏吟／反吟层（Phase 14；缺则不含吟局判定）
   const GJ = window.GeJu;       // 八十一格层（Phase 15；缺则格名仍只是宫格行里的裸标签）
+  const SG = window.ShiGe;      // 时格层（Phase 16：五不遇时／天显时格；缺则不判时格）
   const CB = window.Casebook;   // 案例本·经验层（Phase 5；只统计与建议，绝不改写教义规则）
   const CSTORE = window.CaseStore;
   const RV = window.Revise;     // 复盘正解与规则修订（Phase 6）
@@ -244,6 +245,7 @@
   let _convergeReady = false;   // 维度表同理：缺席只减合流段
   let _yinjuReady = false;      // 吟局规则库同理：缺席只是不判伏吟反吟，不影响其余各层
   let _gejuReady = false;       // 81 格表同理：缺席只是不带格之断语
+  let _shigeReady = false;      // 时格规则库同理：缺席只是不判五不遇时与天显时格
   async function loadKnowledge() {
     if (!YS || !EV) return false;
     const get = (p) => fetch(p).then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)));
@@ -287,6 +289,10 @@
     if (_kbReady && GJ && !_gejuReady) {
       try { _gejuReady = GJ.load(await get('knowledge/geju-81.json')); }
       catch (e) { console.warn('[geju] 81 格表加载失败，本次不带格之断语：', e.message); _gejuReady = false; }
+    }
+    if (_kbReady && SG && !_shigeReady) {
+      try { _shigeReady = SG.load(await get('knowledge/shige-rules.json')); }
+      catch (e) { console.warn('[shige] 时格规则库加载失败，本次不判时格：', e.message); _shigeReady = false; }
     }
     return _kbReady;
   }
@@ -355,6 +361,13 @@
       + '都要照实并陈，不得拿格名去覆盖宫位吉凶，也不得反过来；'
       + '② 标「引擎作『×』，两说并存」者，是本表与引擎命名不同的 20 格之一，'
       + '**不要只挑一个说成定论**，如该格对结论要紧，请说明两说并存。',
+    'E23. 证据包若给出【时格】，那是**几率上的倾向，不是禁令、不是定论**，与【力量校验】的硬约束'
+      + '性质不同，不可当成同一类东西用。**五不遇时**只提高事难成之几率，不等于此事必不成——'
+      + '全盘明显有力时，不得因这一条就翻成凶断。**天显时格分量最轻**，用户给这一条时明言'
+      + '「吉的几率不显着」，故**不得据它加重吉断**，更不足以支撑「可成／顺利」一类结论。'
+      + '另有两条：① 本仓**从未测过**时格与实际应验率的关系，故不得说「此类盘更准／更不准」，'
+      + '也不得据时格调整你对自己判断的把握度；② 时格**可解与否本仓未收录**，不要自行搬用'
+      + '「得三奇可解」之类说法——没收录就是没有，宁可不说。',
     'E20. 数证据数的是**互不相干的路数**，不是象义条数。同一个元素的多个别名（如玄武的'
       + '「盗/失物/暗昧/欺诈」）只算**一路**；五条同源的话不等于五路旁证，不得据此说「多重印证」。',
     // Phase 9：力量校验与断语范围。以下四条全部出自实测案例本的失败复盘，逐条对应一类真实误判。
@@ -616,13 +629,20 @@
               geju = GJ.analyze({ chart: pan, focusGongs: Object.keys(gjRoles), focusRoles: gjRoles });
             } catch (ge) { console.warn('[geju] 查 81 格失败，本次不含格之断语：', ge.message); geju = null; }
           }
+          // 时格（Phase 16）：五不遇时／天显时格。判据只是四柱日干时干，与盘上排布无关，
+          // 故不依赖前面任何一层，放在最后算即可。
+          let shige = null;
+          if (_shigeReady && SG) {
+            try { shige = SG.analyze({ chart: pan }); }
+            catch (se) { console.warn('[shige] 判时格失败，本次不含时格：', se.message); shige = null; }
+          }
           const evidence = EV.build({
-            question: q, domain, chart: pan, yongshen, xiangyi, timing, leixiang, severity, converge, yinju, geju, calibration,
+            question: q, domain, chart: pan, yongshen, xiangyi, timing, leixiang, severity, converge, yinju, geju, shige, calibration,
             wangshuai: wsBlock, yingqi: yqBlock
           });
           runOut.yongshen = yongshen; runOut.xiangyi = xiangyi;
           runOut.timing = timing; runOut.leixiang = leixiang; runOut.severity = severity;
-          runOut.yinju = yinju; runOut.geju = geju;
+          runOut.yinju = yinju; runOut.geju = geju; runOut.shige = shige;
           runOut.evidence = evidence; runOut.domain = domain;
           window._evidence = evidence;                 // 便于在控制台核对喂给模型的内容
           window._xiangyi = xiangyi;                   // 同上：逐条核对判读命中了哪些规则
@@ -631,6 +651,7 @@
           window._severity = severity;                 // 同上：核对触发了哪几条力量禁令
           window._converge = converge;                 // 同上：核对各维度有几路独立证据
           window._geju = geju;                         // 同上：核对逐宫查到了哪个格
+          window._shige = shige;                       // 同上：核对本时辰是否五不遇／天显
           evBlock = EV.toPromptBlock(evidence);
           if (evBlock) sysExtra = '\n' + EVIDENCE_DISCIPLINE;
         } catch (ee) {
