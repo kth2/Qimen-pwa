@@ -96,9 +96,11 @@ t('全盘对拍：与引擎逐宫同键，方向一致', function () {
 });
 
 console.log('\n== 与引擎命名并存而不混 ==');
-t('20 格附 engineName，其余不附', function () {
+t('18 格附 engineName（原 20，两格经裁定后已与引擎同名）', function () {
   var withE = Object.keys(DB.table).filter(function (k) { return DB.table[k].engineName; });
-  assert.strictEqual(withE.length, 20, '实得 ' + withE.length);
+  assert.strictEqual(withE.length, 18, '实得 ' + withE.length);
+  assert.ok(!DB.table['癸+庚'].engineName, '癸+庚 已从引擎，不该再记异名');
+  assert.ok(!DB.table['丁+丁'].engineName, '丁+丁 已改名，不该再记异名');
 });
 t('engineName 只在确实不同时才有，绝不与本表同名', function () {
   Object.keys(DB.table).forEach(function (k) {
@@ -106,10 +108,9 @@ t('engineName 只在确实不同时才有，绝不与本表同名', function () 
     if (e.engineName) assert.notStrictEqual(e.engineName, e.name, k + ' 异名与本名相同，不该记');
   });
 });
-t('engineName 与引擎实际叫法一致（抽三格核对）', function () {
+t('engineName 与引擎实际叫法一致（抽两格核对）', function () {
   assert.strictEqual(DB.table['庚+癸'].engineName, '反吟大格');
   assert.strictEqual(DB.table['丙+壬'].engineName, '火入天网');
-  assert.strictEqual(DB.table['丁+丁'].engineName, '星奇伏吟');
 });
 t('排版块把引擎异名标出来，让两说可辨', function () {
   var r = G.analyze({ chart: zhuanpan('2026-08-27T10:00:00'), focusGongs: ['9'] });
@@ -137,13 +138,46 @@ t('宫位吉凶取自引擎，与格名分列', function () {
   assert.strictEqual(r.focus[0].gongJiXiong, '小吉', '该字段应原样来自引擎 jiXiongText');
   assert.notStrictEqual(r.focus[0].name, r.focus[0].gongJiXiong);
 });
-t('存疑处已记在案，未擅改（癸+庚 太户／太白）', function () {
-  assert.strictEqual(DB.table['癸+庚'].name, '太户入网', '按表原样录入');
-  assert.ok(/太户/.test(DB._engineDiff._open) && /未擅改/.test(DB._engineDiff._open));
+console.log('\n== 两处裁定（用户 2026-08-27）==');
+t('① 癸+庚 跟随引擎：太户入网 → 太白入网', function () {
+  assert.strictEqual(DB.table['癸+庚'].name, '太白入网');
+  assert.strictEqual(DB.table['癸+庚'].supersededTableName, '太户入网', '原表内容须留底，改动要可回溯');
+  assert.ok(/裁定/.test(DB.table['癸+庚'].supersededWhy));
 });
-t('丁+丁 与纲要伏吟类的张力已记在案，未替二者调停', function () {
-  assert.ok(/丁\+丁/.test(DB._engineDiff._tension));
-  assert.ok(/两说并陈/.test(DB._engineDiff._tension));
+t('② 丁+丁 跟随纲要：由吉义改为伏吟类之义', function () {
+  var e = DB.table['丁+丁'];
+  assert.strictEqual(e.name, '星奇伏吟');
+  assert.ok(/静滞不动|久拖难成/.test(e.text), '义须取纲要伏吟类原文，实得：' + e.text);
+  assert.ok(!/喜事从心|万事如意/.test(e.text), '不得再留吉义');
+  assert.strictEqual(e.supersededTableName, '星奇入太阴');
+  assert.strictEqual(e.supersededText, '喜事从心，万事如意');
+});
+t('② 丁+丁 的出处改标【纲要原文】，不再挂在「用户所供 81 格表」名下', function () {
+  var e = DB.table['丁+丁'];
+  assert.ok(e.provenanceOverride, '须有逐条出处');
+  assert.strictEqual(e.provenanceOverride.level, '纲要原文');
+  assert.ok(/127|193/.test(e.provenanceOverride.text), '须指到纲要的行');
+  assert.strictEqual(G.lookup('丁', '丁').provenance.level, '纲要原文', 'lookup 须把它带出来');
+});
+t('裁定后仍与纲要伏吟类一致：九个同干相加无一为吉', function () {
+  ['乙', '丙', '丁', '戊', '己', '庚', '辛', '壬', '癸'].forEach(function (g) {
+    var e = DB.table[g + '+' + g];
+    assert.ok(!/万事如意|喜事从心|大吉大利/.test(e.text),
+      g + '+' + g + ' 与纲要「同干相加＝伏吟类，主静滞」相悖：' + e.text);
+  });
+});
+t('裁定记录在案，可回溯', function () {
+  assert.ok(DB._resolved && DB._resolved['癸+庚'] && DB._resolved['丁+丁']);
+  assert.ok(/可回溯/.test(DB._resolved._why));
+  assert.ok(!DB._engineDiff._open, '已决之事不该再挂在存疑里');
+  assert.ok(!DB._engineDiff._tension, '同上');
+});
+t('排版块把裁定过的格标出原表叫法与新出处', function () {
+  var r = G.analyze({ chart: { jiuGongAnalysis: { '1': { gongName: '坎', tianGan: '丁', diGan: '丁' } } }, focusGongs: ['1'] });
+  var blk = G.toPromptBlock(r);
+  assert.ok(/星奇伏吟/.test(blk));
+  assert.ok(/〔纲要原文〕/.test(blk), '该格出处与整层不同，须逐条另标');
+  assert.ok(/原表作「星奇入太阴」/.test(blk), '改动须对读者可见');
 });
 
 console.log('\n== 关注宫与排版 ==');

@@ -47,7 +47,12 @@
     return {
       key: k, tianGan: String(tianGan), diGan: String(diGan),
       name: e.name, text: e.text,
-      engineName: e.engineName || ''      // 仅在与本表不同时才有
+      engineName: e.engineName || '',     // 仅在与本表不同时才有
+      // 个别格经用户裁定改从纲要或引擎，其出处便不再是「用户所供 81 格表」。
+      // 出处必须逐条各标各的，不能让整层的抬头替它背书。
+      provenance: e.provenanceOverride || null,
+      supersededTableName: e.supersededTableName || '',
+      supersededWhy: e.supersededWhy || ''
     };
   }
 
@@ -82,6 +87,8 @@
         gong: g, gongName: c.gongName || '',
         tianGan: hit.tianGan, diGan: hit.diGan,
         name: hit.name, text: hit.text, engineName: hit.engineName,
+        provenance: hit.provenance, supersededTableName: hit.supersededTableName,
+        supersededWhy: hit.supersededWhy,
         isFocus: !!focus[g],
         roles: (roles[g] || []).slice(),
         // 宫位吉凶另取自引擎，与格名分列——一格之名不等于一宫之吉凶
@@ -115,6 +122,8 @@
         '　天盘' + i.tianGan + ' 加 地盘' + i.diGan + ' —— **' + i.name + '**' +
         (i.engineName ? '（引擎作「' + i.engineName + '」）' : ''));
       L.push('    ' + i.text + (i.gongJiXiong ? '　｜　该宫吉凶(引擎)：' + i.gongJiXiong : ''));
+      if (i.provenance) L.push('    〔' + i.provenance.level + '〕' + i.provenance.text);
+      if (i.supersededTableName) L.push('    （本格经裁定，原表作「' + i.supersededTableName + '」）');
     });
     if (res.rest.length) {
       L.push('· 其余各宫：' + res.rest.map(function (i) {
