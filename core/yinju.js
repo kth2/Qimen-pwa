@@ -31,7 +31,7 @@
   'use strict';
 
   var DB = null;
-  var VERSION = '1.0.0';
+  var VERSION = '2.0.0';
   var GONGS = ['1', '2', '3', '4', '5', '6', '7', '8', '9'];
 
   function load(json) {
@@ -47,20 +47,32 @@
   }
 
   /**
-   * 天禽寄芮，引擎写作「禽芮」而不单占一宫。归一后其本位为中五宫，
-   * 恒不与所落之宫相等——这正是转盘星层「可判 8 宫、命中只 7」的由来，
-   * 是数据实情，不是漏判。
+   * 引擎在转盘里把天芮一律写作「禽芮」（实测 1200 盘无例外），飞盘则天禽、天芮分写。
+   * 故须先按别名表把「禽芮」归为**天芮**再判——禽寄中宫、随芮而行，判吟以芮论。
+   *
+   * v1.0.0 在这里把「禽芮」错归为天禽（本位中五，恒不命中），致**天芮从不参与判定**，
+   * 转盘星层因此恒少一宫（八宫只中七）；当时还把这个缺口误释为「天禽寄芮不占宫」。
+   * 用户所列的对应表里明写着「天芮落艮宫」，正是这一条把错揪了出来。
    */
   function normXing(s) {
     s = String(s || '');
-    if (s === '禽芮' || s === '天禽芮') return '天禽';
-    return s;
+    var alias = (DB && DB.homes && DB.homes.xingAlias) || {};
+    return alias[s] || s;
   }
 
   function appliesHere(node, school) {
     var a = node && node.appliesTo;
     if (!a || !a.length) return true;
     return a.indexOf(school) >= 0;
+  }
+
+  /** 该宫该层是否谈得上判定（元素认得、且不在排除之列）。用于诚实地报「几宫中几宫」。 */
+  function judgeable(layer, gong, cell, school) {
+    if (layer === 'xing') return !!DB.homes.xing[normXing(cell.xing)];
+    if (layer === 'men') return !!DB.homes.men[String(cell.men || '')];
+    if (!cell.tianGan || !cell.diGan) return false;
+    var ex = DB.zhongGongExcludeFor || [];
+    return !(gong === '5' && ex.indexOf(school) >= 0);
   }
 
   /** 某层某宫的判定：返回 'fuyin' / 'fanyin' / ''。无法判定一律空，宁可漏判。 */
@@ -106,7 +118,7 @@
   function analyze(args) {
     args = args || {};
     var chart = args.chart;
-    var out = { version: VERSION, school: '', ju: [], gong: [], combos: [], timing: [], notes: [], _counts: {} };
+    var out = { version: VERSION, school: '', ju: [], layers: [], timing: [], notes: [], _counts: {} };
     if (!DB) { out.notes.push('伏吟／反吟规则库未加载，本层跳过。'); return out; }
     if (!chart || !chart.jiuGongAnalysis) { out.notes.push('盘中无九宫数据，伏吟／反吟无从判起。'); return out; }
 
@@ -115,14 +127,17 @@
     var jg = chart.jiuGongAnalysis;
     var thr = Number(DB.juThreshold) || 6;
     var layers = ['xing', 'men', 'gan'];
-    var hits = {};   // hits[layer][kind] = [gong...]
+    var hits = {};       // hits[layer][kind] = [gong...]
+    var countable = {};  // 本盘该层实际可判的宫数——报「8 宫中 8 宫」比只报命中数诚实
 
     layers.forEach(function (layer) {
       if (!appliesHere(DB.layers[layer], school)) return;
       hits[layer] = { fuyin: [], fanyin: [] };
+      countable[layer] = 0;
       GONGS.forEach(function (g) {
         var cell = jg[g];
         if (!cell) return;
+        if (judgeable(layer, g, cell, school)) countable[layer]++;
         var k = classify(layer, g, cell, school);
         if (k) hits[layer][k].push(g);
       });
@@ -135,7 +150,8 @@
         out._counts[layer + '.' + kind] = gs.length;
         if (!gs.length) return;
         var node = DB.layers[layer][kind];
-        var item = {
+        var full = gs.length >= thr;
+        out.layers.push({
           layer: layer,
           layerLabel: DB.layers[layer].label,
           kind: kind,
@@ -144,41 +160,36 @@
           meaning: node.meaning,
           provenance: provOf(layer, kind),
           gongs: gs.slice(),
-          count: gs.length
-        };
-        if (gs.length >= thr) {
-          item.scope = 'ju';
-          item.scopeLabel = '全盘';
-          out.ju.push(item);
-        } else {
-          item.scope = 'gong';
-          item.scopeLabel = gs.length === 1 ? '单宫' : (gs.length + ' 宫');
-          out.gong.push(item);
-        }
+          count: gs.length,
+          checkable: countable[layer] || 0,
+          scope: full ? 'full' : 'partial',
+          scopeLabel: full ? '全盘' : (gs.length === 1 ? '单宫' : gs.length + ' 宫')
+        });
       });
     });
 
-    // 星门同吟：两层在同一范围内同时成立才算，只作「两路同指」的提示
-    var combo = DB.combos && DB.combos.xingmen;
-    if (combo) {
-      ['fuyin', 'fanyin'].forEach(function (kind) {
-        var jx = out.ju.filter(function (i) { return i.layer === 'xing' && i.kind === kind; })[0];
-        var jm = out.ju.filter(function (i) { return i.layer === 'men' && i.kind === kind; })[0];
-        if (!jx || !jm) return;
-        out.combos.push({
-          name: combo.name + '（' + (kind === 'fuyin' ? '伏' : '反') + '）',
-          kind: kind,
-          meaning: kind === 'fuyin' ? combo.fuyinMeaning : combo.fanyinMeaning,
-          provenance: combo.provenance,
-          basedOn: [jx.name, jm.name]
-        });
+    /* 局＝星、门**俱**成全盘。用户所定：「伏吟局就是星、门都在原本自己的宫里」。
+       只有星全伏或只有门全伏，都还不是局——那只是该一层之吟，不得以局论。 */
+    ['fuyin', 'fanyin'].forEach(function (kind) {
+      var jd = DB.ju && DB.ju[kind];
+      if (!jd) return;
+      var jx = out.layers.filter(function (i) { return i.layer === 'xing' && i.kind === kind && i.scope === 'full'; })[0];
+      var jm = out.layers.filter(function (i) { return i.layer === 'men' && i.kind === kind && i.scope === 'full'; })[0];
+      if (!jx || !jm) return;
+      out.ju.push({
+        name: jd.name, kind: kind, test: jd.test, meaning: jd.meaning,
+        provenance: jd.provenance,
+        basedOn: [
+          { name: jx.name, gongs: jx.gongs, count: jx.count, checkable: jx.checkable },
+          { name: jm.name, gongs: jm.gongs, count: jm.count, checkable: jm.checkable }
+        ]
       });
-    }
+    });
 
     // 应期联动：伏吟主静→抬升马星（纲要原文）；反吟速而不久→只作提示
     var tl = DB.timingLink || {};
-    var anyFu = out.ju.concat(out.gong).some(function (i) { return i.kind === 'fuyin'; });
-    var anyFan = out.ju.concat(out.gong).some(function (i) { return i.kind === 'fanyin'; });
+    var anyFu = out.layers.some(function (i) { return i.kind === 'fuyin'; });
+    var anyFan = out.layers.some(function (i) { return i.kind === 'fanyin'; });
     if (anyFu && tl.fuyin && appliesHere(tl.fuyin, school)) {
       out.timing.push({
         kind: 'fuyin', effect: tl.fuyin.effect, target: tl.fuyin.target,
@@ -192,27 +203,38 @@
       });
     }
 
-    if (!out.ju.length && !out.gong.length) out.notes.push('本盘星、门、干三层皆无伏吟反吟。');
+    if (!out.layers.length) out.notes.push('本盘星、门、干三层皆无伏吟反吟。');
     return out;
   }
 
   /** 排版给证据包用。两级出处必须落到每一条上，不能只在抬头写一句。 */
   function toPromptBlock(res) {
-    if (!res || (!res.ju.length && !res.gong.length)) return '';
+    if (!res || !res.layers.length) return '';
     var L = ['【伏吟／反吟】'];
-    function line(i) {
-      var p = i.provenance || {};
-      L.push('· ' + i.name + '（' + i.scopeLabel + '）：' + i.test +
-        '　命中宫 ' + i.gongs.join('、'));
-      L.push('    义：' + i.meaning);
-      L.push('    〔' + (p.level || '未注明') + '〕' + (p.text || ''));
-    }
-    if (res.ju.length) { L.push('▍成局者：'); res.ju.forEach(line); }
-    if (res.gong.length) { L.push('▍逐宫者（未成局，只在该宫论）：'); res.gong.forEach(line); }
-    res.combos.forEach(function (c) {
-      L.push('▍' + c.name + '：' + c.meaning);
-      L.push('    〔' + c.provenance.level + '〕' + c.provenance.text);
+    res.ju.forEach(function (j) {
+      L.push('‼ ' + j.name + '：' + j.test);
+      L.push('    据：' + j.basedOn.map(function (b) {
+        return b.name + '（' + b.checkable + ' 宫中 ' + b.count + ' 宫：' + b.gongs.join('、') + '）';
+      }).join(' ＋ '));
+      L.push('    义：' + j.meaning);
+      L.push('    〔' + j.provenance.level + '〕' + j.provenance.text);
     });
+    function line(i) {
+      L.push('· ' + i.name + '（' + i.scopeLabel + '）：' + i.test +
+        '　' + i.checkable + ' 宫中 ' + i.count + ' 宫（' + i.gongs.join('、') + '）');
+      L.push('    义：' + i.meaning);
+      L.push('    〔' + i.provenance.level + '〕' + i.provenance.text);
+    }
+    var sm = res.layers.filter(function (i) {
+      // 已并入局的星门两层不再单列，免得同一件事说两遍
+      return (i.layer === 'xing' || i.layer === 'men') && !res.ju.some(function (j) {
+        return j.kind === i.kind && i.scope === 'full';
+      });
+    });
+    if (sm.length) { L.push('▍星门之吟未成局（不得以局论）：'); sm.forEach(line); }
+    // 干层是干加干之格，本不参与局，另节列出
+    var gan = res.layers.filter(function (i) { return i.layer === 'gan'; });
+    if (gan.length) { L.push('▍干加干之格（不参与局的判定）：'); gan.forEach(line); }
     res.timing.forEach(function (t) {
       L.push('▍应期联动：' + (t.effect === 'raise'
         ? '伏吟主静，故「' + t.target + '」锚点升为高——' + t.why
