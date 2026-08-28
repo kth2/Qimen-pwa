@@ -57,6 +57,62 @@
     return (m && m[uiPurpose]) || uiPurpose;
   }
 
+  /**
+   * 占类三套词表的**一次性解析**：界面「目的」→ 引擎占类 → 规则占类，并带上
+   * 「本盘别的引擎认不认」「规则库有没有专条」两项实情。
+   *
+   * 为什么要有这一层：三套词表并不同名（财运/求财、健康/疾病、学业/功名、婚姻/感情），
+   * 且引擎对占类的支持**分盘别**——飞盘不认「事业」与「失物」，会静默落回「综合」
+   * 且一个用神都不给。此前无人记录这件事，界面照旧显示「你指定的」，
+   * 用户无从知道自己的选择其实没生效。
+   *
+   * @param {string} uiPurpose 界面「目的」值（也接受引擎占类名或 domain id）
+   * @param {string} school    'zhuanpan' | 'feipan'
+   */
+  function categoryMap(uiPurpose, school) {
+    var sch = school === 'feipan' ? 'feipan' : 'zhuanpan';
+    var ui = String(uiPurpose || '').trim();
+    // 知识库未加载时**必须说不知道**。此前这里照常往下走，DB 为 null 使得
+    // engineSupported 恒真、ruleDomain 恒 general、ruleLabel 恒空——
+    // 界面于是煞有介事地宣布「失物无专条」，而失物明明有。
+    // 一个在数据没到位时仍给出确定答案的函数，比报错更坏。
+    if (!DB) {
+      return {
+        ui: ui, school: sch, loaded: false,
+        engineCategory: ui, engineSupported: null, degradedTo: '', degradeWhy: '',
+        ruleDomain: '', ruleLabel: '', hasDedicatedRules: null, isZongHe: false
+      };
+    }
+    var eng = toEngineCategory(ui) || ui;
+    var dom = normalizeDomain(eng);
+    var d = getDomain(dom) || {};
+    var sup = (DB && DB.engineSupport) || null;
+    // 「综合」是「无专一用神」那一档，matched=false 属设计如此，不算不支持
+    var isZongHe = eng === '综合' || !eng;
+    var supported = true, why = '';
+    if (sup && !isZongHe) {
+      supported = (sup[sch] || []).indexOf(eng) >= 0;
+      if (!supported) {
+        var ns = (sup.notSupported && sup.notSupported[sch]) || {};
+        why = ns[eng] || ('引擎在' + (sch === 'feipan' ? '飞盘' : '转盘') + '上不认此占类。');
+      }
+    }
+    return {
+      ui: ui, school: sch, loaded: true,
+      engineCategory: eng,
+      engineSupported: supported,
+      degradedTo: supported ? '' : ((sup && sup.degradesTo) || '综合'),
+      degradeWhy: why,
+      ruleDomain: dom,
+      ruleLabel: d.label || '',
+      // general 是通用兜底占类，落到它就等于「本占类无专条，判读退用通用条」。
+      // 注意不能拿「label 是否等于引擎占类名」判断——health 的 label 是「健康」而
+      // 引擎占类叫「疾病」，二者不同名却确有专条。
+      hasDedicatedRules: dom !== 'general',
+      isZongHe: isZongHe
+    };
+  }
+
   function load(domainsJson) {
     DB = domainsJson && domainsJson.domains ? domainsJson : null;
     return !!DB;
@@ -322,6 +378,7 @@
     domainIds: domainIds, getDomain: getDomain,
     normalizeDomain: normalizeDomain,
     detectSchool: detectSchool, toEngineCategory: toEngineCategory,
+    categoryMap: categoryMap,
     locate: locate, gongMeta: gongMeta,
     GONG_INFO: GONG_INFO,
     resolve: resolve

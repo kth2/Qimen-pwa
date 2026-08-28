@@ -203,6 +203,7 @@
     var yj = (args.yinju && args.yinju.version) ? args.yinju : null;
     var gj = (args.geju && args.geju.version) ? args.geju : null;
     var sg = (args.shige && args.shige.version) ? args.shige : null;
+    var cm = args.categoryMap || null;
     var domain = args.domain || (ys && ys.domain) || 'general';
     var items = [];
     // 用神清单按占类权重重排：SYMBOL 与关键词池皆据此取用，截断时先保重点
@@ -383,6 +384,7 @@
       // 字段名是 engineRule（见 yongshen.js 的 resolve 返回值）。此前误写成 ys.engine，
       // 恒为 undefined，于是 ev.category **一直是空字符串**——不报错、不变红，只是悄悄没有。
       category: (ys && ys.engineRule && ys.engineRule.category) || '',
+      categoryMap: cm,
       school: (ys && ys.school) || 'zhuanpan',
       // 三个概念分列呈现，绝不合成单一 yongshen 字段（Phase 1.1 审计结论）
       yongshen: ys ? {
@@ -494,7 +496,20 @@
     // 只写一个会让人以为选错了占类——两者都写出来，并点明为什么不同。
     var engCat = ev.category || '';   // 引擎占类（ys.engineRule.category），与规则占类 ev.domain 未必同
     L.push('【结构化证据包 Evidence v' + ev.version + '　占类：' + ev.domain + (ev.label ? '(' + ev.label + ')' : '') + '】');
-    if (engCat && ev.label && engCat !== ev.label) {
+    /* 占类有三套词表（界面「目的」／引擎占类／规则占类），且引擎的支持**分盘别**。
+     * 任一层降级都要说出来——静默降级是此前最伤的一类问题。 */
+    var cmi = ev.categoryMap;
+    if (cmi && !cmi.engineSupported) {
+      L.push('· ⚠ **本盘别不支持「' + cmi.engineCategory + '」占类**：' + cmi.degradeWhy +
+        '本次已落回「' + cmi.degradedTo + '」，**取不到该占类的专用用神**。' +
+        '请按综合法作答（值符值使＋日干时干＋全盘旺衰生克），' +
+        '**不要凭「' + cmi.engineCategory + '」之名硬套一套本盘并未算出的用神**。');
+    } else if (cmi && !cmi.hasDedicatedRules && !cmi.isZongHe) {
+      L.push('· 占类两级：**引擎按「' + cmi.engineCategory + '」取用神**；象义规则库尚无「' +
+        cmi.engineCategory + '」专条，故判读条目退用通用占类 ' + cmi.ruleDomain + '(' + cmi.ruleLabel + ')。' +
+        '这是**规则未建**，不是占类判错——用神仍按「' + cmi.engineCategory + '」，请照此作答。');
+    } else if (engCat && ev.label && engCat !== ev.label && !cmi) {
+      // 未传 categoryMap 时的退路，行为与旧版一致
       L.push('· 占类两级：**引擎按「' + engCat + '」取用神**；象义规则库尚无「' + engCat +
         '」专条，故判读条目退用通用占类 ' + ev.domain + '(' + ev.label + ')。' +
         '这是**规则未建**，不是占类判错——用神仍按「' + engCat + '」，请照此作答。');

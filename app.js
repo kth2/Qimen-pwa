@@ -454,6 +454,9 @@
       // 显式选择必须走 opts.category：buildPrompt 不认 fallbackCategory，
       // 只把它当 classifyQuestion 的备胎——只传 fallbackCategory 等于没选。
       if (rc.explicit) opts.category = rc.category;
+      // 三层解析随证据包一起交给模型：引擎认不认、规则有没有专条，都不该只有界面知道
+      const catMap = (YS && YS.categoryMap)
+        ? YS.categoryMap(rc.category || fallbackCategory, school === 'feipan' ? 'feipan' : 'zhuanpan') : null;
       const builder = school === 'feipan' ? QM.feipanPredict : QM.zhuanpanPredict;
       const prompt = builder.buildPrompt(pan, q, opts);
       const head = `【占类：${prompt.context.category || '综合'}　模型：${LLM.info().provider}/${LLM.info().model}】\n\n`;
@@ -640,7 +643,7 @@
             catch (se) { console.warn('[shige] 判时格失败，本次不含时格：', se.message); shige = null; }
           }
           const evidence = EV.build({
-            question: q, domain, chart: pan, yongshen, xiangyi, timing, leixiang, severity, converge, yinju, geju, shige, calibration,
+            question: q, domain, chart: pan, yongshen, xiangyi, timing, leixiang, severity, converge, yinju, geju, shige, calibration, categoryMap: catMap,
             wangshuai: wsBlock, yingqi: yqBlock
           });
           runOut.yongshen = yongshen; runOut.xiangyi = xiangyi;
@@ -1467,6 +1470,23 @@
     };
   }
 
+  /**
+   * 本盘别不支持的占类，在下拉里就标出来——**选之前**就看得见，
+   * 比选完再告诉他「其实没生效」要好。飞盘不认「事业」「失物」即属此列。
+   */
+  function markUnsupportedDomains() {
+    if (!YS || !YS.categoryMap || !YS.isLoaded || !YS.isLoaded()) return;   // 数据没到位就先不标
+    const sch = school === 'feipan' ? 'feipan' : 'zhuanpan';
+    const schName = sch === 'feipan' ? '飞盘' : '转盘';
+    [...($('aiDomain') ? $('aiDomain').options : []), ...($('inPurpose') ? $('inPurpose').options : [])]
+      .forEach(o => {
+        if (!o.value) return;
+        const base = o.dataset.base || (o.dataset.base = o.textContent.replace(/（.*不支持）$/, ''));
+        const m = YS.categoryMap(o.value, sch);
+        o.textContent = m.engineSupported ? base : base + '（' + schName + '不支持）';
+      });
+  }
+
   function previewDomain() {
     const sel = $('aiDomain'), tag = $('aiDomainTag');
     if (!sel || !tag) return;
@@ -1481,22 +1501,26 @@
       try { cat = (builder.classifyQuestion(q, '综合') || {}).category || ''; } catch (e) { cat = ''; }
     }
     if (!q) { tag.innerHTML = '<span class="muted">（填了问句才能判占类）</span>'; return; }
-    // 该占类在象义规则库里有没有专条？没有则退用通用条——这件事要说出来，
-    // 否则用户选了「学业」却在证据包里看到 general(其他)，会以为占类又判错了
-    let ruleNote = '';
-    if (cat && YS && YS.normalizeDomain) {
-      const dom = YS.normalizeDomain(cat);
-      const dd = (YS.getDomain && YS.getDomain(dom)) || null;
-      if (dd && dd.label && dd.label !== cat) {
-        ruleNote = '<br><span class="muted">用神按「' + esc(cat) + '」取；象义规则库暂无此占类专条，'
-          + '判读退用通用占类 <b>' + esc(dd.label) + '</b>——是规则未建，不是判错。</span>';
-      }
+    // 三层一次说清：引擎认不认（分盘别）、规则有没有专条。任一层降级都必须看得见——
+    // 静默降级是此前最伤的一类问题：界面写「你指定的」，实际那个选择根本没生效。
+    const m = (YS && YS.categoryMap) ? YS.categoryMap(cat, school === 'feipan' ? 'feipan' : 'zhuanpan') : null;
+    let notes = '';
+    // 知识库还没到位就不下结论——宁可少说一句，也不说错
+    if (m && m.loaded === false) notes = '';
+    else if (m && !m.engineSupported) {
+      notes += '<br><b style="color:#a94442">⚠ ' + (school === 'feipan' ? '飞盘' : '转盘')
+        + '不支持「' + esc(m.engineCategory) + '」占类，本次会落回「' + esc(m.degradedTo)
+        + '」且取不到专用用神。</b><span class="muted">' + esc(m.degradeWhy) + '</span>';
+    }
+    else if (m && m.engineSupported && !m.hasDedicatedRules && !m.isZongHe) {
+      notes += '<br><span class="muted">用神按「' + esc(m.engineCategory) + '」取；象义规则库暂无此占类专条，'
+        + '判读退用通用占类 <b>' + esc(m.ruleLabel) + '</b>——是规则未建，不是判错。</span>';
     }
     tag.innerHTML = '→ 本次按 <b>' + esc(cat || '综合') + '</b> 断'
       + (rc.source === 'ai' ? '<span class="muted">（你指定的）</span>'
         : rc.source === 'purpose' ? '<span class="muted">（据排盘「目的」）</span>'
           : '　<b style="color:#8a6d3b">⚠ 据问句关键词自动判定，请核对</b>')
-      + ruleNote;
+      + notes;
   }
 
   /* ---------- init ---------- */
@@ -1521,6 +1545,7 @@
       if (sx && school === 'feipan') { // 山向不支持飞盘渲染，回退转盘
         school = 'zhuanpan';
         [...$('schoolSeg').children].forEach(x => x.classList.toggle('on', x.dataset.school === 'zhuanpan'));
+        markUnsupportedDomains(); previewDomain();
       }
     }
     $('modeSeg').addEventListener('click', e => {
@@ -1533,6 +1558,8 @@
       const b = e.target.closest('button[data-school]'); if (!b) return;
       school = b.dataset.school;
       [...$('schoolSeg').children].forEach(x => x.classList.toggle('on', x === b));
+      // 引擎对占类的支持分盘别，换派之后下拉里的「不支持」标记与预览都要重算
+      markUnsupportedDomains(); previewDomain();
       cast();
     });
     $('castBtn').addEventListener('click', cast);
@@ -1613,7 +1640,13 @@
       $('aiDomain').addEventListener('change', previewDomain);
       if ($('aiQuestion')) $('aiQuestion').addEventListener('input', previewDomain);
       $('inPurpose').addEventListener('change', previewDomain);
+      markUnsupportedDomains();
       previewDomain();
+      // 占类三层解析要读知识库，而知识库原先只在点 AI 时才懒加载——
+      // 于是首屏的下拉标记与预览全是在数据缺席下算出来的（且当时还给出了确定结论）。
+      // 这里提前把它拉起来，加载完再重算一次。失败也无妨：上面两处会自行判断数据是否到位。
+      loadKnowledge().then(() => { markUnsupportedDomains(); previewDomain(); })
+        .catch(() => {});
     }
     if ($('cfgProbeBtn')) $('cfgProbeBtn').addEventListener('click', async () => {
       const btn = $('cfgProbeBtn'), out = $('cfgProbeOut');
