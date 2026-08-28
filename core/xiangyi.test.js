@@ -670,27 +670,34 @@ t('lost_item：不为失物本身立固定符号，也不臆造宫际生克', fu
 });
 
 console.log('== 出处守卫（basis 反模式） ==');
-t('每条规则的 basis 必须指向纲要或既有知识库，禁止含糊措辞', function () {
+t('每条规则的 basis 必须指向一个**具名出处**，禁止含糊措辞', function () {
   var vague = /^(传统奇门|常识|通行说法|一般认为|common sense|traditional|standard interpretation)/i;
-  var checked = 0;
+  // 出处允许两类，且必须逐条可辨：
+  //   ① 纲要／既有知识库 —— 原有七套占类走这一路；
+  //   ② 〔用户所定·日期〕 —— Phase 19 新增八套由用户逐条给定，不出自纲要。
+  // 关键是**不许含糊**：既不许「传统如此」，也不许把用户所定说成纲要。
+  var named = /纲要|symbols\.json|domains\.json|〔用户所定·\d{4}-\d{2}-\d{2}〕/;
+  var checked = 0, byUser = 0;
   Object.keys(RULES.domains).forEach(function (dm) {
     ['conditions', 'combinations', 'relations'].forEach(function (k) {
       (RULES.domains[dm][k] || []).forEach(function (r) {
         checked++;
         assert.ok(r.basis && r.basis.trim().length >= 8, r.id + ' 的 basis 过短或缺失');
         assert.ok(!vague.test(r.basis.trim()), r.id + ' 的 basis 含糊：' + r.basis);
-        assert.ok(/纲要|symbols\.json|domains\.json/.test(r.basis),
-          r.id + ' 的 basis 未指向纲要或既有知识库：' + r.basis);
+        assert.ok(named.test(r.basis), r.id + ' 的 basis 未指向具名出处：' + r.basis);
+        if (/^〔用户所定/.test(r.basis)) byUser++;
       });
     });
   });
-  assert.ok(checked > 150, '应检验到全部规则，实得 ' + checked);
+  assert.ok(checked > 300, '应检验到全部规则，实得 ' + checked);
+  assert.ok(byUser > 100, '用户所定的条目应占相当数量，实得 ' + byUser);
 });
 t('角色登记同样须有出处与 roleType', function () {
   Object.keys(RULES.domains).forEach(function (dm) {
     var roles = RULES.domains[dm].roles || {};
     Object.keys(roles).forEach(function (n) {
-      assert.ok(/纲要|symbols\.json|domains\.json/.test(roles[n].basis || ''), dm + '.' + n + ' 角色缺出处');
+      assert.ok(/纲要|symbols\.json|domains\.json|〔用户所定·\d{4}-\d{2}-\d{2}〕/.test(roles[n].basis || ''),
+        dm + '.' + n + ' 角色缺出处（须指向纲要／既有知识库，或标明〔用户所定·日期〕）');
       assert.ok(RULES.roleTypes[roles[n].roleType], dm + '.' + n + ' roleType 未在 roleTypes 中声明');
     });
   });

@@ -52,8 +52,10 @@ t('未知/缺省一律回落 general（向后兼容的关键）', function () {
   assert.strictEqual(YS.normalizeDomain(''), 'general');
   assert.strictEqual(YS.normalizeDomain(null), 'general');
   assert.strictEqual(YS.normalizeDomain(undefined), 'general');
-  assert.strictEqual(YS.normalizeDomain('天气'), 'general');
   assert.strictEqual(YS.normalizeDomain('毫无关系的字串'), 'general');
+  // 「天气」曾因无专条而回落 general；Phase 19 补了 weather 专条后它自有归属。
+  // 回落 general 这条兜底仍在，只是不再拿一个**已有专条**的占类去验它。
+  assert.strictEqual(YS.normalizeDomain('天气'), 'weather');
 });
 
 console.log('== 各占类用神映射（规格要求的最低集合）==');

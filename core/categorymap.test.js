@@ -124,19 +124,25 @@ t('health 的 label 是「健康」而引擎占类叫「疾病」，仍算有专
   assert.strictEqual(m.ruleDomain, 'health');
   assert.strictEqual(m.hasDedicatedRules, true, '曾用「label===引擎占类名」判断，此处即会判错');
 });
-t('学业→功名 落 general，确无专条', function () {
+t('学业→功名 现已有 study 专条（Phase 19 之前落 general）', function () {
   var m = YS.categoryMap('学业', 'zhuanpan');
-  assert.strictEqual(m.ruleDomain, 'general');
-  assert.strictEqual(m.hasDedicatedRules, false);
+  assert.strictEqual(m.engineCategory, '功名', '引擎占类名仍是功名，不随规则占类改名');
+  assert.strictEqual(m.ruleDomain, 'study');
+  assert.strictEqual(m.hasDedicatedRules, true);
 });
-t('六个有专条、八个退用通用条、综合另计', function () {
+t('综合仍落 general，且被认作「就是通用占类」而非降级', function () {
+  var m = YS.categoryMap('综合', 'zhuanpan');
+  assert.strictEqual(m.ruleDomain, 'general');
+  assert.strictEqual(m.isZongHe, true, '综合须被单独认出，免得界面把它报成「无专条」');
+});
+t('十四个占类皆有专条，只余「综合」用通用条（Phase 19 之后）', function () {
   var yes = [], no = [];
   UI.forEach(function (u) {
     var m = YS.categoryMap(u, 'zhuanpan');
     (m.hasDedicatedRules ? yes : no).push(u);
   });
-  assert.deepStrictEqual(yes.sort(), ['事业', '婚姻', '官司', '失物', '健康', '财运'].sort(), '实得 ' + yes.join('、'));
-  assert.strictEqual(no.length, 9, '其余（含综合）应为 9 个，实得 ' + no.length);
+  assert.deepStrictEqual(no, ['综合'], '除综合外都该有专条，实际退用通用条的是：' + no.join('、'));
+  assert.strictEqual(yes.length, 14, '实得 ' + yes.length);
 });
 
 console.log('\n== 数据未到位时必须说不知道 ==');
