@@ -448,9 +448,12 @@
       // 占类以 AI 面板的显式选择为先，其次才是排盘「目的」。
       // 二者都留默认时，引擎按问句关键词自动判定——那正是实测里出错最多的一环：
       // 「钱包丢了能不能找到」被判成求财、「另找合作方」被判成失物，整篇解读遂建在错的用神上。
-      const uiPurpose = ($('aiDomain') && $('aiDomain').value) || $('inPurpose').value;
-      const fallbackCategory = (YS && YS.toEngineCategory) ? YS.toEngineCategory(uiPurpose) : uiPurpose;
+      const rc = resolveCategory();
+      const fallbackCategory = rc.category || '综合';
       const opts = { nianMingGan: $('aiNianMing').value, methodText, fallbackCategory };
+      // 显式选择必须走 opts.category：buildPrompt 不认 fallbackCategory，
+      // 只把它当 classifyQuestion 的备胎——只传 fallbackCategory 等于没选。
+      if (rc.explicit) opts.category = rc.category;
       const builder = school === 'feipan' ? QM.feipanPredict : QM.zhuanpanPredict;
       const prompt = builder.buildPrompt(pan, q, opts);
       const head = `【占类：${prompt.context.category || '综合'}　模型：${LLM.info().provider}/${LLM.info().model}】\n\n`;
@@ -1440,24 +1443,60 @@
 
   /** 占类实时预览：在提问处就把「本次会按哪个占类断」摆出来，并说明是谁定的。
    *  实测里最贵的一类错就是占类判错——错了则用神、规则、判读整套都错，事后无从补救。 */
+  /**
+   * 占类的**唯一**解析口径——预览与真跑必须共用它。
+   *
+   * 实测过的 bug：此前两处各写各的。预览调 `classifyQuestion(q, fb)`（它认 fb，
+   * 会听用户的），真跑调 `buildPrompt(pan, q, {fallbackCategory})`——而引擎的
+   * buildPrompt **只认 opts.category，不认 opts.fallbackCategory**（后者仅
+   * classifyQuestion 认）。于是用户选了「学业」，界面明明写着「按 功名 断（你指定的）」，
+   * 整篇却仍按 求财 断，连用神都取的求财那套。选错占类是最贵的一类错，
+   * 而这个 bug 让「选对」这件事根本做不到。
+   *
+   * 口径：AI 面板选了 → 显式；否则排盘「目的」非「综合」→ 显式；两者皆无 → 才交给关键词。
+   */
+  function resolveCategory() {
+    const sel = ($('aiDomain') && $('aiDomain').value) || '';
+    const purpose = ($('inPurpose') && $('inPurpose').value) || '';
+    const uiPick = sel || (purpose && purpose !== '综合' ? purpose : '');
+    const cat = uiPick && YS && YS.toEngineCategory ? YS.toEngineCategory(uiPick) : '';
+    return {
+      explicit: !!cat,
+      category: cat,                                   // 显式时用它**硬指定**引擎占类
+      source: sel ? 'ai' : (uiPick ? 'purpose' : 'auto')
+    };
+  }
+
   function previewDomain() {
     const sel = $('aiDomain'), tag = $('aiDomainTag');
     if (!sel || !tag) return;
     const q = ($('aiQuestion') && $('aiQuestion').value || '').trim();
     const builder = school === 'feipan' ? QM.feipanPredict : QM.zhuanpanPredict;
     if (!builder || !builder.classifyQuestion) { tag.textContent = ''; return; }
-    const picked = sel.value || $('inPurpose').value;
-    const fb = (YS && YS.toEngineCategory) ? YS.toEngineCategory(picked) : picked;
-    let cat = '';
-    try { cat = (builder.classifyQuestion(q, fb) || {}).category || ''; } catch (e) { cat = ''; }
+    const rc = resolveCategory();
+    let cat = rc.category;
+    // 只有真「自动」时才让关键词说话；显式选择直接就是结论，不再过一遍分类器——
+    // 过了反而给了它推翻用户的机会，那正是此前那个 bug 的来路
+    if (!rc.explicit) {
+      try { cat = (builder.classifyQuestion(q, '综合') || {}).category || ''; } catch (e) { cat = ''; }
+    }
     if (!q) { tag.innerHTML = '<span class="muted">（填了问句才能判占类）</span>'; return; }
-    const bySelf = !!sel.value;
-    // 自动判定与「目的」都没指定时，结果全由关键词决定——这一情形要显眼地说出来
-    const auto = !bySelf && $('inPurpose').value === '综合';
+    // 该占类在象义规则库里有没有专条？没有则退用通用条——这件事要说出来，
+    // 否则用户选了「学业」却在证据包里看到 general(其他)，会以为占类又判错了
+    let ruleNote = '';
+    if (cat && YS && YS.normalizeDomain) {
+      const dom = YS.normalizeDomain(cat);
+      const dd = (YS.getDomain && YS.getDomain(dom)) || null;
+      if (dd && dd.label && dd.label !== cat) {
+        ruleNote = '<br><span class="muted">用神按「' + esc(cat) + '」取；象义规则库暂无此占类专条，'
+          + '判读退用通用占类 <b>' + esc(dd.label) + '</b>——是规则未建，不是判错。</span>';
+      }
+    }
     tag.innerHTML = '→ 本次按 <b>' + esc(cat || '综合') + '</b> 断'
-      + (bySelf ? '<span class="muted">（你指定的）</span>'
-        : auto ? '　<b style="color:#8a6d3b">⚠ 据问句关键词自动判定，请核对</b>'
-          : '<span class="muted">（据排盘「目的」）</span>');
+      + (rc.source === 'ai' ? '<span class="muted">（你指定的）</span>'
+        : rc.source === 'purpose' ? '<span class="muted">（据排盘「目的」）</span>'
+          : '　<b style="color:#8a6d3b">⚠ 据问句关键词自动判定，请核对</b>')
+      + ruleNote;
   }
 
   /* ---------- init ---------- */
