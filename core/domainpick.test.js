@@ -95,11 +95,18 @@ t('显式选择时预览不再过分类器（免得它推翻用户）', function
 });
 
 console.log('\n== 占类两级：引擎占类 vs 规则占类 ==');
-t('功名在知识库里无专条，归 general——这是事实，不是判错', function () {
-  assert.strictEqual(YS.normalizeDomain('功名'), 'general');
-  assert.ok(YS.domainIds().indexOf('gongming') < 0, '确无功名专条');
+t('功名现已有 study 专条（Phase 19 前落 general，故此测曾断言相反）', function () {
+  assert.strictEqual(YS.normalizeDomain('功名'), 'study');
+  assert.ok(YS.domainIds().indexOf('study') >= 0);
+  // 规则占类换了名，引擎占类名不受影响——两套词表各归各的
+  var m = YS.categoryMap('学业', 'zhuanpan');
+  assert.strictEqual(m.engineCategory, '功名');
+  assert.strictEqual(m.ruleDomain, 'study');
 });
-t('两级不同时，证据包须点明「规则未建，不是判错」', function () {
+/* 注：Phase 19 补齐八套专条后，界面 15 个占类里只剩「综合」用通用条，而综合另有判别
+ * （isZongHe），故「规则未建」一路在真实路径上已基本不出现。本测改为守住那条**兜底分支**
+ * 本身仍可用——将来若再添一个有引擎用神而无专条的占类，这段文案得还在。 */
+t('两级不同时，证据包须点明「规则未建，不是判错」（兜底分支，今已罕用）', function () {
   var EV = require('./evidence.js');
   EV.load(require('../knowledge/symbols.json'));
   var p = chart();
