@@ -2174,6 +2174,82 @@ node core/domainpick.test.js   # 12 项：锁住引擎 category/fallbackCategory
 
 ---
 
+## 占类三套词表：钉在一起（Phase 18）
+
+### 分歧在哪
+
+占类一直有三套并不同名的词表：
+
+| | 例子 | 出处 |
+|---|---|---|
+| ① 界面「目的」 | 综合／事业／**财运**／婚姻／**健康**／**学业** | index.html |
+| ② 引擎占类 | 综合／事业／**求财**／婚姻／**疾病**／**功名** | engine.bundle.js |
+| ③ 规则占类 | general／career／wealth／**relationship**／health／lawsuit／lost_item | domains.json |
+
+映射本身早就是数据驱动的，但**引擎对占类的支持是分盘别的，而这件事无人记录**。
+实测出来：
+
+| 界面 | 引擎占类 | 转盘 | 飞盘 | 规则占类 | 专条 |
+|---|---|---|---|---|---|
+| 事业 | 事业 | ✓ | **✗** | career(事业) | 有 |
+| 财运 | 求财 | ✓ | ✓ | wealth(求财) | 有 |
+| 婚姻 | 婚姻 | ✓ | ✓ | relationship(感情) | 有 |
+| 健康 | 疾病 | ✓ | ✓ | health(健康) | 有 |
+| 学业 | 功名 | ✓ | ✓ | general(其他) | — |
+| 失物 | 失物 | ✓ | **✗** | lost_item(失物) | 有 |
+| 官司 | 官司 | ✓ | ✓ | lawsuit(官司) | 有 |
+| 出行/寻人/怀孕/风水/射覆/天气/竞赛 | 同名 | ✓ | ✓ | general(其他) | — |
+
+**飞盘不认「事业」与「失物」**——引擎会把它们静默落回「综合」，一个专用用神都不给，
+而界面照旧显示「你指定的」。这是静默降级，用户无从知道自己的选择没生效。
+
+### 做法：把三层解析变成知识层里的一等公民
+
+`domains.json` 新增 `engineSupport`（**实测所得**：每个占类在 4 个不同时刻各排一盘，
+要求 `context.category` 相符**且** `context.yong.matched` 为真，四次全中才算支持），
+并为每个不支持项写明缘由。
+
+`YS.categoryMap(uiPurpose, school)` 一次给出全部三层：
+
+```js
+{ ui:'失物', engineCategory:'失物', engineSupported:false, degradedTo:'综合',
+  degradeWhy:'飞盘纲要未列失物专用用神（玄武/伤门那套只见于转盘）…',
+  ruleDomain:'lost_item', ruleLabel:'失物', hasDedicatedRules:true, loaded:true }
+```
+
+三处同时用它，任一层降级都看得见：
+
+- **下拉框**：本盘别不支持的选项直接标成「失物（飞盘不支持）」——**选之前**就看得见。
+- **预览标签**：`⚠ 飞盘不支持「失物」占类，本次会落回「综合」且取不到专用用神。`
+- **证据包**：另附一句给模型——`请按综合法作答，不要凭「失物」之名硬套一套本盘并未算出的用神。`
+
+### 两个自找的坑，都改了
+
+**① 「有无专条」不能凭名字猜。** 我先用「`label` 是否等于引擎占类名」来判断，
+结果 health 的 label 是「健康」而引擎占类叫「疾病」，二者不同名却确有专条——
+被误判成「无专条」。改用 `ruleDomain !== 'general'`。
+
+**② 数据没到位时不许给确定答案。** `categoryMap` 原先在 `DB` 为 null 时照常往下走，
+于是 `engineSupported` 恒真、`ruleDomain` 恒 general、`ruleLabel` 恒空——界面煞有介事地
+宣布「失物无专条」，而失物明明有。根因是知识库原先只在点 AI 时才懒加载，
+而下拉标记与预览在首屏就跑了。现在：`categoryMap` 未加载时返回 `loaded:false` 且
+`engineSupported/hasDedicatedRules` 皆为 `null`（不知道就是 null，不能是 true），
+调用处见 `loaded===false` 即不下结论；首屏另主动拉一次知识库，加载完重算。
+
+> 一个在数据缺席时仍给出确定答案的函数，比报错更坏——它不会被发现。
+
+### 运行测试
+
+```bash
+node core/categorymap.test.js   # 15 项：三套词表逐项串得上（界面选项直接从 index.html 读，
+                                #        免得测试里另抄一份而与界面漂移）、每个选项在 uiPurposes
+                                #        里恰好出现一次、映射表无死条目、双向自洽；
+                                #        **记录的引擎支持度对着活引擎逐项复核**（引擎变了先红）；
+                                #        有无专条不得凭名字猜；数据未到位时必须说不知道
+```
+
+---
+
 ## 基准线：把整本跑成一张成绩单（Phase A）
 
 改进若不能被测量，就只是换个说法而已。`core/evaluate.js` 把一份案例本导出跑成
