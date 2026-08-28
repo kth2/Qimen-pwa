@@ -380,7 +380,9 @@
       domain: domain,
       label: (ys && ys.label) || '',
       question: args.question || '',
-      category: (ys && ys.engine && ys.engine.category) || '',
+      // 字段名是 engineRule（见 yongshen.js 的 resolve 返回值）。此前误写成 ys.engine，
+      // 恒为 undefined，于是 ev.category **一直是空字符串**——不报错、不变红，只是悄悄没有。
+      category: (ys && ys.engineRule && ys.engineRule.category) || '',
       school: (ys && ys.school) || 'zhuanpan',
       // 三个概念分列呈现，绝不合成单一 yongshen 字段（Phase 1.1 审计结论）
       yongshen: ys ? {
@@ -488,7 +490,15 @@
       }
     });
     L.push('');
+    // 引擎占类与规则占类可能不同：如「功名」有引擎用神、知识库却无专条而归入 general。
+    // 只写一个会让人以为选错了占类——两者都写出来，并点明为什么不同。
+    var engCat = ev.category || '';   // 引擎占类（ys.engineRule.category），与规则占类 ev.domain 未必同
     L.push('【结构化证据包 Evidence v' + ev.version + '　占类：' + ev.domain + (ev.label ? '(' + ev.label + ')' : '') + '】');
+    if (engCat && ev.label && engCat !== ev.label) {
+      L.push('· 占类两级：**引擎按「' + engCat + '」取用神**；象义规则库尚无「' + engCat +
+        '」专条，故判读条目退用通用占类 ' + ev.domain + '(' + ev.label + ')。' +
+        '这是**规则未建**，不是占类判错——用神仍按「' + engCat + '」，请照此作答。');
+    }
     L.push('· 盘别：' + (ev.school === 'feipan' ? '飞盘（括囊）' : '转盘') + '　—— 只按本派断法解读，不得引入另一派取用。');
     if (ev.yongshen) {
       var eng = ev.yongshen.engine, dom = ev.yongshen.domain, res = ev.yongshen.resolution;
