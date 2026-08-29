@@ -179,8 +179,11 @@ t('飞盘上八个占类皆 applicable=false 且判读为空', function () {
 console.log('\n== 怀孕：安全边界 ==');
 t('凡涉母子安危的条目都写明须就医，且不作医学诊断', function () {
   var d = RULES.domains.pregnancy;
-  assert.ok(/不得作医学诊断/.test(d._safetyNote), '须有安全边界说明');
-  assert.ok(/建议就医/.test(d._safetyNote));
+  // 字段名必须是 safetyNote（无下划线）——带下划线的一律被当注释，从不送达。
+  // Phase 20 修好之前，这里写的正是 _safetyNote，那条边界从未到过模型手上。
+  assert.ok(!d._safetyNote, '不得留在带下划线的注释字段里');
+  assert.ok(/不得作医学诊断/.test(d.safetyNote), '须有安全边界说明');
+  assert.ok(/建议就医/.test(d.safetyNote));
   var all = JSON.stringify(d);
   ['你患有', '你有癌', '停止药物', '不需要看医生', '不必就医'].forEach(function (w) {
     assert.ok(all.indexOf(w) < 0, '出现了禁语「' + w + '」');

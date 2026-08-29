@@ -84,7 +84,11 @@
       };
     }
     var eng = toEngineCategory(ui) || ui;
-    var dom = normalizeDomain(eng);
+    // 规则占类**优先按界面选项**解析。两个界面选项可能映到同一个引擎占类
+    // （如「财运」与「股市」都走引擎的「求财」），若一律从引擎占类反推，
+    // normalizeDomain 按插入序先命中谁就是谁，后者的专条便永远跑不到。
+    var dom = normalizeDomain(ui);
+    if (dom === 'general' && eng && eng !== '综合') dom = normalizeDomain(eng);
     var d = getDomain(dom) || {};
     var sup = (DB && DB.engineSupport) || null;
     // 「综合」是「无专一用神」那一档，matched=false 属设计如此，不算不支持
