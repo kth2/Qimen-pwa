@@ -368,6 +368,19 @@
       + '另有两条：① 本仓**从未测过**时格与实际应验率的关系，故不得说「此类盘更准／更不准」，'
       + '也不得据时格调整你对自己判断的把握度；② 时格**可解与否本仓未收录**，不要自行搬用'
       + '「得三奇可解」之类说法——没收录就是没有，宁可不说。',
+    // Phase 20：股市占类。以下四条**出自用户所供原文自带的戒律**，不是外加的免责声明。
+    'E24. 占类为**股市**时，原文自带的四条戒律与判读同等要紧，逐条照办：'
+      + '① **一卦一事**——一局只测大盘，或只测单一支股票；'
+      + '**不得在同一局里同时研判多只个股**（原文：气机混杂，信息互相干扰，论断便会失真）。'
+      + '问句若含多个标的，先说明本局只能答其中一个，请对方另起一局。'
+      + '② **不锁定点位**——原文：「奇门可以研判一时气机的强弱，却不能精准锁定某一只个股、'
+      + '某一日的涨跌点位。一局只能看清大势的倾向，并不是一张稳赚不赔的藏宝图。」'
+      + '故取数只给**大概区间与方向**（旺相取大数、休囚取小数），**不得报出具体点位或精确涨跌幅**。'
+      + '③ **不作投资建议、不承诺获利**——原文：「勿以一局，而赌千金之利」「术数，是观天时、'
+      + '察进退的参考，绝非投机赌博的利器」。不得出现「建议买入/卖出/加仓/满仓」一类操作指令，'
+      + '不得承诺收益，须提示风险自负。'
+      + '④ 见**伏吟局**则言震荡磨底、久盘不动，频繁交易徒增损耗；见**反吟局**则言暴涨暴跌，'
+      + '极易追高被套——这两条与【伏吟／反吟】段的判定联读。',
     'E20. 数证据数的是**互不相干的路数**，不是象义条数。同一个元素的多个别名（如玄武的'
       + '「盗/失物/暗昧/欺诈」）只算**一路**；五条同源的话不等于五路旁证，不得据此说「多重印证」。',
     // Phase 9：力量校验与断语范围。以下四条全部出自实测案例本的失败复盘，逐条对应一类真实误判。
@@ -455,8 +468,10 @@
       // 只把它当 classifyQuestion 的备胎——只传 fallbackCategory 等于没选。
       if (rc.explicit) opts.category = rc.category;
       // 三层解析随证据包一起交给模型：引擎认不认、规则有没有专条，都不该只有界面知道
+      // 必须传**界面选项**而非已转换的引擎占类：「股市」与「财运」都映到引擎「求财」，
+      // 传引擎占类进去就又绕回 wealth，股市专条依旧跑不到——正是这一步我先前写错过。
       const catMap = (YS && YS.categoryMap)
-        ? YS.categoryMap(rc.category || fallbackCategory, school === 'feipan' ? 'feipan' : 'zhuanpan') : null;
+        ? YS.categoryMap(rc.uiPick || rc.category || fallbackCategory, school === 'feipan' ? 'feipan' : 'zhuanpan') : null;
       const builder = school === 'feipan' ? QM.feipanPredict : QM.zhuanpanPredict;
       const prompt = builder.buildPrompt(pan, q, opts);
       const head = `【占类：${prompt.context.category || '综合'}　模型：${LLM.info().provider}/${LLM.info().model}】\n\n`;
@@ -487,8 +502,12 @@
       window._evidence = window._xiangyi = window._timing = window._leixiang = window._severity = null;   // 先清干净，宁可为空也不串盘
       if (await loadKnowledge()) {
         try {
-          // 占类优先取引擎按问句识别的结果（比下拉框更贴合实际所问），识别不出再回落界面「目的」
-          const domain = YS.normalizeDomain((prompt.context && prompt.context.category) || fallbackCategory);
+          // 规则占类：用户显式选了就以**他选的那个**为准（catMap 已按界面选项解析），
+          // 只有在「自动判定」时才从引擎按问句识别出的占类反推。
+          // 若一律从引擎占类反推，「财运」与「股市」这类同走一个引擎占类的选项就分不开了。
+          const domain = (rc.explicit && catMap && catMap.ruleDomain)
+            ? catMap.ruleDomain
+            : YS.normalizeDomain((prompt.context && prompt.context.category) || fallbackCategory);
           const yongshen = YS.resolve({
             domain, chart: pan,
             options: {
@@ -1465,7 +1484,8 @@
     const cat = uiPick && YS && YS.toEngineCategory ? YS.toEngineCategory(uiPick) : '';
     return {
       explicit: !!cat,
-      category: cat,                                   // 显式时用它**硬指定**引擎占类
+      uiPick: uiPick,                                  // 界面选项原值（如「股市」）
+      category: cat,                                   // 显式时用它**硬指定**引擎占类（如「求财」）
       source: sel ? 'ai' : (uiPick ? 'purpose' : 'auto')
     };
   }
@@ -1503,7 +1523,9 @@
     if (!q) { tag.innerHTML = '<span class="muted">（填了问句才能判占类）</span>'; return; }
     // 三层一次说清：引擎认不认（分盘别）、规则有没有专条。任一层降级都必须看得见——
     // 静默降级是此前最伤的一类问题：界面写「你指定的」，实际那个选择根本没生效。
-    const m = (YS && YS.categoryMap) ? YS.categoryMap(cat, school === 'feipan' ? 'feipan' : 'zhuanpan') : null;
+    // 同上：预览也须按界面选项解析，否则显示的规则占类与真跑不一致
+    const m = (YS && YS.categoryMap)
+      ? YS.categoryMap(rc.uiPick || cat, school === 'feipan' ? 'feipan' : 'zhuanpan') : null;
     let notes = '';
     // 知识库还没到位就不下结论——宁可少说一句，也不说错
     if (m && m.loaded === false) notes = '';

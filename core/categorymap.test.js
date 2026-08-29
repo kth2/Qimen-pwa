@@ -40,9 +40,9 @@ function uiPurposes() {
 var UI = uiPurposes();
 
 console.log('\n== 三套词表串得上 ==');
-t('界面下拉有 15 个占类，且从 index.html 直接读取（不另抄一份）', function () {
-  assert.strictEqual(UI.length, 15, '实得 ' + UI.length + '：' + UI.join('、'));
-  assert.ok(UI.indexOf('综合') >= 0 && UI.indexOf('学业') >= 0);
+t('界面下拉有 16 个占类，且从 index.html 直接读取（不另抄一份）', function () {
+  assert.strictEqual(UI.length, 16, '实得 ' + UI.length + '：' + UI.join('、'));
+  assert.ok(UI.indexOf('综合') >= 0 && UI.indexOf('学业') >= 0 && UI.indexOf('股市') >= 0);
 });
 t('每个界面选项都能解析出引擎占类与规则占类，无一落空', function () {
   UI.forEach(function (u) {
@@ -76,6 +76,30 @@ t('规则占类与引擎占类的对应是双向自洽的', function () {
   });
 });
 
+
+t('【股市】与「财运」同走引擎「求财」，但规则占类必须分得开', function () {
+  var a = YS.categoryMap('财运', 'zhuanpan'), b = YS.categoryMap('股市', 'zhuanpan');
+  assert.strictEqual(a.engineCategory, '求财');
+  assert.strictEqual(b.engineCategory, '求财', '股市映到求财，以取得生门/戊两个财星');
+  assert.strictEqual(a.ruleDomain, 'wealth');
+  assert.strictEqual(b.ruleDomain, 'stock', '若从引擎占类反推，股市会被 wealth 抢走，专条永远跑不到');
+  // 反向：直接以引擎占类问，仍应得 wealth（插入序在前），不因新增 stock 而改变
+  assert.strictEqual(YS.normalizeDomain('求财'), 'wealth');
+});
+t('app 显式选择时用 categoryMap.ruleDomain，不从引擎占类反推', function () {
+  var APP = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+  assert.ok(/rc\.explicit && catMap && catMap\.ruleDomain/.test(APP),
+    '否则「财运」与「股市」这类同引擎占类的选项分不开');
+});
+t('【回归】catMap 必须由**界面选项**算出，不得传已转换的引擎占类', function () {
+  var APP = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+  // 传 rc.category（引擎占类「求财」）进去，categoryMap 会算回 wealth，
+  // 股市专条又跑不到——这一步实际写错过一次，故钉死。
+  assert.ok(/YS\.categoryMap\(rc\.uiPick \|\| rc\.category \|\| fallbackCategory/.test(APP),
+    '真跑处未以 rc.uiPick 起头');
+  assert.ok(/YS\.categoryMap\(rc\.uiPick \|\| cat,/.test(APP), '预览处未以 rc.uiPick 起头');
+  assert.ok(/uiPick: uiPick/.test(APP), 'resolveCategory 未返回 uiPick');
+});
 console.log('\n== 引擎支持度：记录必须与活引擎一致 ==');
 /** 与 domains.json 的 _measured 同一口径：四个时刻全中才算支持 */
 function liveSupport(school, cat) {
@@ -142,7 +166,7 @@ t('十四个占类皆有专条，只余「综合」用通用条（Phase 19 之�
     (m.hasDedicatedRules ? yes : no).push(u);
   });
   assert.deepStrictEqual(no, ['综合'], '除综合外都该有专条，实际退用通用条的是：' + no.join('、'));
-  assert.strictEqual(yes.length, 14, '实得 ' + yes.length);
+  assert.strictEqual(yes.length, 15, '实得 ' + yes.length);
 });
 
 console.log('\n== 数据未到位时必须说不知道 ==');
