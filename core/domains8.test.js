@@ -29,7 +29,11 @@ function t(name, fn) {
 }
 var NEW = ['study', 'travel', 'find_person', 'pregnancy', 'fengshui', 'shefu', 'weather', 'contest'];
 var OLD = ['wealth', 'career', 'relationship', 'health', 'lawsuit', 'lost_item', 'general'];
-var PROV = '〔用户所定·2026-08-27〕';
+// 出处前缀只锁到「〔用户所定·」为止，日期不写死：这八套是 2026-08-27 一次写成的，
+// 但同一批占类日后仍会按新的复盘续补条目（如 2026-09-03 补的 study.天辅.去向），
+// 把日期钉进断言，只会让每补一条就红一次，而它要守的本来就不是日期，是**出处这一层**。
+var PROV = '〔用户所定·';
+var PROV_DATE = /^〔用户所定·(\d{4}-\d{2}-\d{2})〕/;   // 但日期必须真的写了，且是个日期
 function zp(iso) {
   return QM.qimen.calculate(new Date(iso), { type: '四柱', method: '时家', purpose: '综合', location: '默认位置' });
 }
@@ -90,10 +94,11 @@ t('八套的每一条 basis 都以〔用户所定〕起头', function () {
   var bad = [];
   NEW.forEach(function (dm) {
     eachBasis(dm, function (basis, where) {
-      if (String(basis || '').indexOf(PROV) !== 0) bad.push(where);
+      // 前缀要对，日期也要真写了——「〔用户所定〕」不带日期便无从回溯是哪一次议定的
+      if (!PROV_DATE.test(String(basis || ''))) bad.push(where);
     });
   });
-  assert.deepStrictEqual(bad.slice(0, 5), [], '共 ' + bad.length + ' 条未标明用户出处：' + bad.slice(0, 5).join('；'));
+  assert.deepStrictEqual(bad.slice(0, 5), [], '共 ' + bad.length + ' 条未标明用户出处（须形如 ' + PROV + 'YYYY-MM-DD〕）：' + bad.slice(0, 5).join('；'));
 });
 t('八套的 basis 里不得出现「纲要」字样——那是另一层的出处', function () {
   var bad = [];

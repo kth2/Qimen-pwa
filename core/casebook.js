@@ -535,6 +535,19 @@
           hits: (sg.hits || []).map(function (h) { return h.id; })
         };
       })(),
+      // 取数层快照（Phase 21）。要考核的问题只有一个：**宫数入候选之后，数字题是不是更准**。
+      // 那就得存下「当时可达几个数、用神取的是哪几个宫」——数值本身不存，
+      // 因为本层从不选定一个数，选数是解读那一步的事，记在 answer 里。
+      qushu: (function () {
+        var qs = a.qushu;
+        if (!qs || !qs.version || !qs.applicable) return null;
+        return {
+          version: qs.version, reachable: qs.reachable,
+          targets: (qs.targets || []).map(function (x) {
+            return { name: x.name, gong: x.gong, adjust: x.adjust };
+          })
+        };
+      })(),
       severity: (function () {
         var sv = a.severity;
         if (!sv || !sv.version || !sv.applicable) return null;

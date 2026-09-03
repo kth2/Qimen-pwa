@@ -516,6 +516,29 @@
         var ea = (ws.gongs[a.gong] || {}).gongElement || '';
         var eb = (ws.gongs[b.gong] || {}).gongElement || '';
         var w = Math.max(weightFor(d, rule.from), weightFor(d, rule.to));
+        // 虚克/虚生：施方之宫极衰时，其生克之力亦当随之折减。此前这里只判五行、不问
+        // 施方有没有那个力气——力量 0.03 的宫去克用神宫，与力量 1.0 的宫去克，读出来
+        // 分量一模一样。2026-09-03 一例高考分数复盘正栽在此：4 宫(力量 0.03)克 5 宫被
+        // 断成「直接压制分数突破空间、限死上限」，实际考生超常发挥。
+        // 折减的**方向**须写明：施方无力只说明这一路阻力不重，不是把凶断翻成吉断的许可。
+        var VA = DB.vacuousActor || null;
+        function vacuityOf(kind) {
+          if (!VA || !VA.actorOf || !VA.thresholds) return null;
+          var side = VA.actorOf[kind];
+          if (!side) return null;                       // 比和/同宫/相冲无单一施方，不判虚实
+          var ctx = side === 'from' ? a : b;
+          var cell = ws.gongs[ctx.gong] || null;
+          if (!cell || typeof cell.power !== 'number') return null;
+          var lvl = cell.power <= VA.thresholds.critical ? 'critical'
+            : (cell.power <= VA.thresholds.weak ? 'weak' : '');
+          if (!lvl) return null;
+          return {
+            level: lvl, side: side, gong: ctx.gong, power: cell.power,
+            harms: (cell.harms || []).slice(),
+            label: (VA.labels || {})[lvl] || lvl,
+            howToUse: VA.howToUse || '', basis: VA.basis || ''
+          };
+        }
         function emit(kind, entry) {
           // 一条 relation 规则底下有六种互斥读法（生/克/比和/同宫/被生/被克），
           // 实测里它们的准头天差地别——同一条 general.rel.日干-时干，「彼宫生我宫」3 例全中，
@@ -537,6 +560,9 @@
             concept: (entry.concept || []).slice(),
             answers: entry.answers || rule.answers || '',
             answersNote: rule.answersNote || '',
+            // 施方虚实随条附上：null＝施方有力或本关系无单一施方，两者不可混为一谈，
+            // 故 vacuity 为 null 时不写任何话，宁可不说也不说成「施方有力」。
+            vacuity: vacuityOf(kind),
             polarity: entry.polarity || '0', basis: rule.basis || ''
           });
         }

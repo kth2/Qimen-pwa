@@ -120,6 +120,9 @@
       gong: r.gong || (r.fromGong ? r.fromGong + '→' + r.toGong : ''),
       weight: r.weight || 0,
       polarity: r.polarity || '0',
+      // 施方虚实（仅宫际关系有）。null＝施方有力，或本关系无单一施方（比和/同宫/相冲）；
+      // 两者不可混为一谈，故为 null 时一个字都不写——宁可不说，也不说成「施方有力」。
+      vacuity: r.vacuity || null,
       content: (r.concept || []).slice(),
       basis: r.basis || ''
     };
@@ -203,6 +206,7 @@
     var yj = (args.yinju && args.yinju.version) ? args.yinju : null;
     var gj = (args.geju && args.geju.version) ? args.geju : null;
     var sg = (args.shige && args.shige.version) ? args.shige : null;
+    var qs = (args.qushu && args.qushu.version) ? args.qushu : null;
     var cm = args.categoryMap || null;
     var domain = args.domain || (ys && ys.domain) || 'general';
     var items = [];
@@ -423,6 +427,13 @@
         version: yj.version, school: yj.school, ju: yj.ju, layers: yj.layers,
         timing: yj.timing, notes: yj.notes
       } : null,
+      // 取数层元信息。候选与可达度量都留下——日后要考核「宫数入候选之后数字题是不是更准」，
+      // 靠的就是这里存下的 reachable 与 targets；不存则永远无从分层。
+      qushu: qs ? {
+        version: qs.version, applicable: qs.applicable, reason: qs.reason, degraded: qs.degraded,
+        targets: qs.targets, candidates: qs.candidates, reachable: qs.reachable, span: qs.span,
+        notes: qs.notes
+      } : null,
       // 时格层元信息（五不遇时／天显时格）。分量随条带出——「增加几率」不是「必然如此」。
       shige: sg ? {
         version: sg.version, riGan: sg.riGan, shiGan: sg.shiGan,
@@ -485,10 +496,19 @@
         var revMark = x.revised ? '〔本机修订·' + (x.revised === 'mute' ? '停用' : x.revised === 'narrow' ? '已收窄' : '已调权') + '〕' : '';
         if (x.answersNote && ansNotes.indexOf(x.answersNote) < 0) ansNotes.push(x.answersNote);
         var ansMark = x.answers ? '〔只答：' + x.answers + '〕' : '';
+        // 施方极衰时，这一路生克读作虚——不标出来，力量 0.03 的宫与力量 1.0 的宫
+        // 在断语里分量一样，「直接压制、封死上限」就是这么写出来的。
+        var vacMark = '';
+        if (x.vacuity) {
+          vacMark = '　⚠ 施方' + x.vacuity.gong + '宫力量仅 ' + x.vacuity.power +
+            (x.vacuity.harms.length ? '（' + x.vacuity.harms.join('、') + '）' : '') +
+            '，此路作 ' + x.vacuity.label + ' 读：' + x.vacuity.howToUse +
+            '　〔出处：' + x.vacuity.basis + '〕';
+        }
         reads[x.scope].push('  - [' + (POL[x.polarity] || '中') + '] ' + revMark + ansMark + x.element +
           (x.aspect ? '(' + x.aspect + ')' : '') + (x.gong ? '·' + x.gong + '宫' : '') +
           (x.trigger ? ' ' + x.trigger : '') +
-          '：' + x.content.join('、') + '　（依据：' + x.basis + '）');
+          '：' + x.content.join('、') + '　（依据：' + x.basis + '）' + vacMark);
       }
     });
     L.push('');
@@ -735,6 +755,47 @@
       });
       L.push('  ※ 本仓**从未测过**时格与实际应验率的关系（案例本未按时格分层），' +
         '故不得声称「此类盘更准／更不准」，也不得据时格调整你对自己判断的把握度。');
+    }
+
+    /* ---------- 取数：数源与可达度量 ----------
+     * 与前几段最大的不同：这一段**不给答案**，只给数源、算法与「本盘一共能凑出几个数」。
+     * 数源多了，事后总凑得出实际值——把可达数摆在候选旁边，是为了让「凑得出来」
+     * 和「断得出来」当场分开。这不是附注，是本段存在的理由。 */
+    var qsi = ev.qushu;
+    if (qsi && qsi.applicable && qsi.targets && qsi.targets.length) {
+      L.push('· 【取数】数源逐用神列全。**宫数一路（后天洛书数／先天卦数）是新补的**——' +
+        '此前只有天地盘干的河图数一路，用神所落之宫本身的宫数从来不在候选里。');
+      qsi.targets.forEach(function (t) {
+        var ss = t.sources, ps = [];
+        // 减半与否按**该干自己**的旺衰，不按宫的——数是干的数，旺衰自然论干。
+        if (ss.hetuTian) ps.push('天盘' + ss.hetuTian.gan + ss.hetuTian.state + '河图=' + ss.hetuTian.full +
+          (ss.hetuTian.adjust !== 'full' ? '(减半' + ss.hetuTian.half + '／个位' + ss.hetuTian.unit + ')' : ''));
+        if (ss.hetuDi) ps.push('地盘' + ss.hetuDi.gan + ss.hetuDi.state + '河图=' + ss.hetuDi.full +
+          (ss.hetuDi.adjust !== 'full' ? '(减半' + ss.hetuDi.half + '／个位' + ss.hetuDi.unit + ')' : ''));
+        if (ss.houtian != null) ps.push('后天宫数=' + ss.houtian + '〔用户所定〕');
+        ps.push(ss.xiantian != null ? '先天卦数=' + ss.xiantian + '〔用户所定〕' : '先天卦数＝无（中五宫无卦）');
+        L.push('  · ' + t.name + ' 落 ' + t.gong + '宫' +
+          (t.gongName ? '(' + t.gongName + (t.direction ? '·' + t.direction : '') + ')' : '') +
+          (t.gongState ? '·宫' + t.gongState : '') + (t.power != null ? '·力量约' + t.power : '') +
+          '：' + ps.join('、'));
+        L.push('      ' + t.adjustNote + '；' + t.gongNumNote);
+      });
+      L.push('  · 组合法：单取〔纲要原文〕／两干相加〔纲要原文〕／乘宫数·层数〔纲要原文〕／' +
+        '连读〔用户所定·2026-09-03〕／定量级〔用户所定·2026-09-03〕。' +
+        '**用哪条就报哪条的出处**，连读与定量级两法纲要皆无，不得说成纲要如此。');
+      if (qsi.span) {
+        L.push('  · **本盘可达 ' + qsi.reachable + ' 个相异数值**（' + qsi.span.min + '～' + qsi.span.max +
+          '）：' + qsi.span.values.join('、') + '。定量级的移位尚未计入——移位一开，这批数在每个量级各来一遍。');
+      }
+      L.push('  · 取数之前先声明四件事，写在数之前不许写在数之后：①取哪个用神；②用它的哪个数源；' +
+        '③用哪种组合法；④落在哪个量级、量级的依据是问题里的哪句话。');
+      L.push('  · 给出数之后须说明：在这 ' + qsi.reachable + ' 个候选里凭什么选中它。' +
+        '理由若只是「它最接近某个已知值」，那不是断，是拟合——此时应当直说此盘取数无据。' +
+        '**数字题允许弃权**，纲要给的是数源与算法，不是保证。');
+      L.push('  ※ 宫数入候选能不能让数字题更准，本仓**一个数据都没有**。' +
+        '这一路补进来是因为原先缺一个数源，不是因为它测出来更准。');
+    } else if (qsi && !qsi.applicable && qsi.reason) {
+      L.push('· 【取数】本次不排：' + qsi.reason);
     }
 
     if (facts.length) { L.push('· FACT（引擎算得的盘面事实，不得改写）：'); L = L.concat(facts); }
