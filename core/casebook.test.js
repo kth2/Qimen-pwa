@@ -1123,13 +1123,37 @@ t('app.js 中 runOut 被读取的每个字段都曾被赋值', function () {
   var missing = Object.keys(used).filter(function (k) { return !assigned[k]; });
   assert.deepStrictEqual(missing, [], '这些字段被读却从未赋值：' + missing.join('、'));
 });
-t('五层都在 _lastReading 里被带上（否则永远考核不了）', function () {
+// 原作「五层」，Phase 21 起取数层也在其中，故改为六层。这条守卫要守的从来不是数目，
+// 是「新加一层就得跟着存」——名单每长一个，就在这里补一个，不许只加层不加存。
+t('六层都在 _lastReading 里被带上（否则永远考核不了）', function () {
   var fs = require('fs');
   var src = fs.readFileSync(require('path').join(__dirname, '..', 'app.js'), 'utf8');
-  var seg = src.slice(src.indexOf('_lastReading = {'), src.indexOf('_lastReading = {') + 900);
-  ['converge', 'yinju', 'geju', 'shige', 'severity'].forEach(function (k) {
+  var seg = src.slice(src.indexOf('_lastReading = {'), src.indexOf('_lastReading = {') + 1400);
+  ['converge', 'yinju', 'geju', 'shige', 'severity', 'qushu'].forEach(function (k) {
     assert.ok(new RegExp(k + ':\\s*runOut\\.' + k).test(seg), '_lastReading 未带上 ' + k);
   });
+});
+t('取数层快照：存可达数与用神落宫，不存选定之数（本层本就不选数）', function () {
+  var rec = CB.makeCase({
+    question: '高考多少分', domain: 'study', chart: { siZhu: { day: '癸亥', time: '庚申' } },
+    qushu: {
+      version: '1.0.0', applicable: true, reachable: 19,
+      targets: [{ name: '丁', gong: '6', adjust: 'full', sources: { houtian: 6 } },
+                { name: '时干', gong: '2', adjust: 'half', sources: { houtian: 2 } }],
+      candidates: [{ value: 62 }], span: { values: [62] }
+    }
+  });
+  assert.strictEqual(rec.qushu.reachable, 19, '可达数是日后分层考核的关键，必须存');
+  assert.deepStrictEqual(rec.qushu.targets.map(function (x) { return x.gong; }), ['6', '2']);
+  assert.strictEqual(rec.qushu.candidates, undefined, '候选逐条不存——太胖，且要考核的不是它');
+  assert.strictEqual(JSON.stringify(rec.qushu).indexOf('62'), -1, '不存具体数值：选数是解读那一步的事，记在 answer 里');
+});
+t('取数排不出时存 null，不留空壳', function () {
+  var rec = CB.makeCase({
+    question: 'q', domain: 'study', chart: { siZhu: { day: '乙亥', time: '辛巳' } },
+    qushu: { version: '1.0.0', applicable: false, reason: '本盘未定出用神落宫' }
+  });
+  assert.strictEqual(rec.qushu, null);
 });
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');

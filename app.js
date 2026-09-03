@@ -11,6 +11,7 @@
   const YJ = window.YinJu;      // 伏吟／反吟层（Phase 14；缺则不含吟局判定）
   const GJ = window.GeJu;       // 八十一格层（Phase 15；缺则格名仍只是宫格行里的裸标签）
   const SG = window.ShiGe;      // 时格层（Phase 16：五不遇时／天显时格；缺则不判时格）
+  const QS = window.QuShu;      // 取数层（Phase 21：河图数＋先天/后天宫数；缺则取数仍只有河图数一路）
   const CB = window.Casebook;   // 案例本·经验层（Phase 5；只统计与建议，绝不改写教义规则）
   const CSTORE = window.CaseStore;
   const RV = window.Revise;     // 复盘正解与规则修订（Phase 6）
@@ -246,6 +247,7 @@
   let _yinjuReady = false;      // 吟局规则库同理：缺席只是不判伏吟反吟，不影响其余各层
   let _gejuReady = false;       // 81 格表同理：缺席只是不带格之断语
   let _shigeReady = false;      // 时格规则库同理：缺席只是不判五不遇时与天显时格
+  let _qushuReady = false;      // 取数规则库同理：缺席只是退回原状（用神宫河图数仍由 TIMING 承载）
   async function loadKnowledge() {
     if (!YS || !EV) return false;
     const get = (p) => fetch(p).then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)));
@@ -293,6 +295,11 @@
     if (_kbReady && SG && !_shigeReady) {
       try { _shigeReady = SG.load(await get('knowledge/shige-rules.json')); }
       catch (e) { console.warn('[shige] 时格规则库加载失败，本次不判时格：', e.message); _shigeReady = false; }
+    }
+    // 取数库同样单独计：缺席只是没有宫数一路，用神宫河图数仍由 TIMING 段承载，取数不至于断炊
+    if (_kbReady && QS && !_qushuReady) {
+      try { _qushuReady = QS.load(await get('knowledge/qushu-rules.json')); }
+      catch (e) { console.warn('[qushu] 取数规则库加载失败，本次取数只有河图数一路：', e.message); _qushuReady = false; }
     }
     return _kbReady;
   }
@@ -381,6 +388,25 @@
       + '不得承诺收益，须提示风险自负。'
       + '④ 见**伏吟局**则言震荡磨底、久盘不动，频繁交易徒增损耗；见**反吟局**则言暴涨暴跌，'
       + '极易追高被套——这两条与【伏吟／反吟】段的判定联读。',
+    // Phase 21：取数纪律。起因是一例高考分数断错（断 560～580、实际 620）——问题不在算错，
+    // 而在数源只有河图数一路，且没人被要求先声明取数法。这两条把「先声明」和「报可达数」写死。
+    'E25. 证据包若给出【取数】，凡答数字（分数/价格/点位/数量/号码/层数），**必须先声明四件事再给数**：'
+      + '①取哪个（哪些）用神；②用它的哪个数源（天盘干河图数／地盘干河图数／后天宫数／先天卦数）；'
+      + '③用哪种组合法（单取／两干相加／乘宫数·层数／连读）；④落在哪个量级，量级的依据是问题里的哪句话。'
+      + '四件事写在数**之前**——先给数再回头挑一条算法圆回去，是本条要禁的唯一那件事。'
+      + '出处不得混称：河图数、单取、相加、旺相足数/休囚减半、乘宫数出自纲要原文；'
+      + '**后天宫数作独立候选、先天卦数、连读、定量级四条出自〔用户所定·2026-09-03〕，纲要无此文**，'
+      + '用了就要写明是按用户所定之法。',
+    'E26. 【取数】段会报出「本盘可达 N 个相异数值」。给出答案后须一并说明：在这 N 个候选里凭什么选中它。'
+      + '理由若只是「它最接近某个已知值／最像正确答案」，那不是断，是拟合——此时应当直说**此盘取数无据**。'
+      + '**数字题允许弃权**：用神休囚入墓、或候选过多而无从取舍时，答「取数无据，只能给方向不能给数」'
+      + '是正当且更可取的答法，不得硬凑一个数交差。另：宫数入候选能不能让数字题更准，'
+      + '本仓一个数据都没有，**不得声称这一路更准**。',
+    'E27. 宫际生克若标了「⚠ 施方…力量仅 x，此路作**虚**／**力薄**读」，照它减轻：'
+      + '**不得**把一条虚克写成「直接压制」「封死上限」「彻底不成」。但减的只是**这一路**的分量——'
+      + '施方无力不等于此事转吉，成败仍须以用神自身旺衰与其余各路合断，不许反过来据此翻成吉断。'
+      + '此条出自〔用户所定·2026-09-03·据纲要§旺衰推〕，纲要原文只说了「该宫自身」的吉凶随旺衰增减，'
+      + '推到「它对他宫的生克亦随之折减」是补的一步，不得说成纲要明文。',
     'E20. 数证据数的是**互不相干的路数**，不是象义条数。同一个元素的多个别名（如玄武的'
       + '「盗/失物/暗昧/欺诈」）只算**一路**；五条同源的话不等于五路旁证，不得据此说「多重印证」。',
     // Phase 9：力量校验与断语范围。以下四条全部出自实测案例本的失败复盘，逐条对应一类真实误判。
@@ -498,7 +524,7 @@
       // 按次作用域收集本轮的结构化产物。**不能靠 window._xiangyi 之类的全局量**：
       // 知识库加载失败或证据构建抛错时那些全局量不会被更新，仍留着上一次解读的值，
       // 存案例就会把「别的盘」的象义记进这一条里——统计从此全错。
-      const runOut = { yongshen: null, xiangyi: null, timing: null, leixiang: null, severity: null, evidence: null, domain: '' };
+      const runOut = { yongshen: null, xiangyi: null, timing: null, leixiang: null, severity: null, qushu: null, evidence: null, domain: '' };
       window._evidence = window._xiangyi = window._timing = window._leixiang = window._severity = null;   // 先清干净，宁可为空也不串盘
       if (await loadKnowledge()) {
         try {
@@ -661,13 +687,30 @@
             try { shige = SG.analyze({ chart: pan }); }
             catch (se) { console.warn('[shige] 判时格失败，本次不含时格：', se.message); shige = null; }
           }
+          // 取数（Phase 21）：把用神宫可取之数摊开列全。此前只有河图数一路（由 TIMING 段承载），
+          // 用神所落之宫**本身的宫数**从来不是候选——纲要「范围大则乘宫数」里宫数只当倍率使。
+          // 本层另补后天洛书数与先天卦数两路，并**报出可达的相异数值个数**：
+          // 数源一多，事后总凑得出实际值，那是拟合不是断准，故把可达度量与候选一同送进去。
+          let qushu = null;
+          if (_qushuReady && QS && yongshen) {
+            try {
+              qushu = QS.analyze({
+                // 与其余各层同一路数：传 wangshuai 的**分析结果**，旺衰只此一处供给。
+                // 取数只用它裁「旺相足数／休囚减半」一条，且这一条纲要只对河图数说过——
+                // 宫数该不该随旺衰增减，纲要与用户皆未言，本层不代为增减。
+                yongshen, wangshuai: (window.WangShuai && window.WangShuai.analyze) ? window.WangShuai.analyze(pan) : null,
+                options: { school: school === 'feipan' ? 'feipan' : 'zhuanpan' }
+              });
+            }
+            catch (qe) { console.warn('[qushu] 排取数失败，本次取数只有河图数一路：', qe.message); qushu = null; }
+          }
           const evidence = EV.build({
-            question: q, domain, chart: pan, yongshen, xiangyi, timing, leixiang, severity, converge, yinju, geju, shige, calibration, categoryMap: catMap,
+            question: q, domain, chart: pan, yongshen, xiangyi, timing, leixiang, severity, converge, yinju, geju, shige, qushu, calibration, categoryMap: catMap,
             wangshuai: wsBlock, yingqi: yqBlock
           });
           runOut.yongshen = yongshen; runOut.xiangyi = xiangyi;
           runOut.timing = timing; runOut.leixiang = leixiang; runOut.severity = severity;
-          runOut.yinju = yinju; runOut.geju = geju; runOut.shige = shige;
+          runOut.yinju = yinju; runOut.geju = geju; runOut.shige = shige; runOut.qushu = qushu;
           // converge 此前一直漏在这里没赋值：_lastReading 取的是 runOut.converge，
           // 于是自 Phase 13 起**每一条存下的案例其 converge 都是 null**——
           // 「说是 A 级的后来对了几成」这条校准曲线因此从未有过数据。
@@ -682,6 +725,7 @@
           window._yinju = yinju;                       // 同上：核对本盘成了什么吟局
           window._geju = geju;                         // 同上：核对逐宫查到了哪个格
           window._shige = shige;                       // 同上：核对本时辰是否五不遇／天显
+          window._qushu = qushu;                       // 同上：核对本盘取数可达哪些数、共几个
           evBlock = EV.toPromptBlock(evidence);
           if (evBlock) sysExtra = '\n' + EVIDENCE_DISCIPLINE;
         } catch (ee) {
@@ -712,6 +756,9 @@
           // 同理：这四层不存进案例，「伏吟局的盘是不是更容易久拖」之类就永远无从考核。
           // 之前漏了它们——层做好了、也确实喂给了 AI，却没有一条案例带得上这些标记。
           yinju: runOut.yinju, geju: runOut.geju, shige: runOut.shige, severity: runOut.severity,
+          // 取数层同理：不存，「宫数入候选之后数字题是不是更准」就永远考核不了——
+          // 而这正是本层唯一还欠着的那个问题。
+          qushu: runOut.qushu,
           answer: String(answer || '').slice(0, 8000)
         };
         $('caseSaveBar').style.display = 'block';
