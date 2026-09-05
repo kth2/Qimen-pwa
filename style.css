@@ -615,3 +615,73 @@ body {
     text-decoration: underline dotted;
     text-underline-offset: 2px;
 }
+
+/* ---------- 四害在九宫格里的标记（Phase 22） ----------
+ * 门迫、击刑、入墓此前在盘面上一个字都没有，只在下方「九宫详解」的文字里露面，
+ * 看盘的人从格子里看不出来。纲要把这四样并称四害、明令「断成败必须称量」——
+ * 盘上不显，等于每次都要低头去别处对。
+ *
+ * 配色刻意不动五行：门/星/干本来就按五行着色（木绿火红土褐金橙水蓝），再拿颜色改字
+ * 会把五行读乱。故一律另加**角标 + 该字的描边**，字色照旧归五行。 */
+/* 一个字上的诸害合成一个角标（「墓刑」），不是各出一个：右列只有约 36px 宽，
+ * 字身已占 18px，两个角标必溢出——初版实机截图上「壬墓刑」就是这么冲出格子的。 */
+.hg {
+    position: relative;
+    display: inline-block;
+    border-radius: 3px;
+    padding: 0 1px;
+    white-space: nowrap;
+}
+/* 角标**绝对定位**贴在字的正上方，不占横向宽度。
+ * 初版让它顺排在字后面：右列只有约 34px 宽，字身 18px + 角标 19px＝37px，
+ * 实机上「壬墓刑」直接冲出格子。改为压在字头上，居中对齐，横向零溢出。 */
+.hg > .harm-mark {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    top: -8px;
+    margin: 0;
+}
+.harm-mark {
+    font-size: 9px;
+    font-weight: 700;
+    line-height: 1.3;
+    padding: 0 2px;
+    border-radius: 2px;
+    color: #fff;
+    white-space: nowrap;
+    letter-spacing: 0;
+}
+.harm-legend .lg-mark { font-size: 10px; padding: 1px 3px; vertical-align: baseline; }
+/* 角标浮在字上方、可越出所在网格区域，不许被裁掉 */
+.gong-tiangan, .gong-dipan, .gong-bamen, .fp-gan, .fp-men { overflow: visible; }
+.harm-po   { background: #B71C1C; }  /* 门迫 — 暗红 */
+.harm-xing { background: #E65100; }  /* 击刑 — 橙红 */
+.harm-mu   { background: #4A148C; }  /* 入墓 — 深紫 */
+
+/* 描边：颜色与角标同源，一眼能把角标和它所属的那个字对上。
+ * 用 box-shadow 而非 border，免得撑开既有的宫格网格布局。 */
+.harm-box-po   { box-shadow: inset 0 0 0 1.5px #B71C1C; }
+.harm-box-xing { box-shadow: inset 0 0 0 1.5px #E65100; }
+.harm-box-mu   { box-shadow: inset 0 0 0 1.5px #4A148C; }
+/* 一个干既入墓又击刑（纲要谓之「几近无力」）时描边取内外两圈，
+ * 比只留一条更贴合「多害减力相乘」的实情。 */
+.harm-box-mu.harm-box-xing { box-shadow: inset 0 0 0 1.5px #4A148C, inset 0 0 0 3px #E65100; }
+
+/* 空亡宫整格压一层极淡的斜纹：单看黄圈容易漏，而空亡是整宫的事，不是某个字的事。 */
+.gong.gong-kong {
+    background-image: repeating-linear-gradient(45deg,
+        rgba(0, 0, 0, .045) 0, rgba(0, 0, 0, .045) 3px, transparent 3px, transparent 8px);
+}
+
+.harm-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+    margin-top: 8px;
+    font-size: 12px;
+    line-height: 1.9;
+}
+.harm-legend .lg { display: inline-flex; align-items: center; gap: 3px; }
+.harm-legend .circle-mark { width: 18px; height: 18px; line-height: 18px; font-size: 11px; }

@@ -29,12 +29,17 @@ function t(name, fn) {
   try { fn(); pass++; console.log('  ✓ ' + name); }
   catch (e) { fail++; console.log('  ✗ ' + name + '  ->  ' + e.message); }
 }
-/** 界面下拉的真实取值——直接从 index.html 读，免得测试里另抄一份而与界面漂移 */
+/** 界面下拉的真实取值——直接从 index.html 读，免得测试里另抄一份而与界面漂移。
+ * 从前读的是排盘栏的 <select id="inPurpose">。Phase 22 撤掉了那个下拉（自 Phase 17 起
+ * 它对解读已不起作用，两处并存反而误导人），选项表整个搬进了 <select id="aiDomain">，
+ * 故此处改读 aiDomain。它头一项 value="" 是「跟随问句自动判定」，不是占类，须滤掉。 */
 function uiPurposes() {
   var html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
-  var seg = html.slice(html.indexOf('<select id="inPurpose">'), html.indexOf('</select>', html.indexOf('<select id="inPurpose">')));
-  var out = [], m, re = /value="([^"]+)"/g;
-  while ((m = re.exec(seg))) out.push(m[1]);
+  var at = html.indexOf('<select id="aiDomain">');
+  assert.ok(at >= 0, 'index.html 里找不到占类下拉 aiDomain');
+  var seg = html.slice(at, html.indexOf('</select>', at));
+  var out = [], m, re = /value="([^"]*)"/g;
+  while ((m = re.exec(seg))) if (m[1]) out.push(m[1]);   // 空值＝自动判定，不计入占类
   return out;
 }
 var UI = uiPurposes();

@@ -32,6 +32,63 @@
 
   function esc(s) { return (s == null ? '' : String(s)).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
 
+  /* ---------- 四害在九宫格里的标记（Phase 22） ----------
+   * 门迫、击刑、入墓此前**在盘面上一个字都没有**：它们只出现在下方「九宫详解」的
+   * 文字里与喂给模型的证据包里，看盘的人从格子里看不出来。而纲要把这四样并称四害、
+   * 明令「断成败必须称量」——盘上不显，等于每次都要低头去别处对。
+   *
+   * 配色不动五行：格子里的门/星/干本来就按五行着色（木绿火红土褐金橙水蓝），
+   * 再拿颜色改字就把五行读乱了。故一律另加**角标 + 该字的描边**，五行色照旧。
+   *   迫（门迫）暗红 · 刑（击刑）橙红 · 墓（入墓）深紫 · 空（空亡）沿用原黄圈 · 马沿用原绿圈
+   * 入墓与击刑是**某个干**的事，故标在那个干上（天盘干、地盘干各标各的），
+   * 不是整宫一个牌子——从前证据包里也吃过这个亏：门/星的墓刑其实是「所落之宫内有干墓刑」。
+   */
+  const HARM_TXT = { mu: '墓', xing: '刑', po: '迫' };
+  const HARM_TIP = {
+    mu: '入墓：仅余两成力，事多滞塞，须待冲墓方发',
+    xing: '击刑：六仪落其刑宫，力减半，主别扭拧劲、彼此掣肘',
+    po: '门迫：门克宫，吉门受迫吉不成、凶门受迫凶更烈，力减半'
+  };
+  const HARM_ORDER = ['mu', 'xing', 'po'];   // 墓最重（仅余两成）故居首，角标配色亦取首项
+  /**
+   * 一个字上的诸害合成**一个**角标（如既入墓又击刑写作「墓刑」）。
+   * 初版每害各出一个角标，两个角标 30px 加上字身 18px，把 36px 宽的右列整个撑破了——
+   * 实机截图上「壬墓刑」直接溢出格子。合成一个既装得下，也更贴合纲要「多害减力相乘」
+   * 的说法：那本就是一件事的两个由头，不是两件事。
+   */
+  function harmBadge(kinds) {
+    if (!kinds.length) return '';
+    const ks = HARM_ORDER.filter(k => kinds.indexOf(k) >= 0);
+    return `<sup class="harm-mark harm-${ks[0]}" title="${ks.map(k => HARM_TIP[k]).join('；')}">` +
+      ks.map(k => HARM_TXT[k]).join('') + '</sup>';
+  }
+  /** 把一个字连同它的诸害包成一个可描边的行内块。无害则原样输出，不多套一层标签。 */
+  function glyph(text, kinds) {
+    if (!text || !kinds.length) return esc(text);
+    const ks = HARM_ORDER.filter(k => kinds.indexOf(k) >= 0);
+    return `<span class="hg ${ks.map(k => 'harm-box-' + k).join(' ')}">${esc(text)}${harmBadge(ks)}</span>`;
+  }
+  /** 某个干落某宫是否入墓/击刑。WangShuai 缺席时一律返回空——宁可不标，不可乱标。 */
+  function ganHarms(gan, g) {
+    const W = window.WangShuai;
+    if (!W || !gan) return [];
+    const out = [];
+    if (W.isRuMu(gan, String(g))) out.push('mu');
+    if (W.isJiXing(gan, String(g))) out.push('xing');
+    return out;
+  }
+  /** 门迫取引擎的 jiuGongAnalysis.menPo（wangshuai 亦读同一处，两边同源不另算）。 */
+  function menPoAt(pan, g) { return !!(((pan.jiuGongAnalysis || {})[g] || {}).menPo); }
+
+  const HARM_LEGEND = '<div class="harm-legend">' +
+    '<span class="lg"><sup class="harm-mark harm-po lg-mark">迫</sup>门迫</span>' +
+    '<span class="lg"><sup class="harm-mark harm-xing lg-mark">刑</sup>击刑</span>' +
+    '<span class="lg"><sup class="harm-mark harm-mu lg-mark">墓</sup>入墓</span>' +
+    '<span class="lg"><span class="circle-mark yellow-circle">空</span>空亡</span>' +
+    '<span class="lg"><span class="circle-mark green-circle">马</span>驿马</span>' +
+    '<span class="lg muted">四害减力：门迫/击刑各减半，空亡吉凶皆减半且须待填实冲实，入墓仅余两成</span>' +
+    '</div>';
+
   /* ---------- 转盘宫格 ---------- */
   function cellZhuanpan(pan, g) {
     const JG = QM.JIU_GONG[g] || {};
@@ -40,17 +97,19 @@
     const ma = pan.maStar && pan.maStar.gong === g;
     const xing = (pan.jiuXing || {})[g] || '', men = (pan.baMen || {})[g] || '', shen = (pan.baShen || {})[g] || '';
     const tg = (pan.tianPan || {})[g] || '', dg = (pan.diPan || {})[g] || '', dz = (pan.anGan || {})[g] || '';
-    const cls = ['gong', 'gong' + g, ja.jiXiong || 'ping', pan.zhiFuGong === g ? 'zhifu' : '', pan.zhiShiGong === g ? 'zhishi' : ''].join(' ');
+    const po = menPoAt(pan, g) ? ['po'] : [], ht = ganHarms(tg, g), hd = ganHarms(dg, g);
+    const cls = ['gong', 'gong' + g, ja.jiXiong || 'ping', pan.zhiFuGong === g ? 'zhifu' : '',
+      pan.zhiShiGong === g ? 'zhishi' : '', kong ? 'gong-kong' : ''].join(' ');
     return `<div class="${cls}"><div class="gong-content">
       <div class="gong-dizhi di-zhi">${esc(dz)}</div>
       <div class="gong-bashen ${shenColor(shen)}">${esc(shen)}</div>
       <div class="gong-tianganfang">${ma ? '<span class="circle-mark green-circle">马</span>' : ''}${kong ? '<span class="circle-mark yellow-circle">空</span>' : ''}</div>
-      <div class="gong-bamen ${menColor(men)}">${esc(men)}</div>
+      <div class="gong-bamen ${menColor(men)}">${glyph(men, po)}</div>
       <div class="gong-jiuxing ${xingColor(xing)}">${esc(xing)}</div>
-      <div class="gong-tiangan ${ganColor(tg)}">${esc(tg)}</div>
+      <div class="gong-tiangan ${ganColor(tg)}">${glyph(tg, ht)}</div>
       <div class="gong-gongname ${gongColor(JG.name)}">${esc(JG.name)}</div>
       <div class="gong-number">${NUM_CN[+g]}</div>
-      <div class="gong-dipan ${ganColor(dg)}">${esc(dg)}</div>
+      <div class="gong-dipan ${ganColor(dg)}">${glyph(dg, hd)}</div>
     </div></div>`;
   }
 
@@ -64,13 +123,17 @@
     const tShen = sh((pan.tianPanShen || {})[g]), tYi = (pan.tianPanYi || {})[g] || '', tAn = (pan.tianPanAnGan || {})[g] || '';
     const mMen = ((pan.renPanMen || {})[g] || '').replace('门', ''), aMen = ((pan.renPanAnMen || {})[g] || '').replace('门', ''), rAn = (pan.renPanAnGan || {})[g] || '';
     const dShen = sh((pan.diPanShen || {})[g]), dYi = (pan.diPan || {})[g] || '', dAn = (pan.diPanAnGan || {})[g] || '';
-    const cls = ['gong', 'gong' + g, pan.zhiFuLuoGong === g ? 'zhifu' : '', pan.zhiShiGong === g ? 'zhishi' : ''].join(' ');
+    // 四害两派通用：飞盘纲要「四害（门迫/击刑/空亡/入墓）」一节与转盘同一口径，
+    // 故这里照标。零串味说的是取用与断法，不是这四条盘面事实。
+    const po = menPoAt(pan, g) ? ['po'] : [], ht = ganHarms(tYi, g), hd = ganHarms(dYi, g);
+    const cls = ['gong', 'gong' + g, pan.zhiFuLuoGong === g ? 'zhifu' : '',
+      pan.zhiShiGong === g ? 'zhishi' : '', kong ? 'gong-kong' : ''].join(' ');
     return `<div class="${cls}"><div class="feipan-gong-content kuonang">
       ${(kong || ma) ? `<div class="fp-marks">${ma ? '<span class="circle-mark green-circle">马</span>' : ''}${kong ? '<span class="circle-mark yellow-circle">空</span>' : ''}</div>` : ''}
       <div class="fp-xing ${xingColor(pan.tianPanXing && pan.tianPanXing[g])}">${esc(star)}</div>
-      <div class="fp-row fp-tian"><span class="fp-shen">${esc(tShen)}</span><span class="fp-gan ${ganColor(tYi)}">${esc(tYi)}</span><span class="fp-an">${esc(tAn)}</span></div>
-      <div class="fp-row fp-ren"><span class="fp-men fp-ming">${esc(mMen)}</span><span class="fp-men fp-an-men">${esc(aMen)}</span><span class="fp-an">${esc(rAn)}</span></div>
-      <div class="fp-row fp-di"><span class="fp-shen">${esc(dShen)}</span><span class="fp-gan ${ganColor(dYi)}">${esc(dYi)}</span><span class="fp-an">${esc(dAn)}</span></div>
+      <div class="fp-row fp-tian"><span class="fp-shen">${esc(tShen)}</span><span class="fp-gan ${ganColor(tYi)}">${glyph(tYi, ht)}</span><span class="fp-an">${esc(tAn)}</span></div>
+      <div class="fp-row fp-ren"><span class="fp-men fp-ming">${glyph(mMen, po)}</span><span class="fp-men fp-an-men">${esc(aMen)}</span><span class="fp-an">${esc(rAn)}</span></div>
+      <div class="fp-row fp-di"><span class="fp-shen">${esc(dShen)}</span><span class="fp-gan ${ganColor(dYi)}">${glyph(dYi, hd)}</span><span class="fp-an">${esc(dAn)}</span></div>
       <div class="fp-gongname">${esc(JG.name)}${NUM_CN[+g]}</div>
     </div></div>`;
   }
@@ -78,7 +141,7 @@
   function renderChart(pan) {
     const cellFn = school === 'feipan' ? cellFeipan : cellZhuanpan;
     const cls = school === 'feipan' ? 'pan-grid feipan-grid' : 'pan-grid';
-    $('chart').innerHTML = `<div class="qimen-pan"><div class="pan-outer"><div class="${cls}">${GRID_ORDER.map(g => cellFn(pan, g)).join('')}</div></div></div>`;
+    $('chart').innerHTML = `<div class="qimen-pan"><div class="pan-outer"><div class="${cls}">${GRID_ORDER.map(g => cellFn(pan, g)).join('')}</div></div></div>` + HARM_LEGEND;
   }
 
   function renderBasicInfo(pan) {
@@ -140,8 +203,15 @@
       fullName: `${type === 'yin' ? '阴遁' : '阳遁'}${number}局（自定义）`, formatCode: v };
   }
   // 山向盘：坐山定局，日期作时间激活层。复用转盘引擎机器(经 core/shanxiang.js)。
+  // 排盘所用的「目的」。原先另有一个排盘栏的「目的」下拉，自 Phase 17 起它对解读
+  // 已不起作用（真正决定取用与判读的是 AI 面板的「占类」，走 opts.category 那一路），
+  // 留着只会让人以为改它有用。Phase 22 撤掉那个下拉，此处改为向占类下拉要值——
+  // 一件事只留一个开关。占类留「自动判定」时按综合排，与从前默认值一致。
+  function purposeNow() {
+    return ($('aiDomain') && $('aiDomain').value) || '综合';
+  }
   function castShanXiang() {
-    const purpose = $('inPurpose').value;
+    const purpose = purposeNow();
     const sitting = $('inSitting').value;         // 二十四山名
     const facing = $('inFacing').value || null;   // 空=自动取冲
     const method = $('inSxMethod').value || 'standard';
@@ -155,7 +225,7 @@
     if (mode === 'shanxiang') {
       pan = castShanXiang();
     } else {
-      const date = getDate(), purpose = $('inPurpose').value, juShu = getJuShuOverride();
+      const date = getDate(), purpose = purposeNow(), juShu = getJuShuOverride();
       const opts = school === 'feipan'
         ? { method: '时家', purpose }
         : { type: '四柱', method: '时家', purpose, location: '默认位置' };
@@ -172,6 +242,30 @@
     _lastReading = null;
     if ($('caseSaveBar')) { $('caseSaveBar').style.display = 'none'; $('caseSaveTag').textContent = ''; }
     renderBasicInfo(pan); renderChart(pan); renderAnalysis(pan);
+  }
+
+  /**
+   * 占类改了 → 只把「分析与建议」按新目的重画。
+   *
+   * 星门神仪与四害都跟目的无关，变的只是**哪个算用神**，故不必也不该整盘重排：
+   * 重排会把 window._pan 换掉，连带作废「存为案例」的素材（那份素材是上一次
+   * 解读的，与目的无关，不该因为改了个下拉就丢）。这里另排一张同时刻的盘只取
+   * 它的分析结果来渲染，_pan 一动不动。
+   */
+  function refreshAnalysisForPurpose() {
+    if (!window._pan) return;
+    try {
+      const p = mode === 'shanxiang' ? castShanXiang() : (() => {
+        const date = getDate(), purpose = purposeNow(), juShu = getJuShuOverride();
+        const opts = school === 'feipan'
+          ? { method: '时家', purpose }
+          : { type: '四柱', method: '时家', purpose, location: '默认位置' };
+        if (juShu) opts.juShu = juShu;
+        return school === 'feipan' ? QM.feipanQimen.calculate(date, opts) : QM.qimen.calculate(date, opts);
+      })();
+      if (!p || p.error) return;              // 排不出就维持原样，不拿错误盖掉已有的分析
+      renderAnalysis(p);
+    } catch (e) { console.warn('[analysis] 按新占类重画失败，维持原分析：', e.message); }
   }
 
   /* ---------- AI 设置 ---------- */
@@ -1522,18 +1616,18 @@
    * 整篇却仍按 求财 断，连用神都取的求财那套。选错占类是最贵的一类错，
    * 而这个 bug 让「选对」这件事根本做不到。
    *
-   * 口径：AI 面板选了 → 显式；否则排盘「目的」非「综合」→ 显式；两者皆无 → 才交给关键词。
+   * 口径：占类下拉选了 → 显式；留「自动判定」→ 才交给关键词。
+   * Phase 22 之前还有第二个入口（排盘栏的「目的」下拉），它与占类下拉两处并存、
+   * 语义又不完全一样，是实测里误导过人的地方；那个下拉已撤，此处只认一个来源。
    */
   function resolveCategory() {
-    const sel = ($('aiDomain') && $('aiDomain').value) || '';
-    const purpose = ($('inPurpose') && $('inPurpose').value) || '';
-    const uiPick = sel || (purpose && purpose !== '综合' ? purpose : '');
+    const uiPick = ($('aiDomain') && $('aiDomain').value) || '';
     const cat = uiPick && YS && YS.toEngineCategory ? YS.toEngineCategory(uiPick) : '';
     return {
       explicit: !!cat,
       uiPick: uiPick,                                  // 界面选项原值（如「股市」）
       category: cat,                                   // 显式时用它**硬指定**引擎占类（如「求财」）
-      source: sel ? 'ai' : (uiPick ? 'purpose' : 'auto')
+      source: uiPick ? 'ai' : 'auto'
     };
   }
 
@@ -1545,7 +1639,7 @@
     if (!YS || !YS.categoryMap || !YS.isLoaded || !YS.isLoaded()) return;   // 数据没到位就先不标
     const sch = school === 'feipan' ? 'feipan' : 'zhuanpan';
     const schName = sch === 'feipan' ? '飞盘' : '转盘';
-    [...($('aiDomain') ? $('aiDomain').options : []), ...($('inPurpose') ? $('inPurpose').options : [])]
+    [...($('aiDomain') ? $('aiDomain').options : [])]
       .forEach(o => {
         if (!o.value) return;
         const base = o.dataset.base || (o.dataset.base = o.textContent.replace(/（.*不支持）$/, ''));
@@ -1699,16 +1793,13 @@
       });
       refreshCaseCount(); renderCaseViews(); loadRevisions();
     }
-    // 占类下拉：与排盘「目的」同一份取值，另加一个「自动判定」
-    if ($('aiDomain') && $('inPurpose')) {
-      [...$('inPurpose').options].forEach(o => {
-        const n = document.createElement('option');
-        n.value = o.value; n.textContent = o.textContent;
-        $('aiDomain').appendChild(n);
-      });
+    // 占类下拉：选项直接写在 index.html 里（从前是启动时从排盘栏「目的」下拉搬过来的，
+    // 那个下拉已撤，再搬就搬空了）。改占类要连带重画「分析与建议」——用神是按目的取的，
+    // 从前得回头再按一次「排盘」才更新，等于把这件事推给了用户。
+    if ($('aiDomain')) {
       $('aiDomain').addEventListener('change', previewDomain);
+      $('aiDomain').addEventListener('change', refreshAnalysisForPurpose);
       if ($('aiQuestion')) $('aiQuestion').addEventListener('input', previewDomain);
-      $('inPurpose').addEventListener('change', previewDomain);
       markUnsupportedDomains();
       previewDomain();
       // 占类三层解析要读知识库，而知识库原先只在点 AI 时才懒加载——
