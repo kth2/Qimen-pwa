@@ -129,6 +129,11 @@ body {
     height: 100%;
     width: 100%;
     position: relative;
+    /* content-box（默认）下 height:100% 再加 4px 内边距，盒子就比宫格高出 8px，
+     * 而 .gong{overflow:hidden} 会把多出来的那一截连同最后一行（地盘干/宫名/宫数）
+     * 一起裁掉。宽屏上行高富余看不出来，窄屏（≤375px）一测就现形：150 张盘里
+     * 有 81 处字被裁。这是本就存在的老问题，量宽度时顺手量出来的。 */
+    box-sizing: border-box;
     padding: 4px;
     gap: 0;
 }
@@ -556,6 +561,8 @@ body {
     align-items: center;
     justify-content: center;
     height: 100%;
+    /* 同上：height:100% + 内边距在 content-box 下会顶出宫格 */
+    box-sizing: border-box;
     padding: 3px 2px;
     text-align: center;
     line-height: 1.3;
@@ -684,4 +691,103 @@ body {
     line-height: 1.9;
 }
 .harm-legend .lg { display: inline-flex; align-items: center; gap: 3px; }
+/* 色环示例：窄屏飞盘只留描边、收起角标文字，故图例里也要能凭颜色认出是哪一害。
+ * 宽屏上它同样有用——盘上一眼看到的先是圈色，再才是那两个小字。 */
+.harm-legend .lg-ring {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border-radius: 3px;
+    margin-right: 2px;
+}
 .harm-legend .circle-mark { width: 18px; height: 18px; line-height: 18px; font-size: 11px; }
+
+/* 飞盘一格里天/人/地三行贴得极紧（12px 字、行距 1.3，行间只余 1px），
+ * 四害角标浮在字头上就会压住上一行——实测截图里「心」被「墓刑」盖掉大半、
+ * 「英」被「墓」盖住、「壬」被「迫」压住。
+ * 故凡**带角标的那一行**另加 .fp-row-harm，由此腾出上方空间；
+ * 只给带角标的行加，无害之盘的排版一点不动。 */
+.feipan-gong-content .fp-row-harm {
+    margin-top: 15px;
+}
+/* 飞盘一行之内是「神｜干｜暗干支」三列并排，列宽只有 1.1em、列距 2px，
+ * 两字角标（「墓刑」22px）压在中间那个干的头上时，会向左右各溢出四五像素，
+ * 正好盖到同一行的邻字——实测里「丙」的角标压住了左边的「符」与右边的「甲申」。
+ * 故飞盘把角标再抬高一档，让它整个落在本行字的**上方**、不与同行邻字同高。
+ * 抬高之后腾出的空间由上面的 .fp-row-harm 承担，不会去压上一行。 */
+.feipan-gong-content .hg > .harm-mark {
+    top: -13px;
+}
+/* .fp-ren 原有 margin:1px 0 的简写会把上面的 margin-top 一并覆写（同特异度、
+ * 但它在前面声明），故人盘那一行单列一条，把上下两边分开写。 */
+.feipan-gong-content .fp-ren.fp-row-harm {
+    margin-top: 15px;
+    margin-bottom: 1px;
+}
+
+
+/* 以下窄屏覆盖必须排在上面那些基准规则**之后**：
+ * 媒体查询不增加特异度，选择器又一模一样，同特异度时后来者胜。
+ * 起初把它们写在基准规则前面，实测量出来角标位置仍是基准的 -13px，
+ * 窄屏那一档等于整个没生效——两处遮挡就是这么来的。 */
+/* ---- 窄屏：宫格是正方形（.pan-grid aspect-ratio 1/1），格高随宽度走，
+ * 460px 宽时格高 141px、320px 时只剩 94px。而上面腾出的行距是固定像素，
+ * 窄屏上就会把内容顶出格子——`.gong{overflow:hidden}` 会直接裁掉星名与宫名。
+ * 实测：只加行距而不缩字，320px 上「冲」「合」「癸」「丁亥」「巽四」全被裁掉，
+ * 那比原来的遮挡更糟。故按宽度分三档，字号与行距一同缩放，两头都不失守。 ---- */
+@media (max-width: 419px) {
+    .feipan-gong-content .fp-xing { font-size: 13px; }
+    .feipan-gong-content .fp-row { font-size: 10px; }
+    .feipan-gong-content .fp-row .fp-an { font-size: 9px; }
+    .feipan-gong-content .fp-gongname { font-size: 9px; }
+    .feipan-gong-content .fp-row-harm,
+    .feipan-gong-content .fp-ren.fp-row-harm { margin-top: 10px; }
+    .feipan-gong-content .harm-mark { font-size: 7px; }
+    .feipan-gong-content .hg > .harm-mark { top: -10px; }
+}
+/* 359px 以下（iPhone SE1 一档）格高只剩 94px，而一格里最多可有三行带角标——
+ * 缩到再小也腾不出三条净空：算下来行距最多给到 6px，而角标本身就有 9px 高。
+ * 与其硬塞出遮挡或让宫名被裁，不如**只留描边、收起角标文字**：
+ * 三种害的描边本就三色分明，图例里也备了色环一栏，光凭颜色仍读得出是哪一害。
+ * 这是一处**明说的降级**，不是没做到——窄到这个份上，信息保住了，位置也没乱。 */
+@media (max-width: 359px) {
+    .feipan-gong-content .fp-row-harm,
+    .feipan-gong-content .fp-ren.fp-row-harm { margin-top: 0; }
+    .feipan-gong-content .hg > .harm-mark { display: none; }
+}
+
+/* ---- 窄屏：转盘 ----
+ * 转盘一格是四行等高的网格，460px 宽时行高约 35px、18px 的字上下各余 7px，
+ * 角标浮上去正好落在空白里；到 375px 行高只剩 28px，上下只余 3.5px，角标就压到
+ * 上一行的字上了。实测 150 张盘 × 全宽度：≤375px 有 138 处遮挡——**这是本就存在的**
+ * （改动前同样是 138 处），只是先前只挑一张盘看，没看出来。
+ * 与飞盘同一路数：字与角标一同按宽度缩，最窄一档只留描边。 */
+/* 下面这四档不是拍脑袋定的：用 Playwright 扫了 40 张盘 × 6 个宽度 × 25 组
+ * （字号 F × 角标偏移 T），逐组量「角标矩形是否与别的字的文字矩形相交」，
+ * 取每一档里**留有余量**的组合，不取刚好卡在边界上的那个。
+ * 边界处的可行组合（实测）：414px 时 F18 只有 T≤7 能过，F16 则 T6～10 全过——
+ * 故 414 一档退到 F16，宁可字小一号，也不吊在悬崖边上。 */
+@media (max-width: 439px) {
+    .gong-jiuxing, .gong-bamen, .gong-tiangan, .gong-dipan { font-size: 16px; }
+    .gong-bashen, .gong-dizhi { font-size: 14px; }
+    .gong-content .hg > .harm-mark { top: -8px; }
+}
+@media (max-width: 392px) {
+    .gong-jiuxing, .gong-bamen, .gong-tiangan, .gong-dipan { font-size: 15px; }
+    .gong-bashen, .gong-dizhi { font-size: 13px; }
+    .gong-content .harm-mark { font-size: 8px; }
+    .gong-content .hg > .harm-mark { top: -7px; }
+}
+@media (max-width: 375px) {
+    .gong-jiuxing, .gong-bamen, .gong-tiangan, .gong-dipan { font-size: 14px; }
+    .gong-bashen, .gong-dizhi { font-size: 12px; }
+    .gong-content .harm-mark { font-size: 8px; }
+    .gong-content .hg > .harm-mark { top: -7px; }
+}
+@media (max-width: 359px) {
+    .gong-jiuxing, .gong-bamen, .gong-tiangan, .gong-dipan { font-size: 13px; }
+    .gong-bashen, .gong-dizhi { font-size: 12px; }
+    /* 窄到这里，四行网格再也腾不出角标的净空；只留描边，颜色仍分得出三害（图例备了色环）。
+     * 与飞盘同一处明说的降级。 */
+    .gong-content .hg > .harm-mark { display: none; }
+}

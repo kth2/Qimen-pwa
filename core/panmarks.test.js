@@ -168,6 +168,52 @@ t('markUnsupportedDomains 只标占类下拉一处', function () {
   assert.ok(seg.indexOf('inPurpose') < 0, '仍在标已撤的下拉');
 });
 
+console.log('\n== 窄屏：角标不许压到邻字，也不许把字顶出格子 ==');
+t('宫格内容盒改用 border-box——content-box 下 height:100% 加内边距会顶出格子', function () {
+  // 这是本就存在的老账：.gong{overflow:hidden}，而 .gong-content 高 100% 再加 4px 内边距，
+  // 盒子比宫格高出 8px，最后一行（地盘干/宫名/宫数）被裁掉。宽屏行高富余看不出来，
+  // 窄屏一量就现形：375px 下 150 张盘里 81 处字被裁。量宽度时顺手量出来的。
+  var seg = CSS.slice(CSS.indexOf('.gong-content {'), CSS.indexOf('.gong-content {') + 900);
+  assert.ok(/box-sizing:\s*border-box/.test(seg), '.gong-content 缺 border-box');
+  var seg2 = CSS.slice(CSS.indexOf('.feipan-gong-content {'), CSS.indexOf('.feipan-gong-content {') + 600);
+  assert.ok(/box-sizing:\s*border-box/.test(seg2), '.feipan-gong-content 缺 border-box');
+});
+t('两派各有一套按宽度缩放的档位，且最窄一档只留描边', function () {
+  ['439px', '392px', '375px', '359px'].forEach(function (w) {
+    assert.ok(CSS.indexOf('max-width: ' + w) >= 0, '缺 max-width:' + w + ' 一档（转盘）');
+  });
+  assert.ok(CSS.indexOf('max-width: 419px') >= 0, '缺 max-width:419px 一档（飞盘）');
+  // 最窄一档：两派都只留描边、收起角标文字
+  var narrow = CSS.slice(CSS.indexOf('@media (max-width: 359px)'));
+  assert.ok((narrow.match(/\.hg > \.harm-mark \{ display: none/g) || []).length >= 1,
+    '359px 一档须收起角标文字，只留描边');
+});
+t('窄屏覆盖必须排在基准规则之后（媒体查询不加特异度，同选择器时后来者胜）', function () {
+  // 起初把它们写在基准规则前面，实测量出来角标位置仍是基准值，那一档等于整个没生效。
+  // 取**首次**出现处＝基准规则（媒体查询里的那几条都排在文件后段）
+  var base = CSS.indexOf('.feipan-gong-content .hg > .harm-mark {');
+  var media = CSS.indexOf('@media (max-width: 419px)');
+  assert.ok(base >= 0 && media >= 0, '基准规则或飞盘窄屏档位缺失');
+  assert.ok(media > base, '飞盘窄屏覆盖排在了基准规则前面，会被基准值盖掉');
+  var zbase = CSS.indexOf('.hg > .harm-mark {');          // 通用基准（转盘走这一条）
+  assert.ok(zbase >= 0);
+  assert.ok(CSS.indexOf('@media (max-width: 439px)') > zbase, '转盘窄屏覆盖排在了基准规则前面');
+});
+t('飞盘只给带角标的那一行腾空间，无害之盘排版一点不动', function () {
+  var seg = APP.slice(APP.indexOf('function cellFeipan('), APP.indexOf('function renderChart('));
+  assert.ok(/ht\.length \? ' fp-row-harm' : ''/.test(seg), '天盘行未按需加类');
+  assert.ok(/po\.length \? ' fp-row-harm' : ''/.test(seg), '人盘行未按需加类');
+  assert.ok(/hd\.length \? ' fp-row-harm' : ''/.test(seg), '地盘行未按需加类');
+  assert.ok(/\.fp-row-harm/.test(CSS), 'CSS 未定义 .fp-row-harm');
+});
+t('图例并列角标与色环——窄屏只剩描边时，得凭颜色认得出是哪一害', function () {
+  var seg = APP.slice(APP.indexOf('const HARM_LEGEND'), APP.indexOf('const HARM_LEGEND') + 1100);
+  ['harm-box-po', 'harm-box-xing', 'harm-box-mu'].forEach(function (c) {
+    assert.ok(seg.indexOf('lg-ring ' + c) >= 0, '图例缺 ' + c + ' 的色环');
+  });
+  assert.ok(/\.harm-legend \.lg-ring/.test(CSS), 'CSS 未定义色环');
+});
+
 console.log('\n== 缓存版本：改了界面就得换 CACHE，否则老用户看不到 ==');
 // 这条钉的是**当前**的名字，不是「变了就行」——变没变机器判不出，只有人知道。
 // 钉死之后，下次改界面的人必然要来动这一行，也就必然会想起换 CACHE 这回事。
@@ -176,8 +222,8 @@ t('sw.js 的 CACHE 名已随本次改动更新（改界面必换，否则老用�
   var SW = fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8');
   var m = SW.match(/const CACHE = '([^']+)'/);
   assert.ok(m, '找不到 CACHE');
-  assert.strictEqual(m[1], 'qimen-pwa-panmarks',
-    '本期 CACHE 应为 qimen-pwa-panmarks；若你又改了界面，请换个新名并同步改这一行');
+  assert.strictEqual(m[1], 'qimen-pwa-panmarks2',
+    '本期 CACHE 应为 qimen-pwa-panmarks2；若你又改了界面，请换个新名并同步改这一行');
 });
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');

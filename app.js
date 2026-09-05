@@ -80,10 +80,12 @@
   /** 门迫取引擎的 jiuGongAnalysis.menPo（wangshuai 亦读同一处，两边同源不另算）。 */
   function menPoAt(pan, g) { return !!(((pan.jiuGongAnalysis || {})[g] || {}).menPo); }
 
+  // 图例每一害并列**角标与色环**两样：窄屏飞盘腾不出角标的空间，只留描边，
+  // 那时就得靠颜色认——图例里没有色环，颜色便无从对照。
   const HARM_LEGEND = '<div class="harm-legend">' +
-    '<span class="lg"><sup class="harm-mark harm-po lg-mark">迫</sup>门迫</span>' +
-    '<span class="lg"><sup class="harm-mark harm-xing lg-mark">刑</sup>击刑</span>' +
-    '<span class="lg"><sup class="harm-mark harm-mu lg-mark">墓</sup>入墓</span>' +
+    '<span class="lg"><span class="lg-ring harm-box-po"></span><sup class="harm-mark harm-po lg-mark">迫</sup>门迫</span>' +
+    '<span class="lg"><span class="lg-ring harm-box-xing"></span><sup class="harm-mark harm-xing lg-mark">刑</sup>击刑</span>' +
+    '<span class="lg"><span class="lg-ring harm-box-mu"></span><sup class="harm-mark harm-mu lg-mark">墓</sup>入墓</span>' +
     '<span class="lg"><span class="circle-mark yellow-circle">空</span>空亡</span>' +
     '<span class="lg"><span class="circle-mark green-circle">马</span>驿马</span>' +
     '<span class="lg muted">四害减力：门迫/击刑各减半，空亡吉凶皆减半且须待填实冲实，入墓仅余两成</span>' +
@@ -125,15 +127,20 @@
     const dShen = sh((pan.diPanShen || {})[g]), dYi = (pan.diPan || {})[g] || '', dAn = (pan.diPanAnGan || {})[g] || '';
     // 四害两派通用：飞盘纲要「四害（门迫/击刑/空亡/入墓）」一节与转盘同一口径，
     // 故这里照标。零串味说的是取用与断法，不是这四条盘面事实。
+    //
+    // 飞盘一格里天/人/地三行贴得极紧（12px 字、行距 1.3，行间只余 1px），角标浮在字头上
+    // 就会压住上一行——实测截图里「心」被「墓刑」盖掉大半、「英」被「墓」盖住。
+    // 故凡带角标的那一行另加一个 fp-row-harm，由 CSS 给它腾出上方空间。
+    // 只给带角标的行加，无害之盘的排版一点不动。
     const po = menPoAt(pan, g) ? ['po'] : [], ht = ganHarms(tYi, g), hd = ganHarms(dYi, g);
     const cls = ['gong', 'gong' + g, pan.zhiFuLuoGong === g ? 'zhifu' : '',
       pan.zhiShiGong === g ? 'zhishi' : '', kong ? 'gong-kong' : ''].join(' ');
     return `<div class="${cls}"><div class="feipan-gong-content kuonang">
       ${(kong || ma) ? `<div class="fp-marks">${ma ? '<span class="circle-mark green-circle">马</span>' : ''}${kong ? '<span class="circle-mark yellow-circle">空</span>' : ''}</div>` : ''}
       <div class="fp-xing ${xingColor(pan.tianPanXing && pan.tianPanXing[g])}">${esc(star)}</div>
-      <div class="fp-row fp-tian"><span class="fp-shen">${esc(tShen)}</span><span class="fp-gan ${ganColor(tYi)}">${glyph(tYi, ht)}</span><span class="fp-an">${esc(tAn)}</span></div>
-      <div class="fp-row fp-ren"><span class="fp-men fp-ming">${glyph(mMen, po)}</span><span class="fp-men fp-an-men">${esc(aMen)}</span><span class="fp-an">${esc(rAn)}</span></div>
-      <div class="fp-row fp-di"><span class="fp-shen">${esc(dShen)}</span><span class="fp-gan ${ganColor(dYi)}">${glyph(dYi, hd)}</span><span class="fp-an">${esc(dAn)}</span></div>
+      <div class="fp-row fp-tian${ht.length ? ' fp-row-harm' : ''}"><span class="fp-shen">${esc(tShen)}</span><span class="fp-gan ${ganColor(tYi)}">${glyph(tYi, ht)}</span><span class="fp-an">${esc(tAn)}</span></div>
+      <div class="fp-row fp-ren${po.length ? ' fp-row-harm' : ''}"><span class="fp-men fp-ming">${glyph(mMen, po)}</span><span class="fp-men fp-an-men">${esc(aMen)}</span><span class="fp-an">${esc(rAn)}</span></div>
+      <div class="fp-row fp-di${hd.length ? ' fp-row-harm' : ''}"><span class="fp-shen">${esc(dShen)}</span><span class="fp-gan ${ganColor(dYi)}">${glyph(dYi, hd)}</span><span class="fp-an">${esc(dAn)}</span></div>
       <div class="fp-gongname">${esc(JG.name)}${NUM_CN[+g]}</div>
     </div></div>`;
   }

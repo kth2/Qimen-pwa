@@ -3,7 +3,7 @@
  * 后台再取新版本更新缓存，下次打开即最新；跨域(AI provider)与非 GET 一律不拦截。
  * CACHE 版本号由 build.js 在产出 dist/ 时以内容哈希盖章（源文件保持 dev 占位）。
  */
-const CACHE = 'qimen-pwa-panmarks';
+const CACHE = 'qimen-pwa-panmarks2';
 const ASSETS = [
   './', './index.html', './style.css', './engine.bundle.js', './core/shanxiang.js', './core/wangshuai.js', './core/yingqi.js', './core/yongshen.js', './core/xiangyi.js', './core/timing.js', './core/leixiang.js', './core/severity.js', './core/converge.js', './core/yinju.js', './core/geju.js', './core/shige.js', './core/qushu.js', './core/evidence.js', './core/casebook.js', './core/evaluate.js', './core/casestore.js', './core/revise.js', './knowledge/domains.json', './knowledge/symbols.json', './knowledge/domain-rules.json', './knowledge/timing-rules.json', './knowledge/leixiang.json', './knowledge/severity-rules.json', './knowledge/dimensions.json', './knowledge/yinju-rules.json', './knowledge/geju-81.json', './knowledge/shige-rules.json', './knowledge/qushu-rules.json', './llm.js', './app.js',
   './manifest.json', './assets/feipan-method.md', './assets/zhuanpan-method.md', './assets/shanxiang-method.md', './assets/icon.svg'
