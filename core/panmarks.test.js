@@ -222,8 +222,8 @@ t('sw.js 的 CACHE 名已随本次改动更新（改界面必换，否则老用�
   var SW = fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8');
   var m = SW.match(/const CACHE = '([^']+)'/);
   assert.ok(m, '找不到 CACHE');
-  assert.strictEqual(m[1], 'qimen-pwa-panmarks2',
-    '本期 CACHE 应为 qimen-pwa-panmarks2；若你又改了界面，请换个新名并同步改这一行');
+  assert.strictEqual(m[1], 'qimen-pwa-feedback23',
+    '本期 CACHE 应为 qimen-pwa-feedback23；若你又改了界面，请换个新名并同步改这一行');
 });
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
