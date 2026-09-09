@@ -592,6 +592,43 @@
       '请按纲要「日干为人、时干为事」：先审时干宫对日干宫(或年命宫)的生克盗泄定成败，再合值符值使、用神宫参断。'].join('\n');
   }
 
+  /**
+   * 收尾锚：把「你要回答的是哪个问题」再说一遍，钉在整条消息的**最末尾**。
+   *
+   * 起因是用户报「Gemini 与自定义端点的解读，前者更贴题」。实测把两路请求体逐字比对，
+   * system 13538 字、user 14214 字**完全相同**，temperature/maxTokens 也相同——
+   * 也就是说**不是提示词的差别**，是模型本身的差别。
+   *
+   * 但比对时看见了一个谁都该修的毛病：占问只在 user 消息的**第 4 个字**出现一次，
+   * 其后是一万四千字的盘面、判读、应期表，全文以一串「组合关键词池」收尾。
+   * 强模型扛得住，弱一点的模型会被末尾那堆词带偏——这正是「答得不贴题」的样子。
+   * 故在末尾把问题、占类与三条最硬的约束重述一遍：**近因效应对哪个模型都成立**，
+   * 强模型不受损，弱模型受益。
+   *
+   * 另有一层保险：Gemini 走 system_instruction，OpenAI 兼容端点走 role:"system"，
+   * 后者被各家后端的权重待遇不一，个别代理甚至整个丢掉。硬约束在这里再落一次，
+   * 万一 system 被轻视或丢弃，最要紧的几条仍然到得了模型跟前。
+   */
+  function tailAnchor(question, rc, catMap) {
+    const q = String(question || '').trim();
+    if (!q) return '';
+    const cat = (catMap && catMap.ruleLabel) || (rc && (rc.uiPick || rc.category)) || '';
+    const how = rc && rc.explicit ? '（你指定的）' : '（按问句自动判定）';
+    // 前导空行不能靠数组里的 '' —— 末尾那句 filter(Boolean) 会把它们一并滤掉，
+    // 结果分隔线直接黏在上一行的关键词池后面（实测输出：「…争斗、追索─────」）。
+    // 故换行由 join 之后统一前置。
+    return '\n\n' + ['─────────────────────────────',
+      '【回到你要回答的问题】以上全部盘面与判读，都是为了回答下面这一句——不是为了复述它们：',
+      '　　「' + q + '」',
+      cat ? '　　占类：' + cat + how + '　取用与判读规则以本占类为准。' : '',
+      '作答前自查三条：',
+      '　① **直接答这句问句问到的每一件事**；问句里有几问就答几问，一件都不许略过，' +
+        '也不要答它没问的（问「能不能找到」就先答能不能，问「在哪」就给方位，问「何时」就给应期）。',
+      '　② 用神以上方【用神落宫】所列为准，不得另取；应期只在【应期】所列锚点中选，不得自造日辰。',
+      '　③ 结论写在最前面，先给答案再给理由；理由须落到具体宫位与依据，不得只堆象义。'
+    ].filter(Boolean).join('\n');
+  }
+
   async function runAI() {
     const pan = window._pan; if (!pan) { $('aiStatus').textContent = '请先排盘'; return; }
     const q = $('aiQuestion').value.trim(); if (!q) { $('aiStatus').textContent = '请填写占问'; return; }
@@ -858,7 +895,7 @@
       // 证据包可用时由它承载旺衰/应期；不可用则退回原有的两段拼接。山向段始终保留。
       const analysisBlocks = evBlock || (wsBlock + yqBlock);
       const userMsg = prompt.user + (school !== 'feipan' ? riShiGanBlock(pan) : '')
-        + analysisBlocks + sxBlock;
+        + analysisBlocks + sxBlock + tailAnchor(q, rc, catMap);
       const answer = await LLM.chat(prompt.system + '\n' + AI_DISCIPLINE + sysExtra, userMsg, (full) => {
         streamed = true; $('aiAnswer').textContent = head + (full || '');
       // onStatus：把重试与备用切换过程显示出来。干等两分钟再报错，是最劝退的体验
