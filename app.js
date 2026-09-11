@@ -12,6 +12,7 @@
   const GJ = window.GeJu;       // 八十一格层（Phase 15；缺则格名仍只是宫格行里的裸标签）
   const SG = window.ShiGe;      // 时格层（Phase 16：五不遇时／天显时格；缺则不判时格）
   const QS = window.QuShu;      // 取数层（Phase 21：河图数＋先天/后天宫数；缺则取数仍只有河图数一路）
+  const MD = window.MdLite;     // 极简 Markdown 渲染（Phase 25；缺则答案退回纯文本，功能不受影响）
   const CB = window.Casebook;   // 案例本·经验层（Phase 5；只统计与建议，绝不改写教义规则）
   const CSTORE = window.CaseStore;
   const RV = window.Revise;     // 复盘正解与规则修订（Phase 6）
@@ -629,10 +630,54 @@
     ].filter(Boolean).join('\n');
   }
 
+  /* ---------- AI 答案的显示：渲染 Markdown（Phase 25） ----------
+   * 模型的解读本来就是 Markdown——骨架里就要求「### ① 结论」「- 逐条」，遇到逐宫对照、
+   * 应期候选这类内容它还会写表格。而答案框一直是 textContent + pre-wrap，表格于是
+   * 原样显示成一堆竖线。
+   *
+   * 不反过来禁止模型用表格：逐宫对照这类内容，表格本就是更该用的形式。
+   *
+   * 两条分寸：
+   *   ① **流式期间照旧用纯文本**。边生成边渲染既费性能，也会把写到一半的表格
+   *      （表头有了、对齐行还没写）渲染成奇形怪状，一行一跳。收尾再渲染一次即可。
+   *   ② **原文随时可看**。渲染器是本仓自己写的小东西，万一它把某段弄拧了，
+   *      得让人一眼能对回原文；何况复制原文去别处用也是常事。
+   * 存进案例本的始终是**原文**，渲染只是显示层的事。 */
+  let _answerRaw = '', _answerShowRaw = false;
+  function paintAnswer() {
+    const box = $('aiAnswer'), bar = $('aiAnswerBar');
+    if (!box) return;
+    const canRender = !!(MD && MD.render) && MD.looksMarkdown(_answerRaw);
+    if (bar) {
+      bar.style.display = canRender ? 'block' : 'none';
+      if ($('aiRawToggle')) $('aiRawToggle').textContent = _answerShowRaw ? '显示表格' : '查看原文';
+      if ($('aiRawHint')) $('aiRawHint').textContent = _answerShowRaw
+        ? '　原文即模型所写的 Markdown，存进案例本的也是这一份'
+        : '　表格与分节已渲染；点左键可看模型写的原文';
+    }
+    if (canRender && !_answerShowRaw) {
+      box.classList.add('md-on');
+      // 只放本模块自产的标签：MdLite 先转义再生成，不放行任何外来标签
+      box.innerHTML = MD.render(_answerRaw);
+    } else {
+      box.classList.remove('md-on');
+      box.textContent = _answerRaw;
+    }
+  }
+  /** 流式途中：不渲染，纯文本直出，避免把写到一半的表格画成怪样 */
+  function streamAnswer(text) {
+    _answerRaw = text;
+    const box = $('aiAnswer');
+    if (!box) return;
+    box.classList.remove('md-on');
+    box.textContent = text;
+  }
+
   async function runAI() {
     const pan = window._pan; if (!pan) { $('aiStatus').textContent = '请先排盘'; return; }
     const q = $('aiQuestion').value.trim(); if (!q) { $('aiStatus').textContent = '请填写占问'; return; }
     const btn = $('aiBtn'); btn.disabled = true; $('aiAnswer').style.display = 'none';
+    if ($('aiAnswerBar')) $('aiAnswerBar').style.display = 'none';
     $('aiStatus').textContent = 'AI 解读中…(云端约 10-30s，本机模型更久)';
     try {
       await loadKnowledge();   // 先备好知识库：fallbackCategory 的占类换算依赖它
@@ -662,7 +707,8 @@
       const head = `【占类：${prompt.context.category || '综合'}　模型：${LLM.info().provider}/${LLM.info().model}】\n\n`;
       // 流式：边生成边显示，既提升观感也避免长响应在网关侧 504
       $('aiStatus').textContent = 'AI 解读中…(边生成边显示)';
-      $('aiAnswer').style.display = 'block'; $('aiAnswer').textContent = head;
+      $('aiAnswer').style.display = 'block';
+      _answerShowRaw = false; streamAnswer(head);
       let streamed = false;
       const sx = pan.shanXiang;
       const sxBlock = sx ? ['', '【山向/宅盘背景】',
@@ -897,11 +943,12 @@
       const userMsg = prompt.user + (school !== 'feipan' ? riShiGanBlock(pan) : '')
         + analysisBlocks + sxBlock + tailAnchor(q, rc, catMap);
       const answer = await LLM.chat(prompt.system + '\n' + AI_DISCIPLINE + sysExtra, userMsg, (full) => {
-        streamed = true; $('aiAnswer').textContent = head + (full || '');
+        streamed = true; streamAnswer(head + (full || ''));
       // onStatus：把重试与备用切换过程显示出来。干等两分钟再报错，是最劝退的体验
       }, (msg) => { $('aiStatus').textContent = msg; });
-      if (!streamed || !answer) $('aiAnswer').textContent = head + (answer || '(无内容)');
-      else $('aiAnswer').textContent = head + answer; // 收尾用清理后的完整文本(去 <think> 等)
+      // 收尾用清理后的完整文本（去 <think> 等），并在此**一次性**渲染 Markdown
+      _answerRaw = head + ((!streamed || !answer) ? (answer || '(无内容)') : answer);
+      paintAnswer();
       $('aiStatus').textContent = '完成';
       // 备好「存为案例」的素材。答案截断到 8000 字：全文可能极长，手机存储不该被单条撑爆
       if (store && CB) {
@@ -1155,7 +1202,11 @@
       <div style="font-size:13px;">
         <div><b>${esc(rec.question || '')}</b> <span class="muted">${esc(rec.chartRef.siZhu || '')}</span></div>
         ${rec.answer ? `<details style="margin-top:6px;"><summary>📄 当时的解读全文（打分前先对照一下）</summary>
-          <div style="white-space:pre-wrap;background:#f7f7f7;border-radius:6px;padding:8px;margin-top:4px;max-height:240px;overflow:auto;font-size:12px;">${esc(rec.answer)}</div>
+          <div class="${(MD && MD.looksMarkdown(rec.answer)) ? 'md-on' : ''}" style="white-space:pre-wrap;background:#f7f7f7;border-radius:6px;padding:8px;margin-top:4px;max-height:240px;overflow:auto;font-size:12px;">${
+            // 存档的解读全文同样渲染：这一栏是复盘时拿来跟实况逐条对照的，
+            // 表格散成竖线最难对。MdLite 先转义再生成，故此处放 HTML 与 esc() 同样安全。
+            (MD && MD.render && MD.looksMarkdown(rec.answer)) ? MD.render(rec.answer) : esc(rec.answer)
+          }</div>
         </details>` : '<div class="muted" style="margin-top:6px;">（本条案例未记录解读全文——存档前的旧案例会这样）</div>'}
         <div style="margin-top:6px;">
           <div class="muted">① 实际发生了什么？（用你自己的话写，越具体越有用）</div>
@@ -1857,6 +1908,9 @@
         await renderArchive();
       });
       refreshCaseCount(); renderCaseViews(); loadRevisions();
+    }
+    if ($('aiRawToggle')) {
+      $('aiRawToggle').addEventListener('click', () => { _answerShowRaw = !_answerShowRaw; paintAnswer(); });
     }
     // 占类下拉：选项直接写在 index.html 里（从前是启动时从排盘栏「目的」下拉搬过来的，
     // 那个下拉已撤，再搬就搬空了）。改占类要连带重画「分析与建议」——用神是按目的取的，
