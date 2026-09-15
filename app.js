@@ -1631,11 +1631,29 @@
 
     $('caseRevView').innerHTML = `
       <div style="font-size:13px;">
-        <p class="muted" style="margin:0 0 8px;">
-          修订**独立于《解断方法纲要》**：纲要文件一字不动，修订自成一集、可导出、可随时停用。
+        <p class="muted" style="margin:0 0 6px;line-height:1.7;">
+          <b>修订独立于《解断方法纲要》</b>：纲要文件一字不动，修订自成一集、可导出、可随时停用。
           且只允许<b>收窄／降权／停用</b>——不允许从错例反推出新规则，
           因为象数系统里任何结果都能被事后圆回来。
         </p>
+        <!-- 下面三条是用户问出来的：他看到「纲要一字不动」，以为反推等于白做。
+             那两件事其实是分开的——教义文件不改，修订却是真参与判读的。
+             这种「看了说明仍不知道到底改没改」的地方，就该把话写在界面上，
+             而不是留给人去翻代码。 -->
+        <div class="muted" style="margin:0 0 8px;padding:6px 8px;background:#f7f7f7;border-radius:6px;line-height:1.75;">
+          <div style="margin-bottom:3px;">① <b>反推本身不改变任何判读。</b>
+            点「让 AI 反推易理偏差」只是生成<b>候选</b>并做冲突检查，
+            <b>必须再点候选下面的「采纳」</b>才会落盘生效。
+            候选须有 ≥${RV.MIN_FAIL_CASES} 例不应验支撑、且与已应验案例冲突不超过 1 例，
+            才会出现「采纳」按钮；不够格的只显示「（不建议采纳）」。</div>
+          <div style="margin-bottom:3px;">② <b>采纳之后，下一次解读是真的会变。</b>
+            被停用的那条判读会整段从送给 AI 的证据包里消失，倾向计数随之改变，
+            并附一行「本次应用了 N 条本机经验修订」。取消下面的「启用」勾选即刻恢复原样。</div>
+          <div>③ <b>只作用于「占类象义判读」这一层。</b>
+            排盘与格局、用神取用、旺衰四害与力量校验、应期锚点、类象取用、证据合流、
+            伏吟反吟、八十一格、时格、取数——<b>这些都不受修订影响</b>，
+            它们照旧按纲要与引擎走。</div>
+        </div>
         <div><b>当前修订集</b>　<span class="muted">${adopted.length} 条，哈希 ${esc((_revIndex && _revIndex.hash) || '—')}</span></div>
         <div style="max-height:220px;overflow:auto;margin:4px 0;">${adoptedHtml}</div>
         <hr style="border:none;border-top:1px solid #eee;margin:8px 0;">

@@ -277,5 +277,50 @@ t('adopt 记下易理依据、支撑案例、冲突案例与来源声明', funct
   assert.strictEqual(rec.enabled, true);
 });
 
+console.log('\n== 界面说明：把「反推≠生效」和「只改这一层」写在明处 ==');
+(function () {
+  var fs = require('fs');
+  var APP = fs.readFileSync(require('path').join(__dirname, '..', 'app.js'), 'utf8');
+  var seg = APP.slice(APP.indexOf("$('caseRevView').innerHTML"), APP.indexOf("$('caseRevView').innerHTML") + 3000);
+  t('说明里写明「反推本身不改变任何判读，须再点采纳」', function () {
+    assert.ok(/反推本身不改变任何判读/.test(seg), '缺第①条');
+    assert.ok(/必须再点候选下面的「采纳」/.test(seg), '未说清还要点采纳');
+    assert.ok(/不建议采纳/.test(seg), '未说明不够格的没有采纳按钮');
+  });
+  t('说明里写明「采纳之后下一次解读真的会变」，并说清怎么撤回', function () {
+    assert.ok(/采纳之后，下一次解读是真的会变/.test(seg), '缺第②条');
+    assert.ok(/从送给 AI 的证据包里消失/.test(seg), '未说清变在哪里');
+    assert.ok(/取消下面的「启用」勾选即刻恢复原样/.test(seg), '未说清如何撤回');
+  });
+  t('说明里写明「只作用于占类象义判读这一层」，并逐一点名不受影响的层', function () {
+    assert.ok(/只作用于「占类象义判读」这一层/.test(seg), '缺第③条');
+    ['排盘与格局', '用神取用', '旺衰四害', '应期锚点', '类象取用', '证据合流',
+     '伏吟反吟', '八十一格', '时格', '取数'].forEach(function (n) {
+      assert.ok(seg.indexOf(n) >= 0, '未点名「' + n + '」');
+    });
+  });
+  t('这三条与代码实情相符：_revIndex 只传进 XiangYi 一处', function () {
+    // 说明写得再好，与代码不符就是误导。此处按源码核对：
+    // ①「须再点采纳」——deriveBias 只填 _revCandidates，adoptRevision 才落盘
+    assert.ok(/_revCandidates = RV\.review\(/.test(APP), '反推应只产候选');
+    assert.ok(!/await saveRevisions\(/.test(APP.slice(APP.indexOf('async function deriveBias('),
+      APP.indexOf('async function adoptRevision('))), '反推里不得直接落盘');
+    assert.ok(/async function adoptRevision\([\s\S]{0,400}?await saveRevisions\(list\)/.test(APP),
+      '采纳才落盘');
+    // ②③ 修订只喂给 XiangYi
+    assert.strictEqual((APP.match(/revisions: _revIndex/g) || []).length, 1,
+      '_revIndex 的消费者不止一处，第③条就说错了');
+  });
+  t('MIN_FAIL_CASES 由代码取值，不在界面里另写死一个数', function () {
+    assert.ok(/\$\{RV\.MIN_FAIL_CASES\}/.test(seg),
+      '门槛须引 RV.MIN_FAIL_CASES，写死的数会跟代码漂移');
+  });
+  t('说明里不留 Markdown 星号（这里是 innerHTML，** 会原样显示）', function () {
+    var head = APP.slice(APP.indexOf('修订独立于《解断方法纲要》') - 200,
+                         APP.indexOf('修订独立于《解断方法纲要》') + 1800);
+    assert.ok(!/\*\*/.test(head), '说明里仍有 ** ，界面上会原样显示成星号');
+  });
+})();
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);
