@@ -126,6 +126,61 @@
       };
     }).sort(function (a, b) { return b.n - a.n; });
 
+    /* ---------- 按模型：Gemini 与自定义端点谁更准 ----------
+     * 归属取的是案例本里 meta.label（由 LLM.lastUsed() 写入，即**实际作答**的那一路），
+     * 不是当时配置里选的那一路——备用链接管过的那些，记的是接管者。
+     *
+     * 两条分寸，缺一不可：
+     *   ① **旧案例没有这一栏**。这项记录自 Phase 27 才有，此前的案例一律归入「未记录」，
+     *      且**不参与比较**——把它们摊进任何一家都是编的。
+     *   ② **这不是对照实验**。两家拿到的盘与问题并不相同（谁在用就归谁），
+     *      样本也非随机分配。所以它只回答「我用 A 的那些盘后来对了几成」，
+     *      **不回答「A 比 B 强」**。这句话写进 notMeasured，不许被读成后者。 */
+    var md = {}, unlabeled = 0;
+    graded.forEach(function (c) {
+      var m = c.meta || {};
+      var key = m.label || (m.provider ? (m.provider + '/' + (m.model || '?')) : '');
+      if (!key) { unlabeled++; return; }
+      var t = (md[key] = md[key] || {
+        label: key, provider: m.provider || '', n: 0, happened: 0, partial: 0, fail: 0, score: 0, fellBack: 0
+      });
+      t.n++;
+      if (m.fellBack) t.fellBack++;
+      if (c.feedback.outcome === 'happened') t.happened++;
+      else if (c.feedback.outcome === 'partial') t.partial++;
+      else t.fail++;
+      var sc2 = CB && CB.caseScore ? CB.caseScore(c) : null;
+      if (sc2) t.score += sc2.score;
+    });
+    var modelRows = Object.keys(md).map(function (k) {
+      var t = md[k];
+      var enough = t.n >= minN;
+      return {
+        label: t.label, provider: t.provider, n: t.n, enough: enough, fellBack: t.fellBack,
+        exactRate: enough ? pct(t.happened, t.n) : null,
+        failRate: enough ? pct(t.fail, t.n) : null,
+        weightedScore: enough ? round(t.score / t.n) : null,
+        display: enough
+          ? '完全应验 ' + pct(t.happened, t.n) + '%　未应验/相反 ' + pct(t.fail, t.n) + '%　加权 ' + round(t.score / t.n)
+          : '样本不足 ' + t.n + '/' + minN + '（不给率，小样本的百分比会被当成精度）'
+      };
+    }).sort(function (a, b) { return b.n - a.n; });
+    // 够格比较的家数：少于两家就没什么可比的，说清楚而不是摆个单行表让人误以为在比
+    var comparable = modelRows.filter(function (r) { return r.enough; });
+    rep.byModel = {
+      rows: modelRows, unlabeled: unlabeled, minSamples: minN,
+      comparable: comparable.length,
+      spread: comparable.length >= 2
+        ? round(Math.max.apply(null, comparable.map(function (r) { return r.weightedScore; })) -
+                Math.min.apply(null, comparable.map(function (r) { return r.weightedScore; })))
+        : null,
+      _note: unlabeled
+        ? '另有 ' + unlabeled + ' 例未记录模型（本项自 Phase 27 才开始记），**不参与比较**。'
+        : '',
+      _caveat: '这不是对照实验：两家拿到的盘与问题并不相同，样本也非随机分配。' +
+        '本项只回答「用某一路的那些盘后来对了几成」，**不回答「甲比乙强」**。'
+    };
+
     /* ---------- 规则与象义可靠度：直接取 casebook 的口径，不另算一套 ---------- */
     if (CB && CB.calibrate) {
       var cal = CB.calibrate(cases);
@@ -230,6 +285,9 @@
 
     /* ---------- 明说算不了的，以及为什么 ---------- */
     rep.notMeasured = [
+      { metric: '模型之间的优劣（甲比乙强）',
+        why: '「按模型」一节给的是各自的应验率，**不是对照实验**：两家拿到的盘与问题不同、' +
+             '样本非随机分配，且占类分布也未对齐。要真比，须同一批盘两家各答一遍。' },
       { metric: '逐条断言准确率', why: '案例本只记了**断错**的断言（misreads），未记全部断言；分母不存在。要算须在解读侧先把断言结构化存下。' },
       { metric: '方位/处所属性准确率', why: '预测侧没有结构化存下「断的是哪个方位/处所」，只有自由文本。要算须让证据合流层把候选与最终采用值一并入案。' },
       { metric: '时辰级应期准确率', why: '仅 ' + rep.coverage.withTime + '% 的案例填了实际时刻（' +
@@ -307,6 +365,27 @@
       L.push('■ 档位校准（说是 A 级的，后来对了几成）');
       r.calibration.rows.forEach(function (x) { line(x.tier + '级', x.display); });
       L.push('  ' + r.calibration._note);
+      L.push('');
+    }
+    if (r.byModel) {
+      L.push('■ 按模型（哪一路作答；备用接管过的算接管者）');
+      if (!r.byModel.rows.length) {
+        L.push('  尚无带模型标记的案例——本项自 Phase 27 才开始记，' +
+          (r.byModel.unlabeled ? '现有 ' + r.byModel.unlabeled + ' 例都在此之前。' : '攒几条新案例后再看。'));
+      } else {
+        r.byModel.rows.forEach(function (x) {
+          L.push('  ' + x.label + '(n=' + x.n + ')：' + x.display +
+            (x.fellBack ? '　其中 ' + x.fellBack + ' 例由备用接管' : ''));
+        });
+        if (r.byModel._note) L.push('  ' + r.byModel._note);
+        if (r.byModel.comparable < 2) {
+          L.push('  **目前还比不出来**：达到 ' + r.byModel.minSamples +
+            ' 例门槛的只有 ' + r.byModel.comparable + ' 家，两家都够格才谈得上比较。');
+        } else {
+          L.push('  加权分差距 ' + r.byModel.spread + '（' + r.byModel.comparable + ' 家达门槛）。');
+        }
+        L.push('  ' + r.byModel._caveat);
+      }
       L.push('');
     }
     L.push('■ 本报告**算不了**的指标（列出来，免得被人当成没测或测过了）');

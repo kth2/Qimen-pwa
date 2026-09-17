@@ -378,6 +378,10 @@ const LLM = (() => {
     }
     return chain;
   }
+  /** 该 provider 在当前配置下用的模型名（不含 provider 前缀）。 */
+  function modelOf(cfg, p) {
+    return labelOf(cfg, p, '').split('/').slice(1).join('/');
+  }
   function labelOf(cfg, p, model) {
     if (p === 'local') return 'Ollama/' + (model || cfg.ollamaModel || 'qwen3:latest');
     if (p === 'custom') return '自定义/' + (model || cfg.customModel || '?');
@@ -396,9 +400,16 @@ const LLM = (() => {
    * @param onToken(fullText) 可选，逐步回调「累积全文」
    * @param onStatus(text)    可选，回调重试/切换进度，让等待过程可见而非干等
    */
+  /* 最近一次成功作答的那一步。**必须是实际答话的那一路**，不是配置里选的那一路——
+   * 备用链会接管：Gemini 过载改由自定义端点作答时，info() 仍报 Gemini，
+   * 拿它去记「这答案是谁给的」就会记反。要比较两家的应验率，记错等于白记。 */
+  let _lastUsed = null;
+  function lastUsed() { return _lastUsed ? Object.assign({}, _lastUsed) : null; }
+
   async function chat(system, user, onToken, onStatus) {
     const cfg = getCfg();
     const chain = buildChain(cfg);
+    _lastUsed = null;
     const maxRetries = Math.max(0, Math.min(numOr(cfg.maxRetries, DEF.maxRetries), 6));
     const say = (t) => { try { if (onStatus) onStatus(t); } catch (_) {} };
     let lastErr = null;
@@ -408,7 +419,16 @@ const LLM = (() => {
       if (ci > 0) say(`改用备用：${step.label}…`);
       for (let attempt = 0; attempt <= maxRetries; attempt++) {
         try {
-          return await callOne(step, cfg, system, user, onToken, attempt > 0);
+          const text = await callOne(step, cfg, system, user, onToken, attempt > 0);
+          _lastUsed = {
+            provider: step.provider,
+            model: step.model || modelOf(cfg, step.provider),
+            label: step.label,
+            fellBack: ci > 0,                 // 是否由备用接管
+            configured: cfg.provider || 'gemini',
+            retries: attempt
+          };
+          return text;
         } catch (e) {
           lastErr = e;
           // 配置错误：重试和换 provider 都没用，直接抛给用户去改
@@ -570,8 +590,9 @@ const LLM = (() => {
 
   return {
     getCfg, saveCfg, chat, info, probe, DEF,
+    lastUsed,   // 实际作答的那一路（备用接管后与 info() 不同）——案例本据此归属模型
     // 供单测与诊断使用的纯函数（不参与业务流程）
-    _internals: { isTransient, isOverloaded, isFatalConfig, backoffMs, parseRetryAfter, buildChain, labelOf, reasonOf, finalize, probeRead }
+    _internals: { isTransient, isOverloaded, isFatalConfig, backoffMs, parseRetryAfter, buildChain, labelOf, modelOf, reasonOf, finalize, probeRead }
   };
 })();
 
