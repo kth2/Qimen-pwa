@@ -37,7 +37,17 @@ const LLM = (() => {
   }
   function saveCfg(cfg) { localStorage.setItem(LS, JSON.stringify(cfg)); }
 
+  /* 两个取数助手，差别只在**0 算不算数**，用错一个就会静默吞掉用户的设置。
+   *
+   * numOr —— 0 无意义的场合（超时、maxTokens）。界面上留空即存 0，故 0 在这里
+   *   就是「没填」，回落默认；真按 0 走的话是「0 毫秒超时」「0 个 token」，没法用。
+   * numOr0 —— 0 本身是一个**合法取值**的场合：
+   *   · 重试次数 0 ＝ 不重试（输入框就写着 min="0"，app.js 也特地保留了 0，
+   *     偏偏这里按 <=0 回落默认，用户填 0 实际仍重试 3 次——设置形同虚设）；
+   *   · 温度 0 ＝ 尽量确定的输出。
+   *   这里只拦「空、非数、负数」，不拦 0。 */
   function numOr(v, d) { const n = Number(v); return (v === '' || v == null || !isFinite(n) || n <= 0) ? d : n; }
+  function numOr0(v, d) { const n = Number(v); return (v === '' || v == null || !isFinite(n) || n < 0) ? d : n; }
   function stripThink(t) { return (t || '').replace(/<think>[\s\S]*?<\/think>/gi, '').trim(); }
 
   /* ---------------- 错误分类 ---------------- */
@@ -216,7 +226,7 @@ const LLM = (() => {
         body: JSON.stringify({
           model, stream: true, think: false,
           messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
-          options: { temperature: numOr(cfg.temperature, DEF.temperature), num_ctx: 8192 }
+          options: { temperature: numOr0(cfg.temperature, DEF.temperature), num_ctx: 8192 }
         })
       });
       if (!r.ok) throw await httpError(r, 'Ollama');
@@ -261,7 +271,7 @@ const LLM = (() => {
     const sink = { full: '', truncated: false };
     // maxOutputTokens 对思考型模型是「思考+回答」的总额——思考会占额度，故默认给足。
     const genCfg = {
-      temperature: numOr(cfg.temperature, DEF.temperature),
+      temperature: numOr0(cfg.temperature, DEF.temperature),
       maxOutputTokens: numOr(cfg.maxTokens, DEF.maxTokens)
     };
     if (cfg.geminiThinkingBudget != null && cfg.geminiThinkingBudget !== '')
@@ -314,7 +324,7 @@ const LLM = (() => {
         signal: guard.signal,
         body: JSON.stringify({
           model: modelOverride || cfg.customModel || 'gpt-3.5-turbo',
-          temperature: numOr(cfg.temperature, DEF.temperature),
+          temperature: numOr0(cfg.temperature, DEF.temperature),
           max_tokens: numOr(cfg.maxTokens, DEF.maxTokens),
           // 开流式是本次修复的关键：整体生成时长响应必然撞总超时，且用户全程看不到进展
           stream: true,
@@ -410,7 +420,7 @@ const LLM = (() => {
     const cfg = getCfg();
     const chain = buildChain(cfg);
     _lastUsed = null;
-    const maxRetries = Math.max(0, Math.min(numOr(cfg.maxRetries, DEF.maxRetries), 6));
+    const maxRetries = Math.max(0, Math.min(numOr0(cfg.maxRetries, DEF.maxRetries), 6));
     const say = (t) => { try { if (onStatus) onStatus(t); } catch (_) {} };
     let lastErr = null;
 
@@ -592,7 +602,7 @@ const LLM = (() => {
     getCfg, saveCfg, chat, info, probe, DEF,
     lastUsed,   // 实际作答的那一路（备用接管后与 info() 不同）——案例本据此归属模型
     // 供单测与诊断使用的纯函数（不参与业务流程）
-    _internals: { isTransient, isOverloaded, isFatalConfig, backoffMs, parseRetryAfter, buildChain, labelOf, modelOf, reasonOf, finalize, probeRead }
+    _internals: { isTransient, isOverloaded, isFatalConfig, backoffMs, parseRetryAfter, buildChain, labelOf, modelOf, reasonOf, finalize, probeRead, numOr, numOr0 }
   };
 })();
 

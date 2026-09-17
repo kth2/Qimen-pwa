@@ -17,6 +17,7 @@ var LLM = require(path.join(__dirname, '..', 'llm.js'));
 var I = LLM._internals;
 
 var pass = 0, fail = 0;
+var pending = [];   // 异步用例：收集起来最后统一等，免得 process.exit 先跑掉
 function t(name, fn) {
   try { fn(); pass++; console.log('  ✓ ' + name); }
   catch (e) { fail++; console.log('  ✗ ' + name + '  ->  ' + e.message); }
@@ -315,5 +316,83 @@ t('probeRead：空体与坏 JSON 不抛异常', function () {
   assert.deepStrictEqual(probeRead('<html>502</html>'), { text: '', finish: '' });
 });
 
-console.log('\n' + pass + ' passed, ' + fail + ' failed');
-process.exit(fail ? 1 : 0);
+console.log('\n== 0 是合法取值，不许被当成「没填」吞掉 ==');
+t('numOr0 认 0，numOr 不认——两者只差这一点', function () {
+  assert.strictEqual(I.numOr0(0, 3), 0, '重试 0 次就是 0 次');
+  assert.strictEqual(I.numOr(0, 3), 3, '超时/maxTokens 那一路，0 仍作「没填」');
+  // 其余情形两者一致：空、非数、负数都回落默认
+  [['', 3], [null, 3], [undefined, 3], ['abc', 3], [NaN, 3], [-1, 3]].forEach(function (c) {
+    assert.strictEqual(I.numOr0(c[0], 3), c[1], 'numOr0(' + JSON.stringify(c[0]) + ')');
+    assert.strictEqual(I.numOr(c[0], 3), c[1], 'numOr(' + JSON.stringify(c[0]) + ')');
+  });
+  assert.strictEqual(I.numOr0(2, 3), 2);
+  assert.strictEqual(I.numOr0('2', 3), 2, '界面存的是字符串，也要认');
+  assert.strictEqual(I.numOr0(0.35, 1), 0.35, '小数照旧');
+});
+
+console.log('\n== 重试次数填 0：得**真的**不重试 ==');
+(function () {
+  // 只验算式不够——这条 bug 的表现正是「算式看着对，行为不对」。故数实际请求次数。
+  var store = {};
+  global.localStorage = global.localStorage || {
+    getItem: function (k) { return Object.prototype.hasOwnProperty.call(store, k) ? store[k] : null; },
+    setItem: function (k, v) { store[k] = String(v); }
+  };
+  function countCalls(maxRetries) {
+    var n = 0, realFetch = global.fetch;
+    global.fetch = function () { n++; return Promise.resolve(new Response('busy', { status: 503 })); };
+    LLM.saveCfg({ provider: 'gemini', geminiKey: 'K', geminiModel: 'm', fallbackProvider: 'none', maxRetries: maxRetries });
+    return LLM.chat('s', 'u').then(
+      function () { global.fetch = realFetch; throw new Error('本该失败'); },
+      function () { global.fetch = realFetch; return n; });
+  }
+  // 必须**串行**跑：三者共用 global.fetch 与同一份配置，并发会互相踩，
+  // 得出的次数是别人那一轮的（第一版就这么错过，看着像功能没修好）。
+  function check(label, cfg, want) {
+    return countCalls(cfg).then(function (n) {
+      try { assert.strictEqual(n, want); pass++; console.log('  ✓ ' + label); }
+      catch (e) { fail++; console.log('  ✗ ' + label + ' → 期望 ' + want + ' 次，实得 ' + n + ' 次'); }
+    });
+  }
+  pending.push(
+    check('maxRetries=0 → 只请求 1 次（修复前会打 4 次）', 0, 1)
+      .then(function () { return check('maxRetries=1 → 请求 2 次（首发 + 1 次重试）', 1, 2); })
+      .then(function () { return check('留空 → 请求 4 次（首发 + 默认 3 次重试）', '', 4); })
+  );
+})();
+
+console.log('\n== 温度 0 同理（0 ＝ 尽量确定，不是「没填」） ==');
+(function () {
+  pending.push((function () {
+    var seen = null, realFetch = global.fetch;
+    global.fetch = function (u, o) {
+      seen = JSON.parse(o.body);
+      return Promise.resolve(new Response('data: ' + JSON.stringify(
+        { candidates: [{ content: { parts: [{ text: 'x' }] }, finishReason: 'STOP' }] }) + '\n\n',
+        { status: 200, headers: { 'content-type': 'text/event-stream' } }));
+    };
+    LLM.saveCfg({ provider: 'gemini', geminiKey: 'K', geminiModel: 'm', fallbackProvider: 'none', temperature: 0 });
+    return LLM.chat('s', 'u').then(function () {
+      global.fetch = realFetch;
+      try {
+        assert.strictEqual(seen.generationConfig.temperature, 0, '温度 0 被吞成了默认值');
+        pass++; console.log('  ✓ temperature=0 原样送出（此前会变成 ' + LLM.DEF.temperature + '）');
+      } catch (e) { fail++; console.log('  ✗ temperature=0 → ' + e.message); }
+    });
+  })());
+})();
+
+console.log('\n== 界面把 0 的含义说出来 ==');
+t('设置面板写明「填 0 即不重试」', function () {
+  var fs = require('fs');
+  var html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  var at = html.indexOf('cfgMaxRetries');
+  var seg = html.slice(at, at + 400);
+  assert.ok(/填 0 即不重试/.test(seg), '输入框写着 min="0"，就得告诉用户 0 是什么意思');
+  assert.ok(/留空用默认/.test(seg), '也要说清留空是什么行为');
+});
+
+Promise.all(pending).then(function () {
+  console.log('\n' + pass + ' passed, ' + fail + ' failed');
+  process.exit(fail ? 1 : 0);
+});
