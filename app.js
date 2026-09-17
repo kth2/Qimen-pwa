@@ -965,7 +965,19 @@
           // 取数层同理：不存，「宫数入候选之后数字题是不是更准」就永远考核不了——
           // 而这正是本层唯一还欠着的那个问题。
           qushu: runOut.qushu,
-          answer: String(answer || '').slice(0, 8000)
+          answer: String(answer || '').slice(0, 8000),
+          // 哪个模型答的。取 LLM.lastUsed() 而非 LLM.info()——备用链接管时后者仍报主选那一路，
+          // 拿它记账会把「Gemini 过载、自定义端点接的班」记成 Gemini。
+          // 要比较两家的应验率，记错等于白记。fellBack 一并留下，日后能把接管的那些单拎出来看。
+          meta: (function () {
+            const u = (LLM.lastUsed && LLM.lastUsed()) || null;
+            const i = LLM.info();
+            return u
+              ? { provider: u.provider, model: u.model, label: u.label,
+                  fellBack: !!u.fellBack, configured: u.configured, retries: u.retries }
+              : { provider: i.provider, model: i.model, label: i.provider + '/' + i.model,
+                  fellBack: false, configured: i.provider, _note: 'lastUsed 缺席，退回配置值' };
+          })()
         };
         $('caseSaveBar').style.display = 'block';
         $('caseSaveTag').textContent = '';
@@ -1064,8 +1076,8 @@
     const noAns = rec_hasAnswer(r) ? '' : '　<span class="muted">（未存解读全文）</span>';
     const marked = fb ? (Object.keys(fb.ruleVerdicts || {}).length + Object.keys(fb.symbolVerdicts || {}).length) : 0;
     return `<div style="border-bottom:1px solid #eee;padding:6px 0;font-size:13px;">
-      <div><b>${esc(r.question || '(未填问题)')}</b> <span class="muted">${esc(r.domain || '')}　${esc(r.chartRef.siZhu || '')}</span></div>
-      <div class="muted">${esc((r.createdAt || '').slice(0, 10))}　判读 ${r.fired.rules.length} 条　锚点 ${r.fired.anchors.length} 个　${tag}${marked ? `　已逐条标注 ${marked} 条` : ''}${hit}${misTag}${partTag}${noAns}</div>
+      <div><b>${esc(r.question || '(未填问题)')}</b> <span class="muted">${esc(r.domain || '')}　${esc((r.chartRef && r.chartRef.siZhu) || '')}</span></div>
+      <div class="muted">${esc((r.createdAt || '').slice(0, 10))}　判读 ${((r.fired && r.fired.rules) || []).length} 条　锚点 ${((r.fired && r.fired.anchors) || []).length} 个　${tag}${marked ? `　已逐条标注 ${marked} 条` : ''}${hit}${misTag}${partTag}${noAns}</div>
       ${actual}
       <div style="margin-top:4px;">
         <button class="btn" style="background:#3c763d;padding:3px 8px;font-size:12px;" data-open="${esc(r.id)}">${fb ? '查看/修改复盘' : '📝 填写实况并复盘'}</button>
@@ -1190,7 +1202,8 @@
         ${sel('symverdict', s.key, svs[s.key])}
       </div>`).join('');
     // ② 规则判读：domain-rules.json 命中项，有出处、可回查、可驱动校准
-    const rulesHtml = rec.fired.rules.length ? rec.fired.rules.map(r => `
+    const recRules = (rec.fired && rec.fired.rules) || [];
+    const rulesHtml = recRules.length ? recRules.map(r => `
       <div style="border-bottom:1px solid #f2f2f2;padding:4px 0;font-size:12px;">
         <div>${esc(r.label || r.id)} <span class="muted">→ ${esc(r.concept || '')}</span>
           <span class="muted">[${r.polarity === '+' ? '助' : r.polarity === '-' ? '阻' : '中'}]</span></div>
@@ -1200,7 +1213,7 @@
     const mis = (fb.misreads || []);
     $('reviewBody').innerHTML = `
       <div style="font-size:13px;">
-        <div><b>${esc(rec.question || '')}</b> <span class="muted">${esc(rec.chartRef.siZhu || '')}</span></div>
+        <div><b>${esc(rec.question || '')}</b> <span class="muted">${esc((rec.chartRef && rec.chartRef.siZhu) || '')}</span></div>
         ${rec.answer ? `<details style="margin-top:6px;"><summary>📄 当时的解读全文（打分前先对照一下）</summary>
           <div class="${(MD && MD.looksMarkdown(rec.answer)) ? 'md-on' : ''}" style="white-space:pre-wrap;background:#f7f7f7;border-radius:6px;padding:8px;margin-top:4px;max-height:240px;overflow:auto;font-size:12px;">${
             // 存档的解读全文同样渲染：这一栏是复盘时拿来跟实况逐条对照的，
@@ -1572,6 +1585,25 @@
           ${esc(s.label || s.key)}　${esc(s.display)}${s.opposite ? `　<span style="color:#a94442">相反 ${s.opposite}</span>` : ''}
         </div>`).join('')
       : '<span class="muted">暂无</span>';
+    /* 按模型：哪一路作答的应验率。统计口径不在这里另写一套，直接取评估器的 byModel——
+       两处各算一套迟早对不上，而这一项最怕的就是「报告里一个数、界面上另一个数」。 */
+    const mdRep = (window.Evaluate && window.Evaluate.evaluate)
+      ? (window.Evaluate.evaluate(rows) || {}).byModel : null;
+    const mdHtml = !mdRep ? ''
+      : !mdRep.rows.length
+        ? `<div style="margin-top:8px;"><b>按模型</b></div>
+           <div class="muted" style="font-size:12px;">尚无带模型标记的案例——本项自本版才开始记${
+             mdRep.unlabeled ? `，现有 ${mdRep.unlabeled} 例都在此之前` : ''}。此后每存一条案例都会记下实际作答的那一路。</div>`
+        : `<div style="margin-top:8px;"><b>按模型</b>
+             <span class="muted">（记的是<b>实际作答</b>的那一路；备用接管过的算接管者）</span></div>
+           ${mdRep.rows.map(x => `<div style="font-size:12px;">
+             ${esc(x.label)}(n=${x.n})：${esc(x.display)}${
+               x.fellBack ? `　<span class="muted">其中 ${x.fellBack} 例由备用接管</span>` : ''}</div>`).join('')}
+           ${mdRep.unlabeled ? `<div class="muted" style="font-size:12px;">另有 ${mdRep.unlabeled} 例未记录模型（本项自本版才记），不参与比较。</div>` : ''}
+           <div style="font-size:12px;margin-top:2px;color:${mdRep.comparable >= 2 ? '#8a6d3b' : '#888'};">${
+             mdRep.comparable >= 2
+               ? `加权分差距 ${mdRep.spread}（${mdRep.comparable} 家达门槛）。${esc(mdRep._caveat).replace(/\*\*/g, '')}`
+               : `<b>目前还比不出来</b>：达到 ${mdRep.minSamples} 例门槛的只有 ${mdRep.comparable} 家，两家都够格才谈得上比较。`}</div>`;
     const psHtml = ps.length ? ps.map(p =>
       `<div style="border-left:3px solid ${p.severity === 'high' ? '#a94442' : '#8a6d3b'};padding:4px 8px;margin:6px 0;background:#fafafa;font-size:12px;">
         <b>${esc(p.title)}</b>${p.ruleId ? `　<code>${esc(p.ruleId)}</code>` : ''}<br>
@@ -1584,6 +1616,7 @@
         <div style="margin-top:8px;"><b>按盘面象义</b>
           <span class="muted">（键为「元素@宫」，如 生门@2＝生门临坤二。这是象的配置统计，不是纲要规则）</span></div>
         <div style="max-height:200px;overflow:auto;margin-top:4px;">${symStatHtml}</div>
+        ${mdHtml}
         <div style="margin-top:8px;"><b>按规则</b>（符合率低者在前，便于复核；不足 ${cal.minSamples} 例不给百分比）</div>
         <div style="max-height:200px;overflow:auto;margin-top:4px;">${ruleHtml}</div>
         ${tcHtml}
