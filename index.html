@@ -132,7 +132,8 @@
               <span class="muted">多久<b>没有新内容</b>才算卡死。流式下这才是真超时——只要还在吐字就不会中断</span></div>
             <div><label>总时长上限(秒)</label><input id="cfgTotalTimeout" type="number" min="30" placeholder="600"></div>
             <div><label>重试次数</label><input id="cfgMaxRetries" type="number" min="0" max="6" placeholder="3">
-              <span class="muted">遇 503/429/504 时按指数退避自动重试</span></div>
+              <span class="muted">遇 503/429/504 时按指数退避自动重试。<b>填 0 即不重试</b>（失败就直接报错，
+                有备用链的仍会接力）；留空用默认 3 次</span></div>
             <div><label>maxTokens</label><input id="cfgMaxTokens" type="number" min="256" placeholder="16384">
               <span class="muted">思考型模型「思考+回答」共用此额度，调太小会截断答案</span></div>
             <div><label>备用 Provider</label>
