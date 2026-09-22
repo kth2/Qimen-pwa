@@ -195,8 +195,13 @@
     if (!chart || !name) return null;
     var v = views(chart), g = null, kind = null, resolved = name;
 
-    if (name === '日干' || name === '时干') {
-      var gan = name === '日干' ? (actors && actors.riGan) : (actors && actors.shiGan);
+    // 年命与日干/时干同属「干落宫」这一类（xiangyi.js 早已把三者一并归为 gan），
+    // 定位规则完全相同——含「甲不上天盘、遁于旬首、以值符落宫论」这条兜底。
+    // 此前只认日干/时干，年命即便传进 actors 也永远定位不到。
+    if (name === '日干' || name === '时干' || name === '年命') {
+      var gan = name === '日干' ? (actors && actors.riGan)
+        : name === '时干' ? (actors && actors.shiGan)
+          : (actors && actors.nianMingGan);
       if (!gan) return null;
       resolved = gan;
       kind = 'gan';

@@ -569,10 +569,16 @@
     'E17. 同一个支在时/日/月/年四级是**同一个候选的四种读法，不是四个候选**，不可分别陈述以显得处处应验。另：时辰与月建以地支命名（午时、辰月），天干在时/月/年三柱上只能说「时干戊」「月干戊」「年干戊」，**不得写成「戊时」「戊月」**；惟「戊日」是纲要原有用语，照旧。',
     'E18. TIMING 的 [★强]/[★中]/[★参考] 表示该机制与本占用神的关系强弱，不是应验概率；不得写成"某日必应"，应表述为"应期多在…"或"须待…方应"。'
   ].join('\n');
-  // 转盘断局补充：日干(求测人)/时干(所占之事)天盘落宫。
-  // 引擎序列化只给四柱与九宫干，不点明二者落宫；此处算好喂给 AI，
+  // 转盘断局补充：日干(求测人)/时干(所占之事)/年命(求测人本命)天盘落宫。
+  // 引擎序列化只给四柱与九宫干，不点明三者落宫；此处算好喂给 AI，
   // 配合纲要新增的「日干为人、时干为事」总纲落地。甲不上天盘，遁于旬首、以值符落宫论。
-  function riShiGanBlock(pan) {
+  //
+  // **年命宫此前是缺的**：提示词给了【求测人年命天干】，骨架与纪律又反复要求「以…对
+  // 年命宫的生克盗泄定论」，却从不说年命落在哪一宫——模型只能自己去九宫表里翻那个干。
+  // 肯翻的模型就论了，不肯翻的整段跳过，同一份提示词遂在不同模型上表现不一。飞盘早有
+  // 【三乙四宫 + 年命宫】把它定死，转盘这一路漏了。既然日干/时干已经在这里算好，
+  // 年命用同一个 fmt 一并算出即可，甲的兜底也就自动跟着对。
+  function riShiGanBlock(pan, nianMingGan) {
     const sz = pan.siZhu || {}, tianPan = pan.tianPan || {};
     const riGan = (sz.day || '').charAt(0), shiGan = (sz.time || '').charAt(0);
     if (!riGan || !shiGan) return '';
@@ -587,10 +593,16 @@
       }
       return `  - ${label}${gan}：天盘未见，以地盘${gan}所在宫论`;
     };
-    return ['', '【日干/时干落宫（转盘断局补充）】',
+    const nm = String(nianMingGan || '').trim();
+    const lines = ['', nm ? '【日干/时干/年命落宫（转盘断局补充）】' : '【日干/时干落宫（转盘断局补充）】',
       fmt('日干(求测人)', riGan),
-      fmt('时干(所占之事/对方)', shiGan),
-      '请按纲要「日干为人、时干为事」：先审时干宫对日干宫(或年命宫)的生克盗泄定成败，再合值符值使、用神宫参断。'].join('\n');
+      fmt('时干(所占之事/对方)', shiGan)];
+    if (nm) lines.push(fmt('年命(求测人本命)', nm));
+    // 末行点名年命宫，故只在年命确有落宫时才提它——否则又成了「点名却不给」。
+    lines.push(nm
+      ? '请按纲要「日干为人、时干为事」：先审时干宫对年命宫(求测人本命，优先于日干宫)的生克盗泄定成败，再合值符值使、用神宫参断。'
+      : '请按纲要「日干为人、时干为事」：先审时干宫对日干宫的生克盗泄定成败，再合值符值使、用神宫参断。（本次未提供年命，以日干宫代年命宫）');
+    return lines.join('\n');
   }
 
   /**
@@ -940,7 +952,7 @@
       }
       // 证据包可用时由它承载旺衰/应期；不可用则退回原有的两段拼接。山向段始终保留。
       const analysisBlocks = evBlock || (wsBlock + yqBlock);
-      const userMsg = prompt.user + (school !== 'feipan' ? riShiGanBlock(pan) : '')
+      const userMsg = prompt.user + (school !== 'feipan' ? riShiGanBlock(pan, $('aiNianMing').value) : '')
         + analysisBlocks + sxBlock + tailAnchor(q, rc, catMap);
       const answer = await LLM.chat(prompt.system + '\n' + AI_DISCIPLINE + sysExtra, userMsg, (full) => {
         streamed = true; streamAnswer(head + (full || ''));
