@@ -229,7 +229,8 @@ t('流式期间不渲染——写到一半的表格不该被画成怪样', funct
   var seg = APP.slice(APP.indexOf('function streamAnswer('), APP.indexOf('async function runAI()'));
   assert.ok(/textContent = text/.test(seg), '流式须走 textContent');
   assert.ok(!/innerHTML/.test(seg), '流式期间不得渲染');
-  assert.ok(/streamAnswer\(head \+ \(full \|\| ''\)\)/.test(APP), 'onToken 须走 streamAnswer');
+  // Phase 33：标题改按实际作答者写，流式时取 headNow()（见 bymodel.test.js）
+  assert.ok(/streamAnswer\(headNow\(\) \+ \(full \|\| ''\)\)/.test(APP), 'onToken 须走 streamAnswer');
 });
 t('收尾只渲染一次，且渲染的是清理后的全文', function () {
   assert.ok(/_answerRaw = head \+ \(\(!streamed \|\| !answer\)/.test(APP), '收尾未取完整文本');

@@ -701,6 +701,18 @@
     box.textContent = text;
   }
 
+  /**
+   * 解读框顶端的【占类·模型】一行。模型按**实际作答**那一路写（u 取 LLM.current() 或 LLM.lastUsed()），
+   * 备用接管时注明主选是谁——否则「Gemini 过载、自定义端点接的班」看上去就像 Gemini 答的。
+   * u 缺席（尚未开始作答）时退回配置值。
+   */
+  function answerHead(category, u, info) {
+    const cat = category || '综合';
+    if (!u) return `【占类：${cat}　模型：${info.provider}/${info.model}】\n\n`;
+    const fb = u.fellBack ? `（备用接管；主选 ${info.provider}/${info.model} 未能作答）` : '';
+    return `【占类：${cat}　模型：${u.provider}/${u.model}${fb}】\n\n`;
+  }
+
   async function runAI() {
     const pan = window._pan; if (!pan) { $('aiStatus').textContent = '请先排盘'; return; }
     const q = $('aiQuestion').value.trim(); if (!q) { $('aiStatus').textContent = '请填写占问'; return; }
@@ -732,7 +744,11 @@
         ? YS.categoryMap(rc.uiPick || rc.category || fallbackCategory, school === 'feipan' ? 'feipan' : 'zhuanpan') : null;
       const builder = school === 'feipan' ? QM.feipanPredict : QM.zhuanpanPredict;
       const prompt = builder.buildPrompt(pan, q, opts);
-      const head = `【占类：${prompt.context.category || '综合'}　模型：${LLM.info().provider}/${LLM.info().model}】\n\n`;
+      // 标题按**实际作答**那一路写：流式途中取 current()，答完取 lastUsed()。
+      // 此前一律写配置值，备用接管后仍挂着主选的名（统计本就取 lastUsed，未受影响，但看的人会被误导）。
+      const catName = prompt.context.category || '综合';
+      const headNow = () => answerHead(catName, (LLM.current && LLM.current()) || null, LLM.info());
+      let head = headNow();
       // 流式：边生成边显示，既提升观感也避免长响应在网关侧 504
       $('aiStatus').textContent = 'AI 解读中…(边生成边显示)';
       $('aiAnswer').style.display = 'block';
@@ -971,10 +987,11 @@
       const userMsg = prompt.user + (school !== 'feipan' ? riShiGanBlock(pan, $('aiNianMing').value) : '')
         + analysisBlocks + sxBlock + tailAnchor(q, rc, catMap);
       const answer = await LLM.chat(prompt.system + '\n' + AI_DISCIPLINE + sysExtra, userMsg, (full) => {
-        streamed = true; streamAnswer(head + (full || ''));
+        streamed = true; streamAnswer(headNow() + (full || ''));
       // onStatus：把重试与备用切换过程显示出来。干等两分钟再报错，是最劝退的体验
       }, (msg) => { $('aiStatus').textContent = msg; });
       // 收尾用清理后的完整文本（去 <think> 等），并在此**一次性**渲染 Markdown
+      head = answerHead(catName, (LLM.lastUsed && LLM.lastUsed()) || null, LLM.info());
       _answerRaw = head + ((!streamed || !answer) ? (answer || '(无内容)') : answer);
       paintAnswer();
       $('aiStatus').textContent = '完成';
@@ -1817,7 +1834,8 @@
    */
   function resolveCategory() {
     const uiPick = ($('aiDomain') && $('aiDomain').value) || '';
-    const cat = uiPick && YS && YS.toEngineCategory ? YS.toEngineCategory(uiPick) : '';
+    // 按盘别解析：界面「失物」在飞盘上即引擎的「寻物」
+    const cat = uiPick && YS && YS.toEngineCategory ? YS.toEngineCategory(uiPick, school) : '';
     return {
       explicit: !!cat,
       uiPick: uiPick,                                  // 界面选项原值（如「股市」）
@@ -1828,7 +1846,7 @@
 
   /**
    * 本盘别不支持的占类，在下拉里就标出来——**选之前**就看得见，
-   * 比选完再告诉他「其实没生效」要好。飞盘不认「事业」「失物」即属此列。
+   * 比选完再告诉他「其实没生效」要好。飞盘不认「事业」、转盘不认飞盘专有的追捕/讨债等即属此列。
    */
   function markUnsupportedDomains() {
     if (!YS || !YS.categoryMap || !YS.isLoaded || !YS.isLoaded()) return;   // 数据没到位就先不标

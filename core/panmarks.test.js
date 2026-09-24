@@ -133,7 +133,8 @@ t('占类下拉自带全部选项，不再靠启动时从「目的」搬（那�
   assert.ok(at >= 0, '找不到占类下拉');
   var seg = HTML.slice(at, HTML.indexOf('</select>', at));
   var vals = (seg.match(/value="[^"]*"/g) || []);
-  assert.strictEqual(vals.length, 17, '应为 1 个「自动判定」+ 16 个占类，实得 ' + vals.length);
+  // Phase 33：＋行人、＋飞盘专有八类（追捕/逃亡/讨债/盗贼/避难/文书音讯/口舌斗殴/家宅）
+  assert.strictEqual(vals.length, 26, '应为 1 个「自动判定」+ 25 个占类，实得 ' + vals.length);
   assert.ok(/value=""/.test(seg), '缺「跟随问句自动判定」');
   ['综合', '学业', '股市', '天气'].forEach(function (v) {
     assert.ok(seg.indexOf('value="' + v + '"') >= 0, '缺选项 ' + v);
@@ -222,8 +223,8 @@ t('sw.js 的 CACHE 名已随本次改动更新（改界面必换，否则老用�
   var SW = fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8');
   var m = SW.match(/const CACHE = '([^']+)'/);
   assert.ok(m, '找不到 CACHE');
-  assert.strictEqual(m[1], 'qimen-pwa-nianming',
-    '本期 CACHE 应为 qimen-pwa-nianming；若你又改了界面，请换个新名并同步改这一行');
+  assert.strictEqual(m[1], 'qimen-pwa-zhanlei',
+    '本期 CACHE 应为 qimen-pwa-zhanlei；若你又改了界面，请换个新名并同步改这一行');
 });
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
