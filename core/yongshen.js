@@ -51,8 +51,13 @@
    * 引擎 classifyQuestion(question, category, fallbackCategory) 的回落分支要求传引擎占类名；
    * 界面值与之并不同名（财运/求财、健康/疾病、学业/功名），直传会静默回落「综合」并丢失专用用神。
    */
-  function toEngineCategory(uiPurpose) {
+  function toEngineCategory(uiPurpose, school) {
     if (!uiPurpose) return '';
+    // 分盘别覆盖优先：两派引擎对同一件事叫法不同（失物：转盘「失物」、飞盘「寻物」）。
+    // 不传盘别则按通用表，与旧调用一致。
+    var bs = DB && DB.uiPurposeToEngineCategoryBySchool;
+    var sch = school === 'feipan' ? 'feipan' : (school === 'zhuanpan' ? 'zhuanpan' : '');
+    if (sch && bs && bs[sch] && bs[sch][uiPurpose]) return bs[sch][uiPurpose];
     var m = DB && DB.uiPurposeToEngineCategory;
     return (m && m[uiPurpose]) || uiPurpose;
   }
@@ -62,7 +67,7 @@
    * 「本盘别的引擎认不认」「规则库有没有专条」两项实情。
    *
    * 为什么要有这一层：三套词表并不同名（财运/求财、健康/疾病、学业/功名、婚姻/感情），
-   * 且引擎对占类的支持**分盘别**——飞盘不认「事业」与「失物」，会静默落回「综合」
+   * 且引擎对占类的支持**分盘别**——飞盘不认「事业」、转盘不认追捕/讨债等飞盘专有占类，会静默落回「综合」
    * 且一个用神都不给。此前无人记录这件事，界面照旧显示「你指定的」，
    * 用户无从知道自己的选择其实没生效。
    *
@@ -83,7 +88,7 @@
         ruleDomain: '', ruleLabel: '', hasDedicatedRules: null, isZongHe: false
       };
     }
-    var eng = toEngineCategory(ui) || ui;
+    var eng = toEngineCategory(ui, sch) || ui;
     // 规则占类**优先按界面选项**解析。两个界面选项可能映到同一个引擎占类
     // （如「财运」与「股市」都走引擎的「求财」），若一律从引擎占类反推，
     // normalizeDomain 按插入序先命中谁就是谁，后者的专条便永远跑不到。

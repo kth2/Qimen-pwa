@@ -415,17 +415,30 @@ const LLM = (() => {
    * 拿它去记「这答案是谁给的」就会记反。要比较两家的应验率，记错等于白记。 */
   let _lastUsed = null;
   function lastUsed() { return _lastUsed ? Object.assign({}, _lastUsed) : null; }
+  /* 正在作答的那一步（流式显示用）。备用接管的那一刻它就换成备用那一路。
+   * 界面标题此前只在调用前按配置写一次：接管后流出的是备用的字，标题却还挂着主选的名，
+   * 看的人便以为是 Gemini 答的。lastUsed 要等答完才有，流式途中只能靠它。 */
+  let _current = null;
+  function current() { return _current ? Object.assign({}, _current) : null; }
 
   async function chat(system, user, onToken, onStatus) {
     const cfg = getCfg();
     const chain = buildChain(cfg);
     _lastUsed = null;
+    _current = null;
     const maxRetries = Math.max(0, Math.min(numOr0(cfg.maxRetries, DEF.maxRetries), 6));
     const say = (t) => { try { if (onStatus) onStatus(t); } catch (_) {} };
     let lastErr = null;
 
     for (let ci = 0; ci < chain.length; ci++) {
       const step = chain[ci];
+      _current = {
+        provider: step.provider,
+        model: step.model || modelOf(cfg, step.provider),
+        label: step.label,
+        fellBack: ci > 0,
+        configured: cfg.provider || 'gemini'
+      };
       if (ci > 0) say(`改用备用：${step.label}…`);
       for (let attempt = 0; attempt <= maxRetries; attempt++) {
         try {
@@ -601,6 +614,7 @@ const LLM = (() => {
   return {
     getCfg, saveCfg, chat, info, probe, DEF,
     lastUsed,   // 实际作答的那一路（备用接管后与 info() 不同）——案例本据此归属模型
+    current,    // 正在作答的那一路（流式途中界面标题据此写）
     // 供单测与诊断使用的纯函数（不参与业务流程）
     _internals: { isTransient, isOverloaded, isFatalConfig, backoffMs, parseRetryAfter, buildChain, labelOf, modelOf, reasonOf, finalize, probeRead, numOr, numOr0 }
   };

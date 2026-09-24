@@ -224,6 +224,49 @@ function run() {
       });
     });
   }).then(function () {
+    console.log('\n== 解读框标题【占类·模型】：写实际作答者，不写配置值 ==');
+    return t('流式途中 current() 随接管换人：备用流字时报的是备用', function () {
+      LLM.saveCfg({
+        provider: 'gemini', geminiKey: 'K', geminiModel: 'g-model', maxRetries: 0,
+        fallbackProvider: 'custom', customUrl: 'https://x.test/v1', customKey: 'K', customModel: 'agnes-2.5'
+      });
+      global.fetch = function (u) {
+        return Promise.resolve(String(u).indexOf('generativelanguage') >= 0
+          ? new Response('busy', { status: 503 }) : sse(C_OK));
+      };
+      var seen = [];
+      return LLM.chat('s', 'u', function () { var c = LLM.current(); seen.push(c && c.provider + '/' + c.model); })
+        .then(function () {
+          assert.ok(seen.length > 0, '没有流出任何字');
+          seen.forEach(function (w) { assert.strictEqual(w, 'custom/agnes-2.5', '流字时 current() 仍报主选：' + w); });
+          assert.strictEqual(LLM.current().fellBack, true);
+        });
+    });
+  }).then(function () {
+    return t('answerHead：接管时写接管者并注明主选；未接管不加注；未开始作答退回配置值', function () {
+      var APP = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+      var at = APP.indexOf('function answerHead('), end = APP.indexOf('\n  }', at);
+      assert.ok(at > 0 && end > at, 'app.js 里取不出 answerHead');
+      var answerHead = new Function(APP.slice(at, end + 4) + '\n; return answerHead;')();
+      var info = { provider: 'gemini', model: 'gemini-3.5-flash' };
+      var h1 = answerHead('行人', { provider: 'custom', model: 'agnes-2.5-flash', fellBack: true }, info);
+      assert.ok(/模型：custom\/agnes-2\.5-flash/.test(h1), h1);
+      assert.ok(/备用接管；主选 gemini\/gemini-3\.5-flash/.test(h1), '接管未注明主选：' + h1);
+      assert.ok(!/模型：gemini/.test(h1), '接管后仍写 gemini：' + h1);
+      var h2 = answerHead('求财', { provider: 'gemini', model: 'gemini-3.5-flash', fellBack: false }, info);
+      assert.ok(/模型：gemini\/gemini-3\.5-flash】/.test(h2) && !/接管/.test(h2), h2);
+      assert.ok(/模型：gemini\/gemini-3\.5-flash】/.test(answerHead('', null, info)));
+      assert.ok(/占类：综合/.test(answerHead('', null, info)), '无占类时应写综合');
+    });
+  }).then(function () {
+    return t('runAI 的标题：流式取 current()、答完取 lastUsed()，不再直接写 info()', function () {
+      var APP = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+      var seg = APP.slice(APP.indexOf('async function runAI()'), APP.indexOf('_answerRaw = head +'));
+      assert.ok(/streamAnswer\(headNow\(\) \+/.test(seg), '流式未用 headNow()');
+      assert.ok(/head = answerHead\(catName, \(LLM\.lastUsed && LLM\.lastUsed\(\)\)/.test(seg), '答完未按 lastUsed 重写标题');
+      assert.ok(!/模型：\$\{LLM\.info\(\)\.provider\}/.test(APP), '仍有直接拿 info() 写标题的旧写法');
+    });
+  }).then(function () {
     console.log('\n' + pass + ' passed, ' + fail + ' failed');
     process.exit(fail ? 1 : 0);
   });

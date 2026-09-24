@@ -43,11 +43,15 @@ function uiPurposes() {
   return out;
 }
 var UI = uiPurposes();
+var FEIPAN_ONLY = ['追捕', '逃亡', '讨债', '盗贼', '避难', '文书音讯', '口舌斗殴', '家宅'];
 
 console.log('\n== 三套词表串得上 ==');
-t('界面下拉有 16 个占类，且从 index.html 直接读取（不另抄一份）', function () {
-  assert.strictEqual(UI.length, 16, '实得 ' + UI.length + '：' + UI.join('、'));
+t('界面下拉有 25 个占类，且从 index.html 直接读取（不另抄一份）', function () {
+  // 16（Phase 22）＋ 行人 ＋ 飞盘专有八类（Phase 33）
+  assert.strictEqual(UI.length, 25, '实得 ' + UI.length + '：' + UI.join('、'));
   assert.ok(UI.indexOf('综合') >= 0 && UI.indexOf('学业') >= 0 && UI.indexOf('股市') >= 0);
+  assert.ok(UI.indexOf('行人') >= 0, '缺行人');
+  FEIPAN_ONLY.forEach(function (c) { assert.ok(UI.indexOf(c) >= 0, '缺飞盘专有：' + c); });
 });
 t('每个界面选项都能解析出引擎占类与规则占类，无一落空', function () {
   UI.forEach(function (u) {
@@ -132,17 +136,63 @@ function liveSupport(school, cat) {
     assert.deepStrictEqual(wrong, [], '引擎行为与记录不符——引擎变了就该先红：' + wrong.join('；'));
   });
 });
-t('飞盘确不支持事业与失物，且各附了缘由', function () {
-  ['事业', '失物'].forEach(function (u) {
-    var m = YS.categoryMap(u, 'feipan');
-    assert.strictEqual(m.engineSupported, false, u + ' 在飞盘上应为不支持');
-    assert.strictEqual(m.degradedTo, '综合');
-    assert.ok(m.degradeWhy && m.degradeWhy.length > 10, u + ' 须写明为何不支持');
-  });
+t('飞盘确不支持事业，且附了缘由', function () {
+  var m = YS.categoryMap('事业', 'feipan');
+  assert.strictEqual(m.engineSupported, false, '事业在飞盘上应为不支持');
+  assert.strictEqual(m.degradedTo, '综合');
+  assert.ok(m.degradeWhy && m.degradeWhy.length > 10, '须写明为何不支持');
+});
+t('【Phase 33】失物在飞盘走引擎「寻物」，是支持的（此前误报不支持）', function () {
+  // 飞盘纲要二节「寻物 / 失物」同条，飞盘引擎也有「寻物」（伤门+玄武）——是界面→引擎这层没接上
+  var m = YS.categoryMap('失物', 'feipan');
+  assert.strictEqual(m.engineCategory, '寻物');
+  assert.strictEqual(m.engineSupported, true);
+  assert.strictEqual(YS.categoryMap('失物', 'zhuanpan').engineCategory, '失物', '转盘仍走「失物」');
+  assert.strictEqual(YS.toEngineCategory('失物'), '失物', '不传盘别按通用表，与旧调用一致');
 });
 t('转盘则两者皆支持——不许把一派的限制推给另一派', function () {
   ['事业', '失物'].forEach(function (u) {
     assert.strictEqual(YS.categoryMap(u, 'zhuanpan').engineSupported, true, u);
+  });
+});
+
+console.log('\n== 【Phase 33】引擎全表：记录不许只测界面映射到的那几个 ==');
+// 根因：08-27 初测只测了界面下拉映射得到的占类。引擎自有而下拉没有的（转盘「行人」、飞盘十一个）
+// 从未入表——引擎按问句自动判出它们时，查表查不到，便被误报「不支持、落回综合、取不到专用用神」，
+// 而引擎其实已取好用神。此处改为逐一比对引擎 YONG_SHEN_RULES 全表，两个方向都查。
+['zhuanpan', 'feipan'].forEach(function (sch) {
+  t('【' + (sch === 'feipan' ? '飞盘' : '转盘') + '】引擎全表每个占类：实测支持者必已入表，入表者必实测支持', function () {
+    var B = sch === 'feipan' ? QM.feipanPredict : QM.zhuanpanPredict;
+    var cats = B.YONG_SHEN_RULES.map(function (r) { return r.category; });
+    var rec = DOMAINS.engineSupport[sch];
+    var missing = [], wrong = [];
+    cats.forEach(function (c) {
+      var live = liveSupport(sch, c), inRec = rec.indexOf(c) >= 0;
+      if (live && !inRec) missing.push(c);
+      if (!live && inRec) wrong.push(c);
+    });
+    rec.forEach(function (c) { if (cats.indexOf(c) < 0) wrong.push(c + '(引擎规则表里没有)'); });
+    assert.deepStrictEqual(missing, [], '实测支持却未入表（会被误报不支持）：' + missing.join('、'));
+    assert.deepStrictEqual(wrong, [], '入表却实测不中：' + wrong.join('、'));
+  });
+});
+t('转盘「行人」：支持，且规则占类为 traveler（不再挂在 general 下）', function () {
+  var m = YS.categoryMap('行人', 'zhuanpan');
+  assert.strictEqual(m.engineSupported, true, '转盘引擎有行人（开门），不得报不支持');
+  assert.strictEqual(m.ruleDomain, 'traveler');
+  assert.strictEqual(m.hasDedicatedRules, true);
+  assert.ok(YS.getDomain('general').engineCategories.indexOf('行人') < 0, '行人仍挂在 general 下');
+});
+t('飞盘引擎自动判出的「寻物」「词讼」认得出所属规则占类', function () {
+  assert.strictEqual(YS.normalizeDomain('寻物'), 'lost_item');
+  assert.strictEqual(YS.normalizeDomain('词讼'), 'lawsuit');
+});
+t('飞盘专有八类：飞盘支持；转盘不支持且逐一写明缘由', function () {
+  FEIPAN_ONLY.forEach(function (c) {
+    assert.strictEqual(YS.categoryMap(c, 'feipan').engineSupported, true, c + ' 飞盘应支持');
+    var z = YS.categoryMap(c, 'zhuanpan');
+    assert.strictEqual(z.engineSupported, false, c + ' 转盘应不支持');
+    assert.ok(/转盘纲要二节未列/.test(z.degradeWhy), c + ' 须写明为何转盘不支持：' + z.degradeWhy);
   });
 });
 
@@ -164,14 +214,17 @@ t('综合仍落 general，且被认作「就是通用占类」而非降级', fun
   assert.strictEqual(m.ruleDomain, 'general');
   assert.strictEqual(m.isZongHe, true, '综合须被单独认出，免得界面把它报成「无专条」');
 });
-t('十四个占类皆有专条，只余「综合」用通用条（Phase 19 之后）', function () {
+t('十六个占类皆有专条（Phase 33 行人加入）；只余「综合」与飞盘专有八类用通用条', function () {
   var yes = [], no = [];
   UI.forEach(function (u) {
     var m = YS.categoryMap(u, 'zhuanpan');
     (m.hasDedicatedRules ? yes : no).push(u);
   });
-  assert.deepStrictEqual(no, ['综合'], '除综合外都该有专条，实际退用通用条的是：' + no.join('、'));
-  assert.strictEqual(yes.length, 15, '实得 ' + yes.length);
+  // 飞盘专有八类无专条：象义规则库只适用于转盘（domain-rules.json appliesTo=zhuanpan），
+  // 而转盘纲要未列这八类，无从据以立条——如实退用通用条。
+  assert.deepStrictEqual(no, ['综合'].concat(FEIPAN_ONLY), '退用通用条的应恰为综合与飞盘专有八类：' + no.join('、'));
+  assert.strictEqual(yes.length, 16, '实得 ' + yes.length);
+  assert.ok(yes.indexOf('行人') >= 0, '行人应有专条');
 });
 
 console.log('\n== 数据未到位时必须说不知道 ==');
