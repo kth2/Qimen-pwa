@@ -104,7 +104,7 @@
    *   chart    —— 引擎输出的盘（定候选落宫用）
    *   options.school     —— 缺省依盘面判定；非转盘一律停用
    *   options.locate     —— locate(chart, name, actors)，通常传 YongShen.locate
-   *   options.actors     —— {riGan, shiGan, nianMingGan}，透传给 locate
+   *   options.actors     —— {riGan, riZhu, shiGan, nianMingGan}，透传给 locate
    *   options.domainNames—— 占类用神名单，用于标出「与占类用神重合」者，避免重复着墨
    *   options.extra      —— 可选，用户另行指明的所问之物（与问句一并匹配）
    */

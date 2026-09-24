@@ -375,7 +375,9 @@ t('日干为甲时，甲的象义不再漏失（既存 bug 回归）', function 
   var ys = YS.resolve({ domain: 'wealth', chart: CHART });
   var jia = ys.examine.filter(function (m) { return m.name === '日干'; })[0];
   assert.strictEqual(jia.resolved, '甲', 'resolved 须为纯干，否则查 symbols.json 必落空');
-  assert.ok(/遁于旬首/.test(jia.via || ''), '「遁于旬首」的说明应由 via 承载');
+  // 日干为甲按本日之甲所遁之仪取宫（〔用户所定·2026-09-24〕，此前是「遁于旬首·以值符论」）；
+  // 这条要守的是「说明由 via 承载、resolved 保持纯干」，不是哪一种取法
+  assert.ok(/^甲[子戌申午辰寅]遁于[戊己庚辛壬癸]/.test(jia.via || ''), '「遁于某仪」的说明应由 via 承载：' + jia.via);
   var ev = EV.build({ domain: 'wealth', chart: CHART, yongshen: ys });
   var els = ev.items.filter(function (x) { return x.type === 'SYMBOL'; }).map(function (x) { return x.element; });
   assert.ok(els.indexOf('甲') >= 0, '甲日求测人自身的象义必须进证据包');

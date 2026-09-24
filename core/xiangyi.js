@@ -138,6 +138,7 @@
     return {
       at: at, primary: primary, layer: layer,
       actors: { 日干: (sz.day || '').charAt(0) || '', 时干: (sz.time || '').charAt(0) || '' },
+      riZhu: sz.day || '',   // 日干为甲时按本日之甲所遁之仪取宫，须知日支
       zhiFuGong: c.zhiFuLuoGong != null ? String(c.zhiFuLuoGong) : (c.zhiFuGong != null ? String(c.zhiFuGong) : ''),
       zhiShiGong: c.zhiShiGong != null ? String(c.zhiShiGong) : '',
       zhiShiMen: c.zhiShiMen || '',
@@ -145,6 +146,9 @@
       maGong: (c.maStar && c.maStar.gong != null) ? String(c.maStar.gong) : ''
     };
   }
+
+  /** 六甲遁六仪。与 core/yongshen.js、app.js、engine.bundle.js 各一份，由 core/jiadun.test.js 钉在一起。 */
+  var LIU_JIA_DUN = { '甲子': '戊', '甲戌': '己', '甲申': '庚', '甲午': '辛', '甲辰': '壬', '甲寅': '癸' };
 
   /**
    * 解析规则中的元素名 → 具体落点。
@@ -158,7 +162,15 @@
       var gan = idx.actors[name];
       if (!gan) return null;
       resolved = gan;
-      if (gan === '甲') {                       // 甲不上天盘，遁于旬首，以值符落宫论
+      if (gan === '甲' && name === '日干') {
+        // 日干为甲：按本日之甲所遁之仪取宫（纲要一节〔用户所定·2026-09-24〕）。不走值符——
+        // 甲日十二时辰全在甲子旬或甲戌旬，按值符取则任何甲日都只会取到戊或己。
+        var yi = LIU_JIA_DUN[idx.riZhu];
+        if (!yi) return null;
+        // 层记作 'dunYi' 而非该仪所在的 tianGan/diGan：盘上摆着的是那个仪，不是甲。若记成 tianGan，
+        // flagsOfElement 会把它当「甲在天盘」，按甲墓于坤二硬断——与值符那一路(layer='zhiFu')同理，须退回宫层判定。
+        gong = idx.primary[yi] || null; lay = 'dunYi'; via = idx.riZhu + '遁于' + yi + '，以' + yi + '落宫论';
+      } else if (gan === '甲') {                // 时干为甲：甲X时之旬首即甲X本身，以值符落宫论（纲要原文）
         if (!idx.zhiFuGong) return null;
         gong = idx.zhiFuGong; lay = 'zhiFu'; via = '甲不上天盘，以值符落宫论';
       } else {
@@ -212,7 +224,7 @@
     }
     // 干自身的墓/刑，只在该干**确实摆在天盘或地盘上**时才断——这样与 wangshuai 判的四害
     // 严格同源，不会出现"本层说入墓、旺衰块说没有"的两套说法。
-    // 日/时干为甲时经值符落宫定位(layer='zhiFu')，甲并不上天盘，故不按甲墓于坤二硬断，
+    // 干为甲时经值符(layer='zhiFu')或遁仪(layer='dunYi')定位，甲并不上天盘，故不按甲墓于坤二硬断，
     // 退回宫层判定；暗干同理（wangshuai 亦不将暗干计入四害）。
     var onPlate = el.kind === 'gan' && el.resolved && (el.layer === 'tianGan' || el.layer === 'diGan');
     if (onPlate) {
@@ -685,7 +697,7 @@
     // 供漂移守卫测试比对（不供业务调用）
     _TABLES: {
       SHENG: SHENG, KE: KE, RU_MU_GONG: RU_MU_GONG, JI_XING_GONG: JI_XING_GONG,
-      GONG_INFO: GONG_INFO, GONG_CHONG: GONG_CHONG
+      GONG_INFO: GONG_INFO, GONG_CHONG: GONG_CHONG, LIU_JIA_DUN: LIU_JIA_DUN
     }
   };
 });
