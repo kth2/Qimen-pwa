@@ -207,31 +207,33 @@
         : name === '时干' ? (actors && actors.shiGan)
           : (actors && actors.nianMingGan);
       if (!gan) return null;
-      // **年命为甲，不走下面「以值符落宫论」那条**。纲要该条原文是「日/时干为甲时，以值符落宫论之」，
-      // 不及年命——而且也不能及：本盘旬首随占时而变，年命是人的出生年，不随占时而变。
-      // 以值符代之，同一个人换个时辰占，年命宫就跟着跑，荒谬。
-      // 通则是六甲各遁其仪：甲子戊、甲戌己、甲申庚、甲午辛、甲辰壬、甲寅癸（纲要「遁于旬首」即出于此）。
-      // 故年命甲须带年支；只给一个「甲」则定不了所遁何仪，如实返回 null，不得拿旬首顶替。
-      if (name === '年命' && gan.charAt(0) === '甲') {
-        var yi = LIU_JIA_DUN[gan];
+      // **年命、日干为甲，不走下面「以值符落宫论」那条**（那条只给时干：甲X时之旬首即甲X本身）。
+      // 本盘旬首随占时而变，年与日不随之变——以值符代之，同一个人换个时辰占，年命宫就跟着跑；
+      // 甲日十二时辰全在甲子旬或甲戌旬，日干按值符取则只会取到戊或己，甲午、甲寅之日也不例外。
+      // 通则是六甲各遁其仪：甲子戊、甲戌己、甲申庚、甲午辛、甲辰壬、甲寅癸（纲要一节〔用户所定·2026-09-24〕）。
+      // 年命甲须带年支；只给一个「甲」则定不了所遁何仪，如实返回 null，不得拿旬首顶替。
+      if ((name === '年命' || name === '日干') && gan.charAt(0) === '甲') {
+        var jz = name === '年命' ? gan : ((actors && actors.riZhu) || (chart.siZhu && chart.siZhu.day) || '');
+        var yi = LIU_JIA_DUN[jz];
         if (!yi) return null;
         g = findIn(v.tianGan, yi) || findIn(v.diGan, yi) || findIn(v.anGan, yi);
         if (!g) return null;
         var mN = gongMeta(g, chart);
-        // resolved 仍写纯干「甲」，理由同下方日干甲一路：它要用来查 symbols.json
+        // resolved 仍写纯干「甲」：它要用来查 symbols.json。写成「甲子」或「戊」都会查错。
+        // 「遁于某仪」的说明由 via 承载，二者各司其职。
         mN.name = name; mN.kind = 'gan'; mN.resolved = '甲';
-        mN.via = gan + '遁于' + yi + '，以天盘' + yi + '落宫论';
+        mN.via = jz + '遁于' + yi + '，以天盘' + yi + '落宫论';
         return mN;
       }
       resolved = gan;
       kind = 'gan';
-      // 甲不上天盘，遁于旬首，通行以值符落宫论
+      // 至此为甲者只剩时干：甲X时之旬首即甲X本身，以值符落宫论（纲要原文）
       if (gan === '甲') {
         g = String(chart.zhiFuLuoGong || chart.zhiFuGong || '');
         if (!g) return null;
         var m0 = gongMeta(g, chart);
         // resolved 必须是**纯干**：它要用来查 symbols.json。写成「甲(遁旬首)」会查不到，
-        // 导致日干为甲时（约 1/10 的日子）求测人自身的象义整个漏出提示词。
+        // 导致干为甲时（日干约 1/10 的日子）求测人自身的象义整个漏出提示词。
         // 「遁于旬首」的说明由 via 承载，二者各司其职。
         m0.name = name; m0.kind = kind; m0.resolved = '甲';
         m0.via = '甲不上天盘，遁于旬首，以值符落宫论';
@@ -256,7 +258,8 @@
       g = findIn(v.tianGan, name) || findIn(v.diGan, name) || findIn(v.anGan, name); kind = 'gan';
       // 甲三盘皆无（甲不上天盘，遁于旬首），若直接返回 null，则凡以甲为用神者——
       // 类象取甲为「栋梁/首领」断老板、领导——一律落得「盘上未见」，等于白取。
-      // 纲要既已明言「以值符落宫论」，此处与上面日干为甲一路同样处理，非新造断法。
+      // 类象之甲不属某日某年，无本旬之仪可依，故仍以值符落宫论（与时干为甲同一路，纲要原文），
+      // 非新造断法。日干、年命之甲另按遁仪，见上。
       if (!g && name === '甲') {
         g = String(chart.zhiFuLuoGong || chart.zhiFuGong || '');
         if (!g) return null;
@@ -300,6 +303,7 @@
     var sz = (chart && chart.siZhu) || {};
     var actors = {
       riGan: (sz.day || '').charAt(0) || '',
+      riZhu: sz.day || '',        // 日干为甲时要按本日之甲所遁之仪取宫，须知日支
       shiGan: (sz.time || '').charAt(0) || '',
       nianMingGan: options.nianMingGan || ''
     };

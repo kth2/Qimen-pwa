@@ -130,12 +130,12 @@ t('界面全部 15 个取值逐个定得到宫，无一落空', function () {
     assert.ok(/天盘落\d宫\(/.test(l), v + ' 定位落空：' + l);
   });
 });
-t('日干/时干两行未被改动（日/时干为甲仍按纲要以值符论，本次不动）', function () {
+t('日干/时干两行格式未变；fmt 的值符分支仍在（时干为甲用它，日干甲另见 jiadun.test.js）', function () {
   var b = riShiGanBlock(ZP, '乙');
   assert.ok(/- 日干\(求测人\)癸：天盘落\d宫\(/.test(b), '日干行变了：\n' + b);
   assert.ok(/- 时干\(所占之事\/对方\)壬：天盘落\d宫\(/.test(b), '时干行变了：\n' + b);
   var fmtSrc = APP.slice(APP.indexOf('function riShiGanBlock('), APP.indexOf('const LIU_JIA_DUN'));
-  assert.ok(/甲遁于旬首，以值符落宫论/.test(fmtSrc), '日/时干为甲的纲要口径被改掉了');
+  assert.ok(/甲遁于旬首，以值符落宫论/.test(fmtSrc), '时干为甲的值符分支被删了');
 });
 
 console.log('== system 纪律：问句里的多人年命也得照此取（那次三人年命全来自问句） ==');
@@ -148,10 +148,10 @@ t('纪律 4.1 在，且给出六甲遁仪全表与例子', function () {
   });
   assert.ok(/甲子年生人看天盘戊落宫/.test(r), '缺例子');
 });
-t('纪律 4.1 明令不得以旬首/值符代之，并点明纲要那条只管日/时干', function () {
+t('纪律 4.1 明令不得以旬首/值符代之，惟时干为甲者以值符论', function () {
   var at = APP.indexOf("'4.1 年命宫"), r = APP.slice(at, APP.indexOf('\n', at));
   assert.ok(/不得以本盘旬首或值符代之/.test(r));
-  assert.ok(/只管日干、时干/.test(r) && /不及年命/.test(r));
+  assert.ok(/惟\*\*时干\*\*为甲者以值符落宫论/.test(r), '未点明只有时干走值符');
   assert.ok(/涉及多人/.test(r), '未覆盖问句中多人年命的情形');
 });
 t('纪律 4.1 紧跟第 4 条（逐宫详析年命宫）之后', function () {
@@ -225,11 +225,7 @@ t('locate(年命=甲) 只给甲 → null，不拿值符顶替', function () {
 t('未提供年命 → null', function () {
   assert.strictEqual(YS.locate(ZP, '年命', { riGan: '癸', shiGan: '壬', nianMingGan: '' }), null);
 });
-t('日干为甲仍按纲要走值符落宫（本次不动）', function () {
-  var ri = YS.locate(ZP, '日干', { riGan: '甲', shiGan: '壬', nianMingGan: '乙' });
-  assert.strictEqual(String(ri.gong), String(ZP.zhiFuLuoGong || ZP.zhiFuGong));
-  assert.ok(/遁于旬首/.test(ri.via || ''));
-});
+// 日干为甲（〔用户所定·2026-09-24〕改从遁仪）的回归见 core/jiadun.test.js
 
 console.log('== 三份六甲遁仪表钉在一起 ==');
 t('core/yongshen.js 导出的表与通则一致', function () {

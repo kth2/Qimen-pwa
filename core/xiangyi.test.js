@@ -320,9 +320,13 @@ t('组合只在两象确实同宫时命中（含天盘/地盘/暗干各层）', 
       var atG = [c.baMen[g], c.jiuXing[g], c.baShen[g], c.tianPan[g], c.diPan[g], (c.anGan || {})[g]];
       x.elements.forEach(function (n) {
         if (n === '日干' || n === '时干') {
-          var gan = (n === '日干' ? c.siZhu.day : c.siZhu.time).charAt(0);
+          var zhu = n === '日干' ? c.siZhu.day : c.siZhu.time, gan = zhu.charAt(0);
+          // 日干为甲按本日之甲所遁之仪取宫（〔用户所定·2026-09-24〕）；时干为甲以值符落宫论（纲要原文）。
+          // 遁仪表在此另写一份字面量：这是独立的判定，不借被测模块的表。
+          var DUN = { '甲子': '戊', '甲戌': '己', '甲申': '庚', '甲午': '辛', '甲辰': '壬', '甲寅': '癸' };
           var ok = atG.indexOf(gan) >= 0 ||
-            (gan === '甲' && String(c.zhiFuLuoGong || c.zhiFuGong) === g);
+            (gan === '甲' && n === '日干' && atG.indexOf(DUN[zhu]) >= 0) ||
+            (gan === '甲' && n === '时干' && String(c.zhiFuLuoGong || c.zhiFuGong) === g);
           assert.ok(ok, x.id + '：' + n + '(' + gan + ') 并不在 ' + g + ' 宫');
         } else if (n.charAt(0) === '天' && n.length === 2) {
           // 引擎的九星可能写作「禽芮」等合称，故按特征字比对（与 xiangyi/yongshen 的还原同义）
