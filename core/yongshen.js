@@ -187,6 +187,11 @@
     };
   }
 
+  /** 六甲遁六仪：甲不上天盘，各隐于其旬首之仪下。年命为甲时据此取宫（见 locate）。
+   *  同一张表在 app.js 的 riShiGanBlock 与 engine.bundle.js 的飞盘年命宫各有一份——
+   *  前者须在 YongShen 缺席时照样可用，后者是打包产物引不进来；三份由 core/nianming.test.js 钉在一起。 */
+  var LIU_JIA_DUN = { '甲子': '戊', '甲戌': '己', '甲申': '庚', '甲午': '辛', '甲辰': '壬', '甲寅': '癸' };
+
   /**
    * 定位单个用神元素落宫。返回 null 表示盘上无此元素（如中宫寄、甲不上天盘），
    * 调用方须如实呈现"未见"，不得代为编造。
@@ -195,14 +200,29 @@
     if (!chart || !name) return null;
     var v = views(chart), g = null, kind = null, resolved = name;
 
-    // 年命与日干/时干同属「干落宫」这一类（xiangyi.js 早已把三者一并归为 gan），
-    // 定位规则完全相同——含「甲不上天盘、遁于旬首、以值符落宫论」这条兜底。
+    // 年命与日干/时干同属「干落宫」这一类（xiangyi.js 早已把三者一并归为 gan）。
     // 此前只认日干/时干，年命即便传进 actors 也永远定位不到。
     if (name === '日干' || name === '时干' || name === '年命') {
       var gan = name === '日干' ? (actors && actors.riGan)
         : name === '时干' ? (actors && actors.shiGan)
           : (actors && actors.nianMingGan);
       if (!gan) return null;
+      // **年命为甲，不走下面「以值符落宫论」那条**。纲要该条原文是「日/时干为甲时，以值符落宫论之」，
+      // 不及年命——而且也不能及：本盘旬首随占时而变，年命是人的出生年，不随占时而变。
+      // 以值符代之，同一个人换个时辰占，年命宫就跟着跑，荒谬。
+      // 通则是六甲各遁其仪：甲子戊、甲戌己、甲申庚、甲午辛、甲辰壬、甲寅癸（纲要「遁于旬首」即出于此）。
+      // 故年命甲须带年支；只给一个「甲」则定不了所遁何仪，如实返回 null，不得拿旬首顶替。
+      if (name === '年命' && gan.charAt(0) === '甲') {
+        var yi = LIU_JIA_DUN[gan];
+        if (!yi) return null;
+        g = findIn(v.tianGan, yi) || findIn(v.diGan, yi) || findIn(v.anGan, yi);
+        if (!g) return null;
+        var mN = gongMeta(g, chart);
+        // resolved 仍写纯干「甲」，理由同下方日干甲一路：它要用来查 symbols.json
+        mN.name = name; mN.kind = 'gan'; mN.resolved = '甲';
+        mN.via = gan + '遁于' + yi + '，以天盘' + yi + '落宫论';
+        return mN;
+      }
       resolved = gan;
       kind = 'gan';
       // 甲不上天盘，遁于旬首，通行以值符落宫论
@@ -389,6 +409,7 @@
     detectSchool: detectSchool, toEngineCategory: toEngineCategory,
     categoryMap: categoryMap,
     locate: locate, gongMeta: gongMeta,
+    LIU_JIA_DUN: LIU_JIA_DUN,
     GONG_INFO: GONG_INFO,
     resolve: resolve
   };
