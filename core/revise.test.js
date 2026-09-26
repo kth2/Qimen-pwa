@@ -164,6 +164,33 @@ t('verdict 非法或坏 JSON 时如实失败，不抛异常', function () {
   });
 });
 
+console.log('== 复盘反推（Phase 36）：提示词带上所问、应期、整体判断；可给单案心得 ==');
+var REC_Q = Object.assign({}, REC, { question: '本月能否收回货款？' });
+t('提示词含所问——此前没带问句，模型只能从解读里猜问的是什么', function () {
+  var p = RV.correctionPrompt(REC_Q, '一分未进');
+  assert.ok(/【所问】\n本月能否收回货款？/.test(p));
+});
+t('给了应期与整体判断就写进提示词；没给则不出现这两节', function () {
+  var p = RV.correctionPrompt(REC_Q, '一分未进', '', { outcome: 'not_happened', happenedAt: '2025-04-20', happenedTime: '15:30' });
+  assert.ok(/【实际应期】2025-04-20 15:30/.test(p));
+  assert.ok(/【用户所标整体判断】未应验/.test(p));
+  var q = RV.correctionPrompt(REC_Q, '一分未进');
+  assert.ok(!/【实际应期】/.test(q) && !/【用户所标整体判断】/.test(q));
+});
+t('断中的也可反推：要求说明当时哪几条最该倚重', function () {
+  var p = RV.correctionPrompt(REC_Q, '如期收回', '', { outcome: 'happened' });
+  assert.ok(/若当时已断中/.test(p));
+});
+t('心得 lesson：须是对已列条目的读法提醒，截断 300 字；不给也照常解析', function () {
+  var p = RV.correctionPrompt(REC_Q, '一分未进');
+  assert.ok(/"lesson"/.test(p) && /不得是新断法/.test(p));
+  var r = RV.parseCorrection(JSON.stringify({ verdict: 'derivable', correction: 'x', lesson: '墓'.repeat(400) }), REC);
+  assert.strictEqual(r.lesson.length, 300);
+  var r2 = RV.parseCorrection(JSON.stringify({ verdict: 'derivable', correction: 'x' }), REC);
+  assert.strictEqual(r2.ok, true);
+  assert.strictEqual(r2.lesson, '');
+});
+
 console.log('== 应验案例作反证 ==');
 t('无冲突时建议采纳', function () {
   var c = RV.review([{ ruleId: RID, op: 'mute', payload: {}, reasoning: 'r' }], fails(6, RID))[0];
