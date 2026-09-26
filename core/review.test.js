@@ -90,5 +90,34 @@ t('AI 代标会填逐维度（此前只能手填）', function () {
   assert.ok(!/symbolVerdicts/.test(AI), 'aiReview 不得再填象义');
 });
 
+console.log('== 复盘反推（Phase 36）：按钮在首屏，结果即存 ==');
+var FIX = (function () { try { return fnSrc('askCorrection'); } catch (e) { return ''; } })();
+t('「复盘反推」按钮与结果区在首屏，不在折叠的细标里', function () {
+  var f = OPEN.indexOf('<details id="reviewFine"'), e = OPEN.indexOf('</details>', f);
+  var b = OPEN.indexOf('id="reviewFixBtn"'), r = OPEN.indexOf('id="reviewFix"');
+  assert.ok(b > 0 && r > 0, '缺按钮或结果区');
+  assert.ok(!(b > f && b < e) && !(r > f && r < e), '按钮/结果区仍在细标里');
+  assert.ok(/复盘反推/.test(OPEN) && /当时应该如何判断/.test(OPEN));
+});
+t('反推只要 ① 实况；把应期、整体判断一并交给提示词', function () {
+  assert.ok(/请先填写 ①/.test(FIX));
+  assert.ok(/RV\.correctionPrompt\(_reviewRec, actual, [^)]*, \{ outcome/.test(FIX));
+});
+t('反推结果当场存入案例——不必再按保存，关掉面板也不丢', function () {
+  assert.ok(/store\.save\(CB\.applyCorrection\(/.test(FIX));
+  assert.ok(/已存入本案例/.test(FIX));
+});
+t('存下依据的实况、时间与实际作答的模型（备用接管时不记错）', function () {
+  assert.ok(/basedOnActual: actual/.test(FIX) && /at: new Date\(\)\.toISOString\(\)/.test(FIX));
+  assert.ok(/LLM\.lastUsed/.test(FIX));
+});
+t('实况改过后再打开，提示旧反推依据的是旧实况', function () {
+  assert.ok(/basedOnActual/.test(fnSrc('renderCorrection')));
+});
+
+t('案例列表标出「已反推」', function () {
+  assert.ok(/r\.correction \? .*已反推/.test(fnSrc('caseRowHtml')));
+});
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

@@ -87,14 +87,21 @@
    * 「当时该怎么断」的提示词。
    * 关键设计：**必须指出偏在哪条已有证据上**，且必须保留「断不出来」这个出口。
    * 没有这个出口，模型会把任何结果都圆成一套自洽的说法——那不是复盘，是编故事。
+   * ctx（可选，Phase 36）：{ outcome, happenedAt, happenedTime }——复盘面板上用户已填的应期与整体判断。
    */
-  function correctionPrompt(rec, actualText, methodNote) {
+  var OUTCOME_LABEL = { happened: '完全应验', partial: '部分应验', not_happened: '未应验', opposite: '结果相反' };
+  function correctionPrompt(rec, actualText, methodNote, ctx) {
+    ctx = ctx || {};
+    var when = ctx.happenedAt ? (ctx.happenedAt + (ctx.happenedTime ? ' ' + ctx.happenedTime : '')) : '';
     var rules = (rec && rec.fired && rec.fired.rules) || [];
     var syms = (rec && rec.fired && rec.fired.symbols) || [];
     var answer = String(rec && rec.answer || '').slice(0, 3000);
     return [
       '你在为一则奇门占例写**正解**：已知实际结果，回头看当时那一盘，',
       '按《解断方法纲要》**正确地断**应该是什么样，以及当时那份解读偏在哪里。',
+      '',
+      '【所问】',
+      String(rec && rec.question || '').trim() || '（未记录）',
       '',
       '【当时盘上的判读条目（规则层，有纲要出处）】',
       rules.length ? rules.map(function (r) {
@@ -115,6 +122,8 @@
       '【实际结果】',
       actualText || '（未填写）',
       '',
+      when ? '【实际应期】' + when + '\n' : '',
+      OUTCOME_LABEL[ctx.outcome] ? '【用户所标整体判断】' + OUTCOME_LABEL[ctx.outcome] + '\n' : '',
       methodNote ? '【本占类边界】' + methodNote + '\n' : '',
       '【要求——这几条是防止你事后圆说的，务必遵守】',
       '1. 正解**只能建立在上面已列出的条目之上**。不得引入盘上没有的元素，不得新造断法，',
@@ -125,10 +134,14 @@
       '   为何断不出（纲要未涉及此类事 / 盘上无相应之象 / 问法太笼统）。这是允许且重要的答案，',
       '   强行圆出一套说法比承认断不出更有害。',
       '4. 正解要写得像一份断语（结论 + 依据），而不是对实际结果的复述。',
-      '5. 只输出 JSON，不要解释文字或代码块标记：',
+      '   若当时已断中，就说明当时哪几条最该倚重、哪些是干扰，misweighted 可以为空。',
+      '5. lesson：一两句下次遇到同类盘时的读法提醒，只能针对上面已列条目的轻重与取舍，',
+      '   不得是新断法；这只是单案心得，写不出就留空字符串。',
+      '6. 只输出 JSON，不要解释文字或代码块标记：',
       '{"verdict":"derivable|partly_derivable|not_derivable",',
       ' "correction":"当时正确的断语（含依据）",',
       ' "misweighted":[{"itemId":"规则id或sym:key","how":"overrated|underrated|missed","why":"依纲要该如何看"}],',
+      ' "lesson":"单案心得，可空",',
       ' "whyNotDerivable":"verdict 为 not_derivable 时填，否则空字符串"}'
     ].filter(Boolean).join('\n');
   }
@@ -138,7 +151,7 @@
     var known = {};
     ((rec && rec.fired && rec.fired.rules) || []).forEach(function (r) { known[r.id] = 1; known[statKey(r)] = 1; });
     ((rec && rec.fired && rec.fired.symbols) || []).forEach(function (s) { known[s.key] = 1; });
-    var empty = { ok: false, verdict: '', correction: '', misweighted: [], whyNotDerivable: '', dropped: [], error: '' };
+    var empty = { ok: false, verdict: '', correction: '', misweighted: [], whyNotDerivable: '', lesson: '', dropped: [], error: '' };
     var raw = String(text || '').trim();
     var a = raw.indexOf('{'), b = raw.lastIndexOf('}');
     if (a < 0 || b <= a) { empty.error = '未找到 JSON'; return empty; }
@@ -164,6 +177,7 @@
       correction: String(obj.correction || '').slice(0, 2000),
       misweighted: mis,
       whyNotDerivable: verdict === 'not_derivable' ? String(obj.whyNotDerivable || '').slice(0, 500) : '',
+      lesson: typeof obj.lesson === 'string' ? obj.lesson.trim().slice(0, 300) : '',
       dropped: dropped, error: ''
     };
   }

@@ -1113,6 +1113,7 @@
       ? `　<span style="color:#3c763d">应期命中 ${r.timingHits.hits.length} 条</span>` : '';
     const actual = fb && fb.actual ? `<div class="muted" style="margin-top:2px;">实况：${esc(fb.actual.slice(0, 80))}</div>` : '';
     const misTag = fb && (fb.misreads || []).length ? `　<span style="color:#a94442">断错分析 ${fb.misreads.length} 条</span>` : '';
+    const fixTag = r.correction ? '　<span style="color:#8a6d3b">已反推</span>' : '';
       const pn = (r.parts && r.parts.items) ? r.parts.items.length : 0;
       const pd = fb && fb.partOutcomes ? Object.keys(fb.partOutcomes).length : 0;
       const partTag = pn ? (r.parts.confirmed
@@ -1122,7 +1123,7 @@
     const marked = fb ? (Object.keys(fb.ruleVerdicts || {}).length + Object.keys(fb.symbolVerdicts || {}).length) : 0;
     return `<div style="border-bottom:1px solid #eee;padding:6px 0;font-size:13px;">
       <div><b>${esc(r.question || '(未填问题)')}</b> <span class="muted">${esc(r.domain || '')}　${esc((r.chartRef && r.chartRef.siZhu) || '')}</span></div>
-      <div class="muted">${esc((r.createdAt || '').slice(0, 10))}　判读 ${((r.fired && r.fired.rules) || []).length} 条　锚点 ${((r.fired && r.fired.anchors) || []).length} 个　${tag}${marked ? `　已逐条标注 ${marked} 条` : ''}${hit}${misTag}${partTag}${noAns}</div>
+      <div class="muted">${esc((r.createdAt || '').slice(0, 10))}　判读 ${((r.fired && r.fired.rules) || []).length} 条　锚点 ${((r.fired && r.fired.anchors) || []).length} 个　${tag}${marked ? `　已逐条标注 ${marked} 条` : ''}${hit}${misTag}${fixTag}${partTag}${noAns}</div>
       ${actual}
       <div style="margin-top:4px;">
         <button class="btn" style="background:#3c763d;padding:3px 8px;font-size:12px;" data-open="${esc(r.id)}">${fb ? '查看/修改复盘' : '📝 填写实况并复盘'}</button>
@@ -1229,7 +1230,8 @@
 
   /* 复盘表单（Phase 35 改为「快速复盘」）：
    *   首屏只留三样——① 实况、② 实际日期、③ 整体判断——加主按钮「AI 代标并保存」。
-   *   规则判读、逐维度、求正解收进折叠的「细标」，AI 代标会替你填好，想改再展开。
+   *   规则判读、逐维度收进折叠的「细标」，AI 代标会替你填好，想改再展开。
+   *   「复盘反推」（Phase 36）在首屏：只要 ① 就能推，推成即存，与保存互不牵连。
    *   盘面象义的逐条标注撤掉：它只进一张按「元素@宫」分的表，样本永远攒不够，不进任何修订。
    *   （AI 提示里象义清单仍在——只作断错分析的依据锚点，见 casebook.reviewPrompt。）
    * 依据：用户案例本两次整本评估（152 例 / 72 例）——改了纲领的发现全出自实况与断错分析；
@@ -1299,11 +1301,19 @@
             填好 ①③ 按「AI 代标并保存」即可：AI 依实况替你标好规则判读、逐维度，并挑出断错之处——一次调用。
           </div>
         </div>
+        <div style="margin-top:10px;">
+          <button class="btn" id="reviewFixBtn" style="background:#8a6d3b;">🔍 复盘反推：当时应该如何判断</button>
+          <span class="muted" id="reviewFixTag"></span>
+          <div class="muted" style="font-size:11px;margin-top:2px;">
+            只需填 ①：AI 依实况回看当时那一盘——按纲要本该怎么断、当时偏在哪一条、下次同类盘留意什么。
+            只许用盘上已有的条目；按纲要断不出就如实说断不出。结果当场存入本案例。
+          </div>
+          <div id="reviewFix" style="margin-top:6px;">${rec.correction ? renderCorrection(rec.correction, fb.actual || '') : ''}</div>
+        </div>
         <details id="reviewFine" style="margin-top:10px;border:1px solid #ddd;border-radius:6px;padding:6px;">
           <summary class="muted">细标（可选）：规则判读 ${recRules.length} 条${cvDims ? '、逐维度 ' + cvDims + ' 项' : ''}——AI 代标会替你填好，想改再展开</summary>
           <div style="margin-top:6px;">
             <button class="btn" id="reviewAiBtn" style="background:#666;padding:3px 8px;font-size:12px;">🤖 先代标、看过再存</button>
-            <button class="btn" id="reviewFixBtn" style="background:#8a6d3b;padding:3px 8px;font-size:12px;">📐 求正解（当时该怎么断）</button>
             <span class="muted" id="reviewAiTag"></span>
           </div>
           <div style="max-height:420px;overflow:auto;margin-top:4px;">
@@ -1311,7 +1321,6 @@
             ${rulesHtml}
           </div>
           ${dimsFormHtml(rec)}
-          <div id="reviewFix" style="margin-top:8px;">${rec.correction ? renderCorrection(rec.correction) : ''}</div>
         </details>
         <div id="reviewMisreads" style="margin-top:8px;">${mis.length ? renderMisreads(mis) : ''}</div>
         <div id="reviewObs" class="muted" style="margin-top:6px;"></div>
@@ -1372,14 +1381,17 @@
     </div>`;
   }
 
-  /** 正解：当时按纲要正确地断该是什么样。含「断不出来」这一诚实出口。 */
+  /** 复盘反推（正解）：当时按纲要正确地断该是什么样。含「断不出来」这一诚实出口。
+   *  curActual：面板上现在的实况——与反推当时依据的实况不同，就提示可以重推。 */
   const VERDICT_LABEL = { derivable: '按纲要可以断出', partly_derivable: '部分可断出', not_derivable: '按纲要断不出此结果' };
   const HOW_LABEL = { overrated: '当时高估了', underrated: '当时低估了', missed: '当时漏看了' };
-  function renderCorrection(c) {
+  function renderCorrection(c, curActual) {
     if (!c) return '';
     const bad = c.verdict === 'not_derivable';
+    const stale = c.basedOnActual && curActual && c.basedOnActual.trim() !== String(curActual).trim();
     return `<div style="border:1px solid ${bad ? '#c9c9c9' : '#c9dcc9'};border-radius:6px;padding:6px;background:${bad ? '#fafafa' : '#f7fbf7'};">
-      <b style="font-size:12px;">正解</b> <span class="muted">（${esc(VERDICT_LABEL[c.verdict] || c.verdict)}）</span>
+      <b style="font-size:12px;">复盘反推</b> <span class="muted">（${esc(VERDICT_LABEL[c.verdict] || c.verdict)}）</span>
+      ${stale ? '<div style="font-size:11px;color:#a15c00;margin-top:2px;">⚠ 这份反推依据的是改动前的实况，可再按一次「复盘反推」。</div>' : ''}
       ${bad
         ? `<div class="muted" style="font-size:12px;margin-top:4px;">${esc(c.whyNotDerivable || '')}
            <br>—— 这是允许且重要的答案：强行圆出一套说法，比承认断不出更有害。</div>`
@@ -1387,26 +1399,50 @@
       ${(c.misweighted || []).length ? `<div style="font-size:12px;margin-top:6px;">偏差所在：${
         c.misweighted.map(m => `<div>· <code>${esc(m.itemId)}</code> ${esc(HOW_LABEL[m.how] || m.how)}——${esc(m.why)}</div>`).join('')
       }</div>` : ''}
+      ${c.lesson ? `<div style="font-size:12px;margin-top:6px;">💡 下次留意：${esc(c.lesson)}
+        <span class="muted">（单案心得，未经多案验证）</span></div>` : ''}
+      ${(c.at || c.model) ? `<div class="muted" style="font-size:11px;margin-top:4px;">${esc(String(c.at || '').slice(0, 16).replace('T', ' '))}${c.model ? ' · ' + esc(c.model) : ''}</div>` : ''}
     </div>`;
   }
 
+  /** 复盘反推：依 ① 实况回推「当时该怎么断」。
+   *  只要 ① 就能推（不必先定整体判断）；推成即**当场存入案例**——此前要再按保存，
+   *  关掉面板就白推一次。存的是 correction 一栏，与实况反馈分开，不动任何判读统计。 */
   async function askCorrection() {
     if (!_reviewRec || !RV) return;
+    const tag = (m) => { $('reviewFixTag').textContent = m; };
     const actual = $('reviewActual').value.trim();
-    if (!actual) { $('reviewAiTag').textContent = '请先填写实际情况'; return; }
-    const btn = $('reviewFixBtn'); btn.disabled = true; $('reviewAiTag').textContent = '求正解中…';
+    if (!actual) { tag('请先填写 ① 实际发生了什么——反推全靠这段'); return; }
+    const picked = document.querySelector('input[name="reviewOutcome"]:checked');
+    const rec0 = _reviewRec;
+    const btn = $('reviewFixBtn'); btn.disabled = true; tag('反推中…');
     try {
-      const sys = '你在为奇门占例写正解。只能基于给定条目，不得新造断法；断不出就如实说。只输出 JSON。';
-      const out = await LLM.chat(sys, RV.correctionPrompt(_reviewRec, actual, _reviewRec.safetyNote || ''), null,
-        (m) => { $('reviewAiTag').textContent = m; });
-      const p = RV.parseCorrection(out, _reviewRec);
-      if (!p.ok) { $('reviewAiTag').textContent = '解析失败：' + p.error; return; }
-      _reviewRec._correction = p;
-      $('reviewFix').innerHTML = renderCorrection(p);
-      $('reviewAiTag').textContent = p.verdict === 'not_derivable'
-        ? '模型认为按纲要断不出此结果——这条信息本身很有价值'
-        : `已给出正解${p.misweighted.length ? `，指出 ${p.misweighted.length} 处偏差` : ''}${p.dropped.length ? `（丢弃 ${p.dropped.length} 条无效项）` : ''}`;
-    } catch (e) { $('reviewAiTag').textContent = '求正解失败：' + (e.message || e); }
+      const sys = '你在为奇门占例写复盘反推（正解）。只能基于给定条目，不得新造断法；断不出就如实说。只输出 JSON。';
+      const out = await LLM.chat(sys, RV.correctionPrompt(_reviewRec, actual, _reviewRec.safetyNote || '', { outcome: picked ? picked.value : '', happenedAt: $('reviewDate').value, happenedTime: $('reviewTime') ? $('reviewTime').value : '' }), null, tag);
+      const p = RV.parseCorrection(out, rec0);
+      if (!p.ok) { tag('解析失败：' + p.error + '，可再试一次'); return; }
+      const u = (LLM.lastUsed && LLM.lastUsed()) || null;
+      const c = {
+        verdict: p.verdict, correction: p.correction, misweighted: p.misweighted,
+        whyNotDerivable: p.whyNotDerivable, lesson: p.lesson,
+        basedOnActual: actual, at: new Date().toISOString(), model: u ? u.label : ''
+      };
+      // 存库以库里那份为底：只并入 correction，面板上尚未保存的实况/标注不在此一并写入
+      if (store && CB) {
+        const cur = await store.get(rec0.id);
+        if (cur) {
+          await store.save(CB.applyCorrection(cur, c));
+          try { await renderCaseViews(); } catch (e) { /* 列表刷新失败不影响反推结果 */ }
+        }
+      }
+      rec0.correction = c; rec0._correction = c;   // 之后再按保存也带着它
+      if (_reviewRec !== rec0) return;               // 等 AI 期间面板被关掉或换了案例
+      $('reviewFix').innerHTML = renderCorrection(c, actual);
+      tag((p.verdict === 'not_derivable'
+        ? '按纲要断不出此结果——这条信息本身很有价值'
+        : `已反推${p.misweighted.length ? `，指出 ${p.misweighted.length} 处偏差` : ''}`)
+        + (p.dropped.length ? `（丢弃 ${p.dropped.length} 条无效项）` : '') + '；已存入本案例');
+    } catch (e) { tag('反推失败：' + (e.message || e)); }
     finally { btn.disabled = false; }
   }
 
