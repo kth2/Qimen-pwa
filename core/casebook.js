@@ -343,6 +343,12 @@
       return '- ' + r.id + ' ｜ ' + (r.label || '') + ' → ' + (r.concept || '') +
         ' ｜ 当时倾向：' + (r.polarity === '+' ? '助' : r.polarity === '-' ? '阻' : '中');
     });
+    // 逐维度（Phase 35 起由 AI 代标）：弃权的维度当时就没下结论，不必标
+    var cv = (rec && rec.converge) || null;
+    var abst = (cv && cv.abstained) || [];
+    var dimLines = ((cv && cv.dims) || []).filter(function (d) { return abst.indexOf(d.dim) < 0; }).map(function (d) {
+      return '- ' + d.dim + ' ｜ 当时断「' + (d.top || '—') + '」（' + (d.tier || '') + '级·' + (d.independent || 0) + ' 路）';
+    });
     var symLines = syms.map(function (s) {
       return '- ' + s.key + ' ｜ ' + s.label +
         (s.withEls.length ? ' ｜ 同宫：' + s.withEls.join('/') : '') +
@@ -352,12 +358,17 @@
     return [
       '你在做奇门占例的**复盘**，不是重新断卦。',
       '下面给出：当时这一卦触发的确定性条目、当时实际给出的解读全文、以及事后用户填写的实际发生情况。',
-      '你要做两件事：①逐条判断条目是否与实际相符；②指出解读中**具体断错的地方**及其所依据的条目。',
+      '你要做三件事：①逐条判断规则条目是否与实际相符；②逐维度判断当时的断语是否与实际相符；③指出解读中**具体断错的地方**及其所依据的条目。',
       '',
       '【当时的判读条目（规则层，有出处）】',
       lines.length ? lines.join('\n') : '（本占类规则库未覆盖，无判读条目）',
       '',
-      '【当时的盘面象义（用神落宫与同宫之象）】',
+      '【当时的逐维度断语】',
+      dimLines.length ? dimLines.join('\n') : '（无，或各维度当时均已弃权）',
+      '',
+      // 盘面象义自 Phase 35 起不再逐条标注（只进一张样本永远攒不够的表，用户已定撤掉）。
+      // 清单仍列出，**只供断错分析引作依据**——删了它，本可挂上的断错会被算成「挂不上证据」。
+      '【当时的盘面象义（用神落宫与同宫之象；仅供断错分析引作依据，不必逐条判断）】',
       symLines.length ? symLines.join('\n') : '（无）',
       '',
       '【当时实际给出的解读' + (answer.length >= REVIEW_ANSWER_CHARS ? '（节选前 ' + REVIEW_ANSWER_CHARS + ' 字）' : '') + '】',
@@ -367,16 +378,16 @@
       actualText || '（未填写）',
       '',
       '【要求】',
-      '1. 只对上面列出的条目作判断，不得新增条目、不得改写其内容、不得提出新的断法。',
-      '2. 每条给出四档之一：happened(相符) / partial(部分相符) / not_happened(不相符) / opposite(与实际相反)。',
+      '1. 只对上面列出的规则条目与维度作判断，不得新增条目、不得改写其内容、不得提出新的断法。盘面象义不必判断。',
+      '2. 每条（每个维度）给出四档之一：happened(相符) / partial(部分相符) / not_happened(不相符) / opposite(与实际相反)。',
       '3. 实际情况里没有涉及到的条目，**不要勉强判断**——直接省略该条，宁缺勿猜。',
       '4. 断错分析(misreads)：从上面的解读全文中挑出**与实际明显不符**的具体论断，最多 5 条。每条给：',
       '   claim=照抄解读里的原句(不要转述)、basedOn=它所依据的条目 id 或象义 key(对应不上就留空字符串)、',
       '   actual=实际情况如何。断得对的地方不必列；解读没提到的事也不算断错(那属于观察)。',
       '5. 另可给出 0-3 条「观察」：实际情况中出现、但当时解读未提到的现象，供人工参考。观察不是结论。',
       '6. 只输出 JSON，不要任何解释文字或代码块标记。verdicts 用判读条目的 id，',
-      '   symbolVerdicts 用盘面象义的 key（形如 sym:生门@2）：',
-      '{"verdicts":{"规则id":"happened"},"symbolVerdicts":{"sym:生门@2":"partial"},',
+      '   dimVerdicts 用维度名（照抄上面「逐维度断语」每行开头那几个字）：',
+      '{"verdicts":{"规则id":"happened"},"dimVerdicts":{"维度名":"partial"},',
       ' "misreads":[{"claim":"解读原句","basedOn":"规则id或sym:key或空","actual":"实际如何"}],',
       ' "observations":["..."]}'
     ].join('\n');
@@ -387,16 +398,18 @@
    * 模型可能编出不存在的 id 或自造档位，放进统计就等于污染数据。
    */
   function parseReview(text, rec) {
-    var known = {}, knownSym = {};
+    var known = {}, knownSym = {}, knownDim = {};
+    var cvR = (rec && rec.converge) || null, abstR = (cvR && cvR.abstained) || [];
+    ((cvR && cvR.dims) || []).forEach(function (d) { if (abstR.indexOf(d.dim) < 0) knownDim[d.dim] = 1; });
     ((rec && rec.fired && rec.fired.rules) || []).forEach(function (r) { known[r.id] = 1; });
     ((rec && rec.fired && rec.fired.symbols) || []).forEach(function (s) { knownSym[s.key] = 1; });
     var raw = String(text || '').trim();
     // 容忍模型裹上代码块或前后废话：取第一个 { 到最后一个 }
     var s = raw.indexOf('{'), e = raw.lastIndexOf('}');
-    if (s < 0 || e <= s) return { ok: false, verdicts: {}, symbolVerdicts: {}, misreads: [], observations: [], dropped: [], error: '未找到 JSON' };
+    if (s < 0 || e <= s) return { ok: false, verdicts: {}, dimVerdicts: {}, symbolVerdicts: {}, misreads: [], observations: [], dropped: [], error: '未找到 JSON' };
     var obj;
     try { obj = JSON.parse(raw.slice(s, e + 1)); }
-    catch (err) { return { ok: false, verdicts: {}, symbolVerdicts: {}, misreads: [], observations: [], dropped: [], error: 'JSON 解析失败' }; }
+    catch (err) { return { ok: false, verdicts: {}, dimVerdicts: {}, symbolVerdicts: {}, misreads: [], observations: [], dropped: [], error: 'JSON 解析失败' }; }
     var verdicts = {}, dropped = [];
     var vs = (obj && obj.verdicts) || {};
     Object.keys(vs).forEach(function (id) {
@@ -404,12 +417,15 @@
       if (!isOutcome(vs[id])) { dropped.push({ id: id, why: '档位非法：' + vs[id] }); return; }
       verdicts[id] = vs[id];
     });
+    // 盘面象义 Phase 35 起不再逐条标注：模型即便照旧给了 symbolVerdicts，也一概不收（不算丢弃，不报）
     var symVerdicts = {};
-    var svs = (obj && obj.symbolVerdicts) || {};
-    Object.keys(svs).forEach(function (k) {
-      if (!knownSym[k]) { dropped.push({ id: k, why: '本案无此象义条目' }); return; }
-      if (!isOutcome(svs[k])) { dropped.push({ id: k, why: '档位非法：' + svs[k] }); return; }
-      symVerdicts[k] = svs[k];
+    // 逐维度：只收本案当时下了结论（未弃权）的维度，档位须合法
+    var dimVerdicts = {};
+    var dvs = (obj && obj.dimVerdicts) || {};
+    Object.keys(dvs).forEach(function (k) {
+      if (!knownDim[k]) { dropped.push({ id: k, why: '本案无此维度或该维度当时已弃权' }); return; }
+      if (!isOutcome(dvs[k])) { dropped.push({ id: k, why: '档位非法：' + dvs[k] }); return; }
+      dimVerdicts[k] = dvs[k];
     });
     // 断错分析：claim/actual 为自由文本（截断即可）；basedOn 必须指向本案真实存在的条目，
     // 否则清空——模型很会编一个看起来像 id 的东西，放着不管就会污染「被指错」计数。
@@ -434,7 +450,7 @@
       obs = obj.observations.filter(function (x) { return typeof x === 'string' && x.trim(); })
         .slice(0, 3).map(function (x) { return String(x).slice(0, 200); });
     }
-    return { ok: true, verdicts: verdicts, symbolVerdicts: symVerdicts, misreads: misreads, observations: obs, dropped: dropped, error: '' };
+    return { ok: true, verdicts: verdicts, dimVerdicts: dimVerdicts, symbolVerdicts: symVerdicts, misreads: misreads, observations: obs, dropped: dropped, error: '' };
   }
 
   /**

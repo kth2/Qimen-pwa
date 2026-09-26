@@ -1227,6 +1227,13 @@
 
   const VERDICT_OPTS = [['', '未标注'], ['happened', '相符'], ['partial', '部分'], ['not_happened', '不符'], ['opposite', '相反']];
 
+  /* 复盘表单（Phase 35 改为「快速复盘」）：
+   *   首屏只留三样——① 实况、② 实际日期、③ 整体判断——加主按钮「AI 代标并保存」。
+   *   规则判读、逐维度、求正解收进折叠的「细标」，AI 代标会替你填好，想改再展开。
+   *   盘面象义的逐条标注撤掉：它只进一张按「元素@宫」分的表，样本永远攒不够，不进任何修订。
+   *   （AI 提示里象义清单仍在——只作断错分析的依据锚点，见 casebook.reviewPrompt。）
+   * 依据：用户案例本两次整本评估（152 例 / 72 例）——改了纲领的发现全出自实况与断错分析；
+   * 逐条勾选做了 93%，而 177 个规则分支里够 8 例门槛的只有 1 个。 */
   async function openReview(id) {
     if (!store || !CB) return;
     const rec = await store.get(id);
@@ -1234,19 +1241,10 @@
     _reviewRec = rec;
     const fb = rec.feedback || {};
     const vs = fb.ruleVerdicts || {};
-    const svs = fb.symbolVerdicts || {};
     const sel = (attr, key, cur) => `<select data-${attr}="${esc(key)}" style="font-size:12px;margin-top:2px;">
       ${VERDICT_OPTS.map(([v, label]) => `<option value="${v}"${cur === v || (!cur && !v) ? ' selected' : ''}>${label}</option>`).join('')}
     </select>`;
-    // ① 盘面象义：用神落宫与同宫之象。各盘别、各占类都有，是「当时这盘说了什么」的原始层
-    const symsHtml = (rec.fired.symbols || []).map(s => `
-      <div style="border-bottom:1px solid #f2f2f2;padding:4px 0;font-size:12px;">
-        <div><b>${esc(s.label)}</b></div>
-        <div class="muted">同宫：${esc(s.withEls.join('/'))}</div>
-        <div class="muted">象义：${esc(s.words.join('、'))}</div>
-        ${sel('symverdict', s.key, svs[s.key])}
-      </div>`).join('');
-    // ② 规则判读：domain-rules.json 命中项，有出处、可回查、可驱动校准
+    // 规则判读：domain-rules.json 命中项，有出处、可回查、可驱动校准——收进细标，AI 代填
     const recRules = (rec.fired && rec.fired.rules) || [];
     const rulesHtml = recRules.length ? recRules.map(r => `
       <div style="border-bottom:1px solid #f2f2f2;padding:4px 0;font-size:12px;">
@@ -1254,8 +1252,12 @@
           <span class="muted">[${r.polarity === '+' ? '助' : r.polarity === '-' ? '阻' : '中'}]</span></div>
         ${sel('verdict', r.id, vs[r.id])}
       </div>`).join('')
-      : '<div class="muted" style="font-size:12px;padding:4px 0;">本占类的规则库尚未覆盖（如综合占类、或飞盘），故无规则判读条目——这不代表盘上无象，上面的盘面象义照常可标。</div>';
+      : '<div class="muted" style="font-size:12px;padding:4px 0;">本占类的规则库尚未覆盖（如综合占类、或飞盘），故无规则判读条目。</div>';
+    const cvDims = ((rec.converge && rec.converge.dims) || []).length;
     const mis = (fb.misreads || []);
+    // 「占问当天」：占问时刻取自存档的盘（chartRef.date 形如「2025-04-04 19:41:00 …」）
+    const askDay = String((rec.chartRef && rec.chartRef.date) || '').slice(0, 10);
+    const hasAskDay = /^\d{4}-\d{2}-\d{2}$/.test(askDay);
     $('reviewBody').innerHTML = `
       <div style="font-size:13px;">
         <div><b>${esc(rec.question || '')}</b> <span class="muted">${esc((rec.chartRef && rec.chartRef.siZhu) || '')}</span></div>
@@ -1267,53 +1269,71 @@
           }</div>
         </details>` : '<div class="muted" style="margin-top:6px;">（本条案例未记录解读全文——存档前的旧案例会这样）</div>'}
         <div style="margin-top:6px;">
-          <div class="muted">① 实际发生了什么？（用你自己的话写，越具体越有用）</div>
+          <div class="muted">① 实际发生了什么？（用你自己的话写，越具体越有用——AI 代标全靠这段）</div>
           <textarea id="reviewActual" rows="3" style="width:100%;">${esc(fb.actual || '')}</textarea>
         </div>
         <div style="margin-top:6px;">
           <span class="muted">② 实际发生日期</span>
           <input type="date" id="reviewDate" value="${esc(fb.happenedAt || '')}">
+          ${hasAskDay ? `<button class="btn" type="button" id="reviewDayAsk" style="background:#666;padding:2px 6px;font-size:12px;">占问当天</button>
+          <button class="btn" type="button" id="reviewDayNext" style="background:#666;padding:2px 6px;font-size:12px;">次日</button>` : ''}
           <span class="muted">时刻(可选)</span>
           <input type="time" id="reviewTime" value="${esc(fb.happenedTime || '')}" style="width:96px;">
           <span class="muted" id="reviewHitTag"></span>
           <div class="muted" style="font-size:11px;margin-top:2px;">
-            填了时刻才会核对「时辰」一级。不填就不核对——拿中午顶替等于白送一次蒙中的机会，
-            那样算出来的命中率是虚的。
+            填了日期，应期才核对得了。时刻填了才核对「时辰」一级——不填就不核对，拿中午顶替等于白送一次蒙中的机会。
           </div>
         </div>
         ${partsFormHtml(rec)}
-        ${dimsFormHtml(rec)}
         <div style="margin-top:6px;">
           <span class="muted">③ 整体判断${rec.parts && rec.parts.confirmed ? '（已按逐问自动推出，可手改）' : ''}</span>
           ${OUTCOME_BTNS.map(([k, label]) =>
             `<label style="margin-right:8px;font-size:12px;"><input type="radio" name="reviewOutcome" value="${k}"${fb.outcome === k ? ' checked' : ''}>${label}</label>`).join('')}
         </div>
-        <div style="margin-top:8px;">
-          <span class="muted">④ 逐条标注（这一步做了，统计才谈得上可信——否则只能按"整案归因"粗算）</span>
-          <button class="btn" id="reviewAiBtn" style="background:#666;padding:3px 8px;font-size:12px;">🤖 让 AI 依实况给出建议</button>
-          <button class="btn" id="reviewFixBtn" style="background:#8a6d3b;padding:3px 8px;font-size:12px;">📐 求正解（当时该怎么断）</button>
-          <span class="muted" id="reviewAiTag"></span>
-          <div style="max-height:420px;overflow:auto;margin-top:4px;">
-            <div style="margin:4px 0;font-weight:bold;">盘面象义（当时这盘的用神落宫与同宫之象）</div>
-            ${symsHtml}
-            <div style="margin:10px 0 4px;font-weight:bold;">规则判读（按纲要命中的条目，有出处）</div>
-            ${rulesHtml}
-          </div>
-        </div>
-        <div id="reviewMisreads" style="margin-top:8px;">${mis.length ? renderMisreads(mis) : ''}</div>
-        <div id="reviewFix" style="margin-top:8px;">${rec.correction ? renderCorrection(rec.correction) : ''}</div>
-        <div id="reviewObs" class="muted" style="margin-top:6px;"></div>
-        <div style="margin-top:8px;">
-          <button class="btn" id="reviewSaveBtn">保存复盘</button>
+        <div style="margin-top:10px;">
+          <button class="btn" id="reviewAiSaveBtn">🤖 AI 代标并保存</button>
+          <button class="btn" id="reviewSaveBtn" style="background:#666;">仅保存</button>
           <button class="btn" id="reviewCancelBtn" style="background:#999;">关闭</button>
           <span class="muted" id="reviewSaveTag"></span>
+          <div class="muted" style="font-size:11px;margin-top:2px;">
+            填好 ①③ 按「AI 代标并保存」即可：AI 依实况替你标好规则判读、逐维度，并挑出断错之处——一次调用。
+          </div>
         </div>
+        <details id="reviewFine" style="margin-top:10px;border:1px solid #ddd;border-radius:6px;padding:6px;">
+          <summary class="muted">细标（可选）：规则判读 ${recRules.length} 条${cvDims ? '、逐维度 ' + cvDims + ' 项' : ''}——AI 代标会替你填好，想改再展开</summary>
+          <div style="margin-top:6px;">
+            <button class="btn" id="reviewAiBtn" style="background:#666;padding:3px 8px;font-size:12px;">🤖 先代标、看过再存</button>
+            <button class="btn" id="reviewFixBtn" style="background:#8a6d3b;padding:3px 8px;font-size:12px;">📐 求正解（当时该怎么断）</button>
+            <span class="muted" id="reviewAiTag"></span>
+          </div>
+          <div style="max-height:420px;overflow:auto;margin-top:4px;">
+            <div style="margin:4px 0;font-weight:bold;">规则判读（按纲要命中的条目，有出处）</div>
+            ${rulesHtml}
+          </div>
+          ${dimsFormHtml(rec)}
+          <div id="reviewFix" style="margin-top:8px;">${rec.correction ? renderCorrection(rec.correction) : ''}</div>
+        </details>
+        <div id="reviewMisreads" style="margin-top:8px;">${mis.length ? renderMisreads(mis) : ''}</div>
+        <div id="reviewObs" class="muted" style="margin-top:6px;"></div>
       </div>`;
     $('reviewPanel').style.display = 'block';
     $('reviewDate').addEventListener('change', previewTimingHits);
     $('reviewTime').addEventListener('change', previewTimingHits);
-    $('reviewAiBtn').addEventListener('click', aiReview);
+    if (hasAskDay) {
+      const setDay = (offset) => {
+        const d = new Date(askDay + 'T12:00:00'); d.setDate(d.getDate() + offset);
+        const pad = (n) => String(n).padStart(2, '0');
+        $('reviewDate').value = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+        previewTimingHits();
+      };
+      $('reviewDayAsk').addEventListener('click', () => setDay(0));
+      $('reviewDayNext').addEventListener('click', () => setDay(1));
+    }
+    $('reviewAiSaveBtn').addEventListener('click', aiAndSave);
+    $('reviewAiBtn').addEventListener('click', () => aiReview());
     $('reviewFixBtn').addEventListener('click', askCorrection);
+    // 细标里的改动由人手做了才算「人工标注」；AI 预填是程序赋值，不触发 change
+    $('reviewFine').addEventListener('change', () => { if (_reviewRec) _reviewRec._touched = true; });
     // 一卦多问：勾选后展开逐问，且逐问一改就把「整体判断」按规则推出来
     const partsOn = $('partsOn');
     if (partsOn) {
@@ -1334,7 +1354,7 @@
       document.querySelectorAll('input[name^="part"]').forEach(x => x.addEventListener('change', sync));
       sync();
     }
-    $('reviewSaveBtn').addEventListener('click', saveReview);
+    $('reviewSaveBtn').addEventListener('click', () => saveReview());
     $('reviewCancelBtn').addEventListener('click', () => { $('reviewPanel').style.display = 'none'; _reviewRec = null; });
     previewTimingHits();
   }
@@ -1475,50 +1495,74 @@
   }
 
   /** AI 复盘：只让模型把实况映射到当时的判读上，输出经严格校验后填进表单，由用户过目再存。 */
+  /** AI 依实况代标：填好规则判读、逐维度，并挑出断错之处。返回是否成功（「AI 代标并保存」据此决定怎么报）。 */
   async function aiReview() {
-    if (!_reviewRec || !CB) return;
+    if (!_reviewRec || !CB) return false;
     const actual = $('reviewActual').value.trim();
-    if (!actual) { $('reviewAiTag').textContent = '请先填写实际情况'; return; }
-    const btn = $('reviewAiBtn'); btn.disabled = true; $('reviewAiTag').textContent = 'AI 复盘中…';
+    if (!actual) { $('reviewAiTag').textContent = '请先填写实际情况'; return false; }
+    const btns = ['reviewAiBtn', 'reviewAiSaveBtn'].map(i => $(i)).filter(Boolean);
+    btns.forEach(b => { b.disabled = true; });
+    $('reviewAiTag').textContent = 'AI 代标中…';
     try {
       const sys = '你是奇门占例复盘助手。只做判读与实况的比对标注，不重新断卦、不新增断法。只输出 JSON。';
       const out = await LLM.chat(sys, CB.reviewPrompt(_reviewRec, actual), null);
       const parsed = CB.parseReview(out, _reviewRec);
-      if (!parsed.ok) { $('reviewAiTag').textContent = '解析失败：' + parsed.error + '（可手动标注）'; return; }
+      if (!parsed.ok) { $('reviewAiTag').textContent = '解析失败：' + parsed.error + '（可手动标注）'; return false; }
       let n = 0;
       Object.keys(parsed.verdicts).forEach(id => {
         const el = document.querySelector(`select[data-verdict="${CSS.escape(id)}"]`);
         if (el) { el.value = parsed.verdicts[id]; n++; }
       });
-      Object.keys(parsed.symbolVerdicts || {}).forEach(k => {
-        const el = document.querySelector(`select[data-symverdict="${CSS.escape(k)}"]`);
-        if (el) { el.value = parsed.symbolVerdicts[k]; n++; }
+      Object.keys(parsed.dimVerdicts || {}).forEach(dim => {
+        const el = document.querySelector(`input[name="dim_${CSS.escape(dim)}"][value="${CSS.escape(parsed.dimVerdicts[dim])}"]`);
+        if (el) { el.checked = true; n++; }
       });
+      _reviewRec._aiDone = true;
       _reviewRec._aiObservations = parsed.observations;
       _reviewRec._aiMisreads = parsed.misreads || [];
       $('reviewMisreads').innerHTML = renderMisreads(_reviewRec._aiMisreads);
       $('reviewObs').innerHTML = parsed.observations.length
         ? '观察（供参考，非结论）：<br>' + parsed.observations.map(o => '· ' + esc(o)).join('<br>') : '';
-      $('reviewAiTag').textContent = `已填入 ${n} 条标注建议`
+      $('reviewAiTag').textContent = `已代标 ${n} 条`
         + ((parsed.misreads || []).length ? `、${parsed.misreads.length} 条断错分析` : '')
-        + (parsed.dropped.length ? `，丢弃 ${parsed.dropped.length} 条无效项` : '') + '——请过目后再保存';
+        + (parsed.dropped.length ? `，丢弃 ${parsed.dropped.length} 条无效项` : '');
+      return true;
     } catch (e) {
-      $('reviewAiTag').textContent = 'AI 复盘失败：' + (e.message || e);
-    } finally { btn.disabled = false; }
+      $('reviewAiTag').textContent = 'AI 代标失败：' + (e.message || e);
+      return false;
+    } finally { btns.forEach(b => { b.disabled = false; }); }
   }
 
-  async function saveReview() {
+  /** 主按钮：先代标，再保存。
+   *  代标失败就**不自动保存**，面板留着并写明原因——保存会收起面板，失败的消息收起就看不见了；
+   *  填的内容一字不丢，可按「仅保存」存下，或稍后再试。 */
+  async function aiAndSave() {
+    if (!_reviewRec) return;
+    if (!$('reviewActual').value.trim()) { $('reviewSaveTag').textContent = '请先填写 ① 实际发生了什么——AI 代标全靠这段'; return; }
+    if (!document.querySelector('input[name="reviewOutcome"]:checked')) { $('reviewSaveTag').textContent = '请先选择 ③ 整体判断'; return; }
+    // 已代标过（先代标、看过再存）就不重跑——重跑会冲掉你在细标里的改动
+    let ok = !!_reviewRec._aiDone;
+    if (!ok) { $('reviewSaveTag').textContent = 'AI 代标中…'; ok = await aiReview(); }
+    if (!_reviewRec) return;   // 等 AI 期间被关掉了
+    if (!ok) {
+      $('reviewSaveTag').textContent = '未保存：' + ($('reviewAiTag').textContent || 'AI 代标未成')
+        + '。你填的内容还在——可按「仅保存」先存下，或稍后再试。';
+      return;
+    }
+    await saveReview();
+  }
+
+  async function saveReview(opts) {
+    opts = opts || {};
     if (!_reviewRec || !store || !CB) return;
     const picked = document.querySelector('input[name="reviewOutcome"]:checked');
     if (!picked) { $('reviewSaveTag').textContent = '请先选择整体判断'; return; }
-    const verdicts = {}, symbolVerdicts = {};
-    let anyManual = false;
+    const verdicts = {};
     document.querySelectorAll('select[data-verdict]').forEach(sel => {
-      if (sel.value) { verdicts[sel.dataset.verdict] = sel.value; anyManual = true; }
+      if (sel.value) verdicts[sel.dataset.verdict] = sel.value;
     });
-    document.querySelectorAll('select[data-symverdict]').forEach(sel => {
-      if (sel.value) { symbolVerdicts[sel.dataset.symverdict] = sel.value; anyManual = true; }
-    });
+    // 盘面象义已不再逐条标注（Phase 35）；旧案例当初标过的原样带过，不因重新保存而丢
+    const symbolVerdicts = Object.assign({}, ((_reviewRec.feedback || {}).symbolVerdicts) || {});
     const partsOnEl = $('partsOn');
     const partOutcomes = {}, partActuals = {};
     if (partsOnEl && partsOnEl.checked) {
@@ -1542,8 +1586,11 @@
         happenedAt, happenedTime, partOutcomes, partActuals, dimVerdicts,
         ruleVerdicts: verdicts,
         symbolVerdicts,
-        // 用户在界面上过目并可改动过，故一律记为 manual；AI 只是预填
-        verdictSource: anyManual ? 'manual' : '',
+        // 标注来源如实记：人手在细标里改过 → manual；只由 AI 代标、没人改 → ai；
+        // 都没动而沿用旧标注 → 沿用旧来源。「AI 代标并保存」一键下去，没人逐条过目，不能记成 manual。
+        verdictSource: (Object.keys(verdicts).length || Object.keys(dimVerdicts).length)
+          ? (_reviewRec._touched ? 'manual' : _reviewRec._aiDone ? 'ai' : (((_reviewRec.feedback || {}).verdictSource) || 'manual'))
+          : '',
         observations: _reviewRec._aiObservations || [],
         misreads: _reviewRec._aiMisreads || (_reviewRec.feedback && _reviewRec.feedback.misreads) || [],
         now: new Date().toISOString()
@@ -1555,9 +1602,9 @@
         rec.parts = Object.assign({}, rec.parts, { confirmed: !!(partsOnEl && partsOnEl.checked) });
       }
       if (_reviewRec._correction) rec = CB.applyCorrection(rec, _reviewRec._correction);
-      delete rec._aiObservations; delete rec._aiMisreads; delete rec._correction;
+      delete rec._aiObservations; delete rec._aiMisreads; delete rec._correction; delete rec._aiDone; delete rec._touched;
       await store.save(rec);
-      $('reviewSaveTag').textContent = '已保存';
+      $('reviewSaveTag').textContent = '已保存' + (opts.note || '');
       $('reviewPanel').style.display = 'none'; _reviewRec = null;
       await refreshCaseCount(); await renderCaseViews(); await rebuildOverlay();
     } catch (e) { $('reviewSaveTag').textContent = '保存失败：' + e.message; }
@@ -1659,7 +1706,8 @@
         <div><b>总计</b>：${cal.totals.cases} 例，已回填 ${cal.totals.graded} 例</div>
         <div style="margin-top:6px;"><b>按占类</b></div>${domHtml}
         <div style="margin-top:8px;"><b>按盘面象义</b>
-          <span class="muted">（键为「元素@宫」，如 生门@2＝生门临坤二。这是象的配置统计，不是纲要规则）</span></div>
+          <span class="muted">（键为「元素@宫」，如 生门@2＝生门临坤二。这是象的配置统计，不是纲要规则。
+          自 Phase 35 起不再逐条标注：新案例只按整案归因计入，旧案例当初的逐条标注照常计）</span></div>
         <div style="max-height:200px;overflow:auto;margin-top:4px;">${symStatHtml}</div>
         ${mdHtml}
         <div style="margin-top:8px;"><b>按规则</b>（符合率低者在前，便于复核；不足 ${cal.minSamples} 例不给百分比）</div>
