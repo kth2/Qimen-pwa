@@ -409,22 +409,44 @@ t('象义标注与规则标注分开统计，互不冒充', function () {
     assert.strictEqual(r.attribution, 'case', '未标注规则者应仍按整案归因，不得挪用象义标注');
   });
 });
-t('AI 复盘可给象义标注，且编造的 key 一律丢弃', function () {
+t('【Phase 35】盘面象义不再逐条标注：模型照旧给了 symbolVerdicts 也一概不收', function () {
   var rec = fullCase('wealth');
   var key = rec.fired.symbols[0].key;
   var r = CB.parseReview(JSON.stringify({
     verdicts: {}, symbolVerdicts: { [key]: 'partial', 'sym:伪造@9': 'happened' }
   }), rec);
-  assert.strictEqual(r.symbolVerdicts[key], 'partial');
-  assert.ok(!('sym:伪造@9' in r.symbolVerdicts));
-  assert.ok(r.dropped.some(function (d) { return /本案无此象义条目/.test(d.why); }));
+  assert.strictEqual(r.ok, true);
+  assert.deepStrictEqual(r.symbolVerdicts, {}, '已撤掉的一栏不得悄悄收回来');
 });
-t('复盘提示同时列出盘面象义与规则判读', function () {
-  var rec = fullCase('general');
+/** 带逐维度快照的案例：能否 A 级、方位 B 级；应期当时已弃权 */
+function withDims(rec) {
+  var o = JSON.parse(JSON.stringify(rec));
+  o.converge = { version: 'x', dims: [
+    { dim: '能否', top: '可成', tier: 'A', independent: 2 },
+    { dim: '方位', top: '正南', tier: 'B', independent: 1 },
+    { dim: '应期', top: '午日', tier: 'C', independent: 1 }], abstained: ['应期'] };
+  return o;
+}
+t('【Phase 35】逐维度由 AI 代标：只收本案未弃权的维度，编造维度与弃权维度一律丢弃', function () {
+  var rec = withDims(fullCase('wealth'));
+  var r = CB.parseReview(JSON.stringify({
+    verdicts: {}, dimVerdicts: { '能否': 'happened', '方位': 'weird', '应期': 'partial', '伪维度': 'happened' }
+  }), rec);
+  assert.deepStrictEqual(r.dimVerdicts, { '能否': 'happened' });
+  assert.ok(r.dropped.some(function (d) { return d.id === '方位' && /档位非法/.test(d.why); }));
+  assert.ok(r.dropped.some(function (d) { return d.id === '应期' && /弃权/.test(d.why); }), '弃权维度当时没下结论，不得标');
+  assert.ok(r.dropped.some(function (d) { return d.id === '伪维度'; }));
+});
+t('【Phase 35】复盘提示：象义清单仍列出但只作断错依据，不再要 symbolVerdicts；列出逐维度并要 dimVerdicts', function () {
+  var rec = withDims(fullCase('general'));
   var p = CB.reviewPrompt(rec, '实际发生了某事');
-  assert.ok(/盘面象义/.test(p), '提示须含象义段');
-  assert.ok(p.indexOf(rec.fired.symbols[0].key) >= 0, '须把象义 key 列出，模型才标得回来');
-  assert.ok(/symbolVerdicts/.test(p), '须说明象义标注的字段名');
+  // 象义清单留着：断错分析的 basedOn 可引象义 key，删了它，本可挂上的断错会被算成「挂不上证据」
+  assert.ok(p.indexOf(rec.fired.symbols[0].key) >= 0, '象义 key 仍须列出，供断错分析引作依据');
+  assert.ok(/仅供断错分析引作依据，不必逐条判断/.test(p));
+  assert.ok(!/symbolVerdicts/.test(p), '不得再向模型要象义逐条标注');
+  assert.ok(/能否 ｜ 当时断「可成」/.test(p) && /方位 ｜ 当时断「正南」/.test(p), '未弃权的维度须列出');
+  assert.ok(!/应期 ｜ 当时断/.test(p), '弃权的维度不列');
+  assert.ok(/dimVerdicts/.test(p));
 });
 
 console.log('== 应期反推：完全确定性 ==');
