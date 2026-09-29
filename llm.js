@@ -605,6 +605,73 @@ const LLM = (() => {
     return { text: text, finish: finish };
   }
 
+  /* ---------------- 可用模型列表（Phase 37） ----------------
+   * 模型名此前全靠用户手写，拼错一个字就 404。这里向 provider 自己的「模型列表」接口要，
+   * 列表以服务端当下返回为准——同「不硬编码备用模型名」一个道理：写死的名单日后会静默失效。 */
+  const uniqSort = (list) => {
+    const seen = {}, out = [];
+    list.forEach(m => { if (m && m.id && !seen[m.id]) { seen[m.id] = 1; out.push(m); } });
+    return out.sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+  };
+  const arr = (x) => Array.isArray(x) ? x : [];
+  // Gemini 列表里混着嵌入、语音、出图、实时语音等——本应用只要「文字进、文字出」
+  const GEMINI_NOT_TEXT = /embedding|(^|-)aqa($|-)|tts|-image($|-)|image-generation|imagen|veo|native-audio|-live($|-)/i;
+  function parseGeminiModels(j) {
+    return uniqSort(arr(j && j.models).filter(m => m && typeof m.name === 'string'
+      && arr(m.supportedGenerationMethods).indexOf('generateContent') >= 0)
+      .map(m => ({ id: m.name.replace(/^models\//, ''), label: m.displayName || '' }))
+      .filter(m => !GEMINI_NOT_TEXT.test(m.id)));
+  }
+  function parseOpenAIModels(j) {
+    const list = Array.isArray(j) ? j : arr(j && j.data).length ? j.data : arr(j && j.models);
+    return uniqSort(list.map(m => typeof m === 'string' ? { id: m }
+      : m && typeof m === 'object' ? { id: String(m.id || m.name || ''), label: m.name && m.id ? String(m.name) : '' } : null));
+  }
+  function parseOllamaModels(j) {
+    return uniqSort(arr(j && j.models).map(m => m && typeof m === 'object' ? { id: String(m.name || m.model || '') } : null));
+  }
+  function modelsUrl(customUrl) {
+    return String(customUrl || '').replace(/\/+$/, '').replace(/\/chat\/completions$/, '') + '/models';
+  }
+  async function getJson(url, headers, label) {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 20000);
+    try {
+      const r = await fetch(url, { method: 'GET', headers: headers || {}, signal: ctl.signal });
+      if (!r.ok) throw await httpError(r, label);
+      return await r.json();
+    } catch (e) {
+      if (e.name === 'AbortError') throw new Error(label + ' 取模型列表超时（20 秒）');
+      throw e;
+    } finally { clearTimeout(timer); }
+  }
+  /** 取某 provider 的可用模型。cfg 可传表单上尚未保存的值；省略则用已存配置。
+   *  @returns {Promise<Array<{id,label}>>} */
+  async function listModels(provider, cfg) {
+    cfg = cfg || getCfg();
+    if (provider === 'gemini') {
+      if (!cfg.geminiKey) throw new Error('请先填写 Gemini API Key');
+      const out = [];
+      let token = '';
+      for (let page = 0; page < 10; page++) {   // 防服务端翻页不止
+        const url = 'https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000'
+          + (token ? '&pageToken=' + encodeURIComponent(token) : '');
+        const j = await getJson(url, { 'x-goog-api-key': cfg.geminiKey }, 'Gemini');
+        out.push.apply(out, parseGeminiModels(j));
+        token = j && j.nextPageToken;
+        if (!token) break;
+      }
+      return uniqSort(out);
+    }
+    if (provider === 'custom') {
+      if (!cfg.customUrl) throw new Error('请先填写端点 URL');
+      const h = cfg.customKey ? { Authorization: 'Bearer ' + cfg.customKey } : {};
+      return parseOpenAIModels(await getJson(modelsUrl(cfg.customUrl), h, '自定义端点'));
+    }
+    const base = (cfg.ollamaUrl || 'http://localhost:11434').replace(/\/+$/, '');
+    return parseOllamaModels(await getJson(base + '/api/tags', {}, 'Ollama'));
+  }
+
   function info() {
     const cfg = getCfg();
     const p = cfg.provider || 'gemini';
@@ -612,11 +679,12 @@ const LLM = (() => {
   }
 
   return {
-    getCfg, saveCfg, chat, info, probe, DEF,
+    getCfg, saveCfg, chat, info, probe, listModels, DEF,
     lastUsed,   // 实际作答的那一路（备用接管后与 info() 不同）——案例本据此归属模型
     current,    // 正在作答的那一路（流式途中界面标题据此写）
     // 供单测与诊断使用的纯函数（不参与业务流程）
-    _internals: { isTransient, isOverloaded, isFatalConfig, backoffMs, parseRetryAfter, buildChain, labelOf, modelOf, reasonOf, finalize, probeRead, numOr, numOr0 }
+    _internals: { isTransient, isOverloaded, isFatalConfig, backoffMs, parseRetryAfter, buildChain, labelOf, modelOf, reasonOf, finalize, probeRead, numOr, numOr0,
+      parseGeminiModels, parseOpenAIModels, parseOllamaModels, modelsUrl }
   };
 })();
 
