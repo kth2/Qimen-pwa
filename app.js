@@ -293,14 +293,15 @@
     $('cfgMaxRetries').value = (c.maxRetries === 0 || c.maxRetries) ? String(c.maxRetries) : '';
     $('cfgMaxTokens').value = c.maxTokens ? String(c.maxTokens) : '';
     $('cfgFallbackProvider').value = c.fallbackProvider || 'none';
-    showProvFields(); updateProviderTag();
+    showProvFields(); updateProviderTag(); restoreModelPicks();
   }
   function showProvFields() {
     const p = $('cfgProvider').value;
     document.querySelectorAll('.prov').forEach(el => el.style.display = el.classList.contains('prov-' + p) ? '' : 'none');
   }
-  function saveCfg() {
-    LLM.saveCfg({
+  /** 表单上当下的配置（尚未保存也算）——「列出可用模型」要用刚填进去的 key，不该逼人先按保存。 */
+  function formCfg() {
+    return {
       provider: $('cfgProvider').value,
       geminiKey: $('cfgGeminiKey').value.trim(), geminiModel: $('cfgGeminiModel').value.trim() || 'gemini-3.5-flash',
       ollamaUrl: $('cfgOllamaUrl').value.trim() || 'http://localhost:11434', ollamaModel: $('cfgOllamaModel').value.trim() || 'qwen3:latest',
@@ -316,9 +317,84 @@
       totalTimeoutMs: (Number($('cfgTotalTimeout').value) || 0) * 1000,
       maxRetries: $('cfgMaxRetries').value === '' ? '' : Number($('cfgMaxRetries').value),
       maxTokens: Number($('cfgMaxTokens').value) || 0
-    });
+    };
+  }
+  function saveCfg() {
+    LLM.saveCfg(formCfg());
     $('cfgSavedTag').textContent = '已保存 ✓'; setTimeout(() => $('cfgSavedTag').textContent = '', 2000); updateProviderTag();
   }
+  /* ---------- 可用模型下拉（Phase 37） ----------
+   * 模型名此前全靠手写。按「📋 列出可用模型」向 provider 要当下可用的模型，
+   * 填进每个模型框下方的下拉；选中即写入该框并保存。手写照旧可用（端点不给列表时就靠它）。
+   * 取到的列表存本机，下次打开设置直接有下拉；自定义/Ollama 换了地址则不沿用旧列表。 */
+  const MODEL_FIELDS = {
+    gemini: ['cfgGeminiModel', 'cfgGeminiFallbackModel'],
+    custom: ['cfgCustomModel', 'cfgCustomFallbackModel'],
+    local: ['cfgOllamaModel']
+  };
+  const MODELS_LS = 'qm_llm_models';
+  function readModelCache() { try { return JSON.parse(localStorage.getItem(MODELS_LS)) || {}; } catch (e) { return {}; } }
+  function writeModelCache(p, entry) {
+    try { const c = readModelCache(); c[p] = entry; localStorage.setItem(MODELS_LS, JSON.stringify(c)); } catch (e) { /* 存不下也不影响这次选用 */ }
+  }
+  function modelSrc(p, c) { return p === 'custom' ? (c.customUrl || '') : p === 'local' ? (c.ollamaUrl || '') : ''; }
+  /** 列表填进该 provider 各模型框下方的下拉；返回「框里填的却不在列表里」的名字，供提示拼错。 */
+  function fillModelPicks(p, list) {
+    const stray = [];
+    (MODEL_FIELDS[p] || []).forEach(id => {
+      const inp = $(id);
+      if (!inp) return;
+      const fallback = /Fallback/.test(id);
+      let sel = $(id + 'Pick');
+      if (!sel) {
+        sel = document.createElement('select');
+        sel.id = id + 'Pick';
+        sel.style.cssText = 'display:block;margin-left:92px;font-size:12px;';
+        inp.insertAdjacentElement('afterend', sel);
+        sel.addEventListener('change', () => {
+          if (!sel.value) return;
+          inp.value = sel.value === '__none__' ? '' : sel.value;
+          saveCfg();
+          const tag = document.querySelector(`[data-modelstag="${p}"]`);
+          if (tag) tag.textContent = inp.value ? `已选用 ${inp.value} 并保存` : '已关闭备用模型并保存';
+        });
+      }
+      const cur = inp.value.trim();
+      if (cur && !list.some(m => m.id === cur)) stray.push(cur);
+      // 模型名来自外部端点：用 new Option 逐个建，不拼 HTML（esc 不转引号，放进属性里不安全）
+      sel.textContent = '';
+      sel.add(new Option(`— 从列表选${fallback ? '备用' : ''}模型（${list.length} 个）—`, ''));
+      if (fallback) sel.add(new Option('（不启用备用）', '__none__'));
+      list.forEach(m => sel.add(new Option(m.id + (m.label && m.label !== m.id ? '　' + m.label : ''), m.id, false, m.id === cur)));
+    });
+    return stray;
+  }
+  async function listModelsFor(p, btn) {
+    const tag = document.querySelector(`[data-modelstag="${p}"]`);
+    const say = (t) => { if (tag) tag.textContent = t; };
+    btn.disabled = true; say('取模型列表中…');
+    try {
+      const list = await LLM.listModels(p, formCfg());
+      if (!list.length) { say('服务端没列出任何可用模型——仍可手填模型名'); return; }
+      writeModelCache(p, { at: new Date().toISOString(), src: modelSrc(p, formCfg()), list });
+      const stray = fillModelPicks(p, list);
+      say(`取到 ${list.length} 个，在模型框下方的下拉里选`
+        + (stray.length ? `。⚠ 你填的「${stray.join('」「')}」不在列表里，可能拼错或已下线` : ''));
+    } catch (e) {
+      const m = e.message || String(e);
+      say('取不到：' + m + (/Failed to fetch|NetworkError/i.test(m)
+        ? '（网络不通，或该端点不许浏览器直接取列表——仍可手填模型名）' : ''));
+    } finally { btn.disabled = false; }
+  }
+  /** 打开设置时：本机存过列表、且地址没换，就直接铺好下拉。 */
+  function restoreModelPicks() {
+    const cache = readModelCache(), c = formCfg();
+    Object.keys(MODEL_FIELDS).forEach(p => {
+      const e = cache[p];
+      if (e && Array.isArray(e.list) && e.list.length && e.src === modelSrc(p, c)) fillModelPicks(p, e.list);
+    });
+  }
+
   function updateProviderTag() { const i = LLM.info(); $('aiProviderTag').textContent = `（${i.provider} / ${i.model}）`; }
 
   /* ---------- AI 占断 ---------- */
@@ -2121,6 +2197,8 @@
       } catch (e) { out.textContent = '自检本身出错：' + e.message; }
       finally { btn.disabled = false; }
     });
+    document.querySelectorAll('[data-listmodels]').forEach(b =>
+      b.addEventListener('click', () => listModelsFor(b.dataset.listmodels, b)));
     loadCfgForm();
     cast();
   }
