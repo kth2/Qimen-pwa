@@ -207,6 +207,7 @@
     var gj = (args.geju && args.geju.version) ? args.geju : null;
     var sg = (args.shige && args.shige.version) ? args.shige : null;
     var qs = (args.qushu && args.qushu.version) ? args.qushu : null;
+    var fr = (args.framing && args.framing.version) ? args.framing : null;
     var cm = args.categoryMap || null;
     var domain = args.domain || (ys && ys.domain) || 'general';
     var items = [];
@@ -434,6 +435,10 @@
         targets: qs.targets, candidates: qs.candidates, reachable: qs.reachable, span: qs.span,
         notes: qs.notes
       } : null,
+      // 问句方向（Phase 38）：只记检出「怕发生之事」的那一种；未检出不等于「盼发生」。
+      framing: fr ? {
+        version: fr.version, direction: fr.direction, event: fr.event, phrase: fr.phrase
+      } : null,
       // 时格层元信息（五不遇时／天显时格）。分量随条带出——「增加几率」不是「必然如此」。
       shige: sg ? {
         version: sg.version, riGan: sg.riGan, shiGan: sg.shiGan,
@@ -535,6 +540,14 @@
         '这是**规则未建**，不是占类判错——用神仍按「' + engCat + '」，请照此作答。');
     }
     L.push('· 盘别：' + (ev.school === 'feipan' ? '飞盘（括囊）' : '转盘') + '　—— 只按本派断法解读，不得引入另一派取用。');
+    // 问句方向（Phase 38）：READING 的 [助]/[阻] 说的是「此事得成／不成」。问的若是怕发生之事，
+    // 「得成」正是求测人最不想要的——不点出来，模型会把 [助] 读成「对你有利」。
+    var fri = ev.framing;
+    if (fri && fri.direction === 'adverse') {
+      L.push('· ⚠ **问句方向：所问之事「' + fri.event + '」是求测人（或所问之人）不愿其发生之事**' +
+        '（问句检出：「' + fri.phrase + '」）。下文 READING 的 [助]/[阻] 指**此事得成／不成**，' +
+        '对求测人的吉凶**恰好相反**；时干宫即这件怕发生的事本身。换算与断法见 E30。');
+    }
     if (ev.yongshen) {
       var eng = ev.yongshen.engine, dom = ev.yongshen.domain, res = ev.yongshen.resolution;
       if (eng && eng.matched) {
@@ -808,7 +821,10 @@
       if (reads.relation.length) { L.push('  宫际生克（定成败向背）：'); L = L.concat(reads.relation); }
       if (xy && xy.tally) {
         L.push('  倾向计数（**非结论**，只供权衡详略）：助 ' + xy.tally.support + ' 条／阻 ' +
-          xy.tally.obstruct + ' 条／中性 ' + xy.tally.neutral + ' 条。');
+          xy.tally.obstruct + ' 条／中性 ' + xy.tally.neutral + ' 条。' +
+          '〔实测·案例本 2026-10-05·是非题 199 例〕此计数与实况几乎无关：净倾向为正者 62% 如愿、为负者 53%，' +
+          '基线 57%；净值 ≥10 与 ≤-10 两头都只 47%～48%。**不得以助多阻少或阻多助少定成败。**' +
+          (fri && fri.direction === 'adverse' ? '本题问的是怕发生之事，「助」数的是此事得成之势，不是对求测人有利之势。' : ''));
       }
       // 本机修订须显式告知：标〔本机修订〕者已不是纯纲要判读，模型与用户都该知道
       if (xy && xy.revisions && xy.revisions.count) {

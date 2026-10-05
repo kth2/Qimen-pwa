@@ -12,6 +12,7 @@
   const GJ = window.GeJu;       // 八十一格层（Phase 15；缺则格名仍只是宫格行里的裸标签）
   const SG = window.ShiGe;      // 时格层（Phase 16：五不遇时／天显时格；缺则不判时格）
   const QS = window.QuShu;      // 取数层（Phase 21：河图数＋先天/后天宫数；缺则取数仍只有河图数一路）
+  const FR = window.Framing;    // 问句方向（Phase 38：检出「怕发生之事」；缺则不提示，判读照旧）
   const MD = window.MdLite;     // 极简 Markdown 渲染（Phase 25；缺则答案退回纯文本，功能不受影响）
   const CB = window.Casebook;   // 案例本·经验层（Phase 5；只统计与建议，绝不改写教义规则）
   const CSTORE = window.CaseStore;
@@ -607,6 +608,22 @@
       + '故：问「今天／现在／这两天」的近事，**先看有没有 offset 0 或最近一两位的锚点能答**，'
       + '答得了就先答它；确要断到填实／冲实那一档，须说明为何不是更早。'
       + '（偏晚这一实测结论为〔用户所定·2026-09-07·据案例本 12:1〕，纲要只写了填实冲实之法，未言早晚。）',
+    // Phase 38：出自案例本导出 2026-10-05（396 例／379 回填）逐例判读实况。问「怕发生之事」的
+    // 那一类，解读分远低于其余，且错的方向一边倒——不是规则错，是没分清 [助] 助的是谁。
+    'E30. **先定问句方向，再读 [助]/[阻]。** 证据包若有「⚠ 问句方向」一行，所问之事是求测人'
+      + '（或所问之人）**不愿其发生**之事（被抓、被罚、被举报、裁员、出事、复发、会漏、倒闭……）。此时：'
+      + '① READING 的 [助]/[阻] 与倾向计数说的是**此事得成／不成**，对求测人的吉凶**恰好相反**，'
+      + '不得把 [助] 写成「对你有利」、把 [阻] 写成「对你不利」；'
+      + '② 时干宫即这件怕发生之事。纲要「时干宫空亡主事虚悬待填实」「用神空亡：所问之事多虚」在此读作'
+      + '**所怕之事虚悬、未成形**；「日干宫克时干宫→我能制事」读作我制得住此事；「时干宫克日干宫→事制我」'
+      + '读作此事伤我；「时干宫生日干宫→事来就我」读作此事**找上门来**——于所怕之事是凶，不是「易成」之吉；'
+      + '③ **凶门、凶星、凶神落时干宫，只说明所问之事本身是件凶事——那是题面已知的，不是它会发生的证据。**'
+      + '会不会发生，要看时干宫的虚实（空亡、入墓、旺衰）与日时生克，并把所据写出来；'
+      + '④ 断「会发生」之前，须先说明为何不读作虚悬——只凭凶象叠加断「必发」，正是这类题的主错。'
+      + '实测：本仓是非题里此类 18 例，所怕之事**实际发生的只有 7 例**；解读加权分 0.36（盼发生之事 181 例为 0.52）；'
+      + '断错者 **6 例断「会发生」而实际没发生**（举报、被抓、投诉、出问题、处分、裁员），3 例相反。'
+      + '（②的换算为〔本层归纳·据纲要一节生克原句〕，纲要未就「怕发生之事」另立条文，**本仓未测过它准不准**；'
+      + '实测数为〔据案例本导出 2026-10-05·18 例〕，样本小，只作纠偏之据，不作概率用。）',
     'E20. 数证据数的是**互不相干的路数**，不是象义条数。同一个元素的多个别名（如玄武的'
       + '「盗/失物/暗昧/欺诈」）只算**一路**；五条同源的话不等于五路旁证，不得据此说「多重印证」。',
     // Phase 9：力量校验与断语范围。以下四条全部出自实测案例本的失败复盘，逐条对应一类真实误判。
@@ -1029,8 +1046,14 @@
             }
             catch (qe) { console.warn('[qushu] 排取数失败，本次取数只有河图数一路：', qe.message); qushu = null; }
           }
+          // 问句方向（Phase 38）：只看问句字面，与盘无关，故不依赖前面任何一层。
+          let framing = null;
+          if (FR) {
+            try { framing = FR.detect(q); }
+            catch (fe) { console.warn('[framing] 检问句方向失败，本次不提示：', fe.message); framing = null; }
+          }
           const evidence = EV.build({
-            question: q, domain, chart: pan, yongshen, xiangyi, timing, leixiang, severity, converge, yinju, geju, shige, qushu, calibration, categoryMap: catMap,
+            question: q, domain, chart: pan, yongshen, xiangyi, timing, leixiang, severity, converge, yinju, geju, shige, qushu, calibration, categoryMap: catMap, framing,
             wangshuai: wsBlock, yingqi: yqBlock
           });
           runOut.yongshen = yongshen; runOut.xiangyi = xiangyi;

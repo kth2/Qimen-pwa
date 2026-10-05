@@ -19,9 +19,9 @@
  *       或在 Node 下自动 require），本模块不重算统计口径，只做汇总与呈现。
  */
 (function (root, factory) {
-  if (typeof module === 'object' && module.exports) module.exports = factory(require('./casebook.js'));
-  else root.Evaluate = factory(root.Casebook);
-})(typeof self !== 'undefined' ? self : this, function (CB) {
+  if (typeof module === 'object' && module.exports) module.exports = factory(require('./casebook.js'), require('./framing.js'));
+  else root.Evaluate = factory(root.Casebook, root.Framing);
+})(typeof self !== 'undefined' ? self : this, function (CB, FR) {
   'use strict';
 
   var VERSION = '1.0.0';
@@ -180,6 +180,39 @@
       _caveat: '这不是对照实验：两家拿到的盘与问题并不相同，样本也非随机分配。' +
         '本项只回答「用某一路的那些盘后来对了几成」，**不回答「甲比乙强」**。'
     };
+
+    /* ---------- 按问句方向（Phase 38）：问「怕发生之事」的那一类单列 ----------
+     * 方向由 framing.detect 按问句字面现算，不读案例里存的任何字段——旧案例也能分。
+     * 只分「检出为怕发生之事」与「其余」两组；其余**不等于**「盼发生之事」，
+     * 里头还有射覆、选择题、问数问期的，故两组之差只说明前一组单独看是什么样。 */
+    if (FR && FR.detect) {
+      var fg = {};
+      graded.forEach(function (c) {
+        var k = FR.detect(c.question).direction === 'adverse' ? 'adverse' : 'other';
+        var t = (fg[k] = fg[k] || { key: k, n: 0, happened: 0, fail: 0, score: 0 });
+        t.n++;
+        if (c.feedback.outcome === 'happened') t.happened++;
+        else if (c.feedback.outcome !== 'partial') t.fail++;
+        var sc3 = CB && CB.caseScore ? CB.caseScore(c) : null;
+        if (sc3) t.score += sc3.score;
+      });
+      rep.byFraming = {
+        minSamples: minN,
+        rows: ['adverse', 'other'].filter(function (k) { return fg[k]; }).map(function (k) {
+          var t = fg[k], enough = t.n >= minN;
+          return {
+            key: k, label: k === 'adverse' ? '问怕发生之事' : '其余', n: t.n, enough: enough,
+            weightedScore: enough ? round(t.score / t.n) : null,
+            display: enough
+              ? '完全应验 ' + pct(t.happened, t.n) + '%　未应验/相反 ' + pct(t.fail, t.n) + '%　加权 ' + round(t.score / t.n)
+              : '样本不足 ' + t.n + '/' + minN + '（不给率，小样本的百分比会被当成精度）'
+          };
+        }),
+        _note: '「问怕发生之事」由 core/framing.js 按问句字面检出（会不会被抓／被罚／被举报／裁员／出事…），宁漏勿错；' +
+          '「其余」含射覆、选择题、问数问期，**不等于**「盼发生之事」。E30 自 Phase 38 起生效，要看它有没有用，' +
+          '只能比对此后新积累的这一组。'
+      };
+    }
 
     /* ---------- 规则与象义可靠度：直接取 casebook 的口径，不另算一套 ---------- */
     if (CB && CB.calibrate) {
@@ -386,6 +419,12 @@
         }
         L.push('  ' + r.byModel._caveat);
       }
+      L.push('');
+    }
+    if (r.byFraming && r.byFraming.rows.length) {
+      L.push('■ 按问句方向');
+      r.byFraming.rows.forEach(function (x) { line(x.label + '(n=' + x.n + ')', x.display); });
+      L.push('  ' + r.byFraming._note);
       L.push('');
     }
     L.push('■ 本报告**算不了**的指标（列出来，免得被人当成没测或测过了）');
