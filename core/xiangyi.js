@@ -571,7 +571,9 @@
             weight: w,
             concept: (entry.concept || []).slice(),
             answers: entry.answers || rule.answers || '',
-            answersNote: rule.answersNote || '',
+            // 分支级说明优先：同一条规则底下各支准头不同，收窄只落在那一支上（Phase 23 起
+            // knowledge 里就有分支级 answersNote，但此处只读规则级的——那几条收窄从未送达模型）。
+            answersNote: entry.answersNote || rule.answersNote || '',
             // 施方虚实随条附上：null＝施方有力或本关系无单一施方，两者不可混为一谈，
             // 故 vacuity 为 null 时不写任何话，宁可不说也不说成「施方有力」。
             vacuity: vacuityOf(kind),

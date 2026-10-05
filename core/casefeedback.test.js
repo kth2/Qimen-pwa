@@ -124,7 +124,10 @@ t('收窄 general.rel.日干-时干#我宫克彼宫（46%，12 例，被指错 5
   });
   assert.ok(r, '关系条目不存在');
   var m = r.map.from_ke_to;
-  assert.ok(m._measured && m._measured.n === 12 && m._measured.citedAsMisread === 5, '样本须记下');
+  // Phase 38 复核后现值移为 20 例／9 次，2026-09-07 那一次的数留在 history 里，不许抹掉
+  var h = (m._measured && m._measured.history) || [];
+  assert.ok(h.some(function (x) { return x.n === 12 && x.citedAsMisread === 5 && /2026-09-07/.test(x.source); }),
+    '样本须记下（09-07 那一次在 history 里）');
   assert.ok(/不答「此事成不成」/.test(m.answersNote), '须限定范围');
   assert.ok(/我能制之只表谋为可成/.test(m._measured.note), '须点出 severity 早有此戒仍被越界');
 });

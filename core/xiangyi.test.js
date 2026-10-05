@@ -81,8 +81,14 @@ t('综合类的生克关系只断成败倾向，不得拿去断迟速与幅度',
   assert.strictEqual(rel.answers, '成败倾向');
   assert.ok(/不断迟速/.test(rel.answersNote) && /不断幅度/.test(rel.answersNote));
   assert.ok(/应期5/.test(rel.answersNote), '须指明迟速另有其法');
+  // 各支缺省答成败倾向；据实测收窄过的支（Phase 23/38）改答更窄的问题，且必须随条带出实测依据——
+  // 否则提示词里会出现「〔只答：成败倾向〕」紧挨着「不答此事成不成」的自相矛盾。
   Object.keys(rel.map).forEach(function (k) {
-    assert.strictEqual(rel.map[k].answers, '成败倾向', k + ' 缺 answers');
+    var e = rel.map[k];
+    assert.ok(e.answers, k + ' 缺 answers');
+    if (e.answers !== '成败倾向') {
+      assert.ok(e._measured && e._measured.n >= 8 && e.answersNote, k + ' 收窄了却没有实测依据或说明');
+    }
   });
 });
 t('标 complete 者必须真有规则（不得空壳冒充已建成）', function () {
