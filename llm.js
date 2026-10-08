@@ -144,8 +144,7 @@ const LLM = (() => {
       txt.split('\n').forEach(line => {
         line = line.trim();
         if (!line.startsWith('data:')) return;
-        const p = line.slice(5).trim(); if (!p) return;
-        if (p === '[DONE]') { sink.sawDone = true; return; }
+        const p = line.slice(5).trim(); if (!p || p === '[DONE]') return;
         try { push(extract(JSON.parse(p)) || ''); } catch (_) {}
       });
       return sink.full;
@@ -153,15 +152,6 @@ const LLM = (() => {
     const reader = resp.body.getReader();
     const dec = new TextDecoder();
     let buf = '';
-    const handle = (line) => {
-      line = line.trim();
-      if (!line.startsWith('data:')) return;
-      const payload = line.slice(5).trim();
-      if (!payload) return;
-      if (payload === '[DONE]') { sink.sawDone = true; return; }   // OpenAI 兼容端点的「写完了」
-      let obj; try { obj = JSON.parse(payload); } catch (_) { return; }
-      push(extract(obj));
-    };
     for (;;) {
       const { value, done } = await reader.read();
       if (done) break;
@@ -169,13 +159,14 @@ const LLM = (() => {
       buf += dec.decode(value, { stream: true });
       let idx;
       while ((idx = buf.indexOf('\n')) >= 0) {
-        const line = buf.slice(0, idx); buf = buf.slice(idx + 1);
-        handle(line);
+        const line = buf.slice(0, idx).trim(); buf = buf.slice(idx + 1);
+        if (!line.startsWith('data:')) continue;
+        const payload = line.slice(5).trim();
+        if (!payload || payload === '[DONE]') continue;
+        let obj; try { obj = JSON.parse(payload); } catch (_) { continue; }
+        push(extract(obj));
       }
     }
-    // 流的最后一行可能不带换行就结束了——那一行往往正是带 finishReason 的收尾块，丢了它就分不清写没写完
-    buf += dec.decode();
-    if (buf.trim()) handle(buf);
     return sink.full;
   }
 
@@ -192,34 +183,6 @@ const LLM = (() => {
     return e;
   }
 
-  /* ---------------- 断流续写 ----------------
-   * 实测（案例本 2026-10-05）：gemini-3.6/3.8-flash 22 例里 4 例断在半句上（最短 465 字），
-   * 界面却**没有任何「未写完」提示**——流正常关闭，但最后那个带 finishReason 的收尾块根本没来，
-   * 或流里夹了一个 {error:…}（过载）被当成空块吞掉。旧逻辑只在 finishReason≠STOP 时才认截断，
-   * 「压根没有 finishReason」被当成了写完。agnes 同病，只是少见（1 例）。
-   *
-   * 现在：没收到结束信号＝没写完。只要已写出一段，就把它作为模型自己的上文交回去，
-   * 请它从断处接着写——比整段重来省一半时间与额度，也不会把已看到的内容清掉。
-   * 最多续 MAX_CONTINUE 次；安全策略中断与总时长超限不续（续了也是同样结果）。 */
-  const MAX_CONTINUE = 2;
-  function canContinue(sink) {
-    return !!(sink.truncated && /^(cut|maxTokens|idle)$/.test(sink.truncReason || '') && (sink.full || '').trim());
-  }
-  function continuePrompt(sofar) {
-    const tail = String(sofar || '').replace(/\s+$/, '').slice(-30);
-    return `你上一条回答在中途断了，最后几个字是「${tail}」。请紧接着断处往下写完：` +
-      '不要重复已写的内容，不要重新开头，不要加任何说明，直接续写。';
-  }
-  /** 续写拼接：模型常会把断处前几个字再写一遍，去掉这段重叠（≥4 字才算，免得误删）。 */
-  function joinContinuation(prev, next) {
-    prev = String(prev || ''); next = String(next || '').replace(/^\s+/, '');
-    const max = Math.min(200, prev.length, next.length);
-    for (let k = max; k >= 4; k--) {
-      if (prev.endsWith(next.slice(0, k))) return prev + next.slice(k);
-    }
-    return prev + next;
-  }
-
   /**
    * 收尾：把「这答案没写完」这件事**说出来**。
    * 此前 sink.truncated 只被写、从未被读，于是截断的答案与完整的答案在界面上一模一样——
@@ -233,12 +196,7 @@ const LLM = (() => {
         '若用的是思考型模型，思考也占这份额度，可一并把「思考预算」调小或设 0。'
       : sink.truncReason === 'safety'
         ? '被模型的安全策略中断。可换个说法重问，或改用别的模型。'
-        : sink.truncReason === 'cut'
-          ? '服务端没发「已写完」信号就把连接关了' +
-            (sink.streamError ? '（流中报错：' + String(sink.streamError).slice(0, 80) + '）' : '') +
-            (sink.continued ? `，已自动续写 ${sink.continued} 次仍未写完` : '') +
-            '。多为对方临时过载，稍后重试即可；常出现时可在设置里填「备用模型」。'
-          : '连接中断或等待超时，只取回了已生成的部分。可调大「空闲超时」后重试。';
+        : '连接中断或等待超时，只取回了已生成的部分。可调大「空闲超时」后重试。';
     return String(text || '') + `\n\n⚠ **本次回答未写完**（${label.trim() || 'AI'}）：${why}`;
   }
 
@@ -305,10 +263,12 @@ const LLM = (() => {
   }
 
   /* ---------------- 2) Gemini（SSE 流式） ---------------- */
-  async function callGemini(cfg, system, user, onToken, isRetry, modelOverride, hooks) {
+  async function callGemini(cfg, system, user, onToken, isRetry, modelOverride) {
     if (!cfg.geminiKey) throw new Error('未填写 Gemini API Key（在 Google AI Studio 免费获取）');
     const model = modelOverride || cfg.geminiModel || 'gemini-3.5-flash';
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse`;
+    const guard = makeIdleAbort(numOr(cfg.idleTimeoutMs, DEF.idleTimeoutMs), numOr(cfg.totalTimeoutMs, DEF.totalTimeoutMs));
+    const sink = { full: '', truncated: false };
     // maxOutputTokens 对思考型模型是「思考+回答」的总额——思考会占额度，故默认给足。
     const genCfg = {
       temperature: numOr0(cfg.temperature, DEF.temperature),
@@ -317,37 +277,6 @@ const LLM = (() => {
     if (cfg.geminiThinkingBudget != null && cfg.geminiThinkingBudget !== '')
       genCfg.thinkingConfig = { thinkingBudget: Number(cfg.geminiThinkingBudget) };
     if (isRetry && onToken) onToken('');   // 重试：清空上次流出的残缺内容
-    let sofar = '', sink = null;
-    for (let round = 0; ; round++) {
-      const prefix = sofar;
-      const contents = [{ role: 'user', parts: [{ text: user }] }];
-      if (round > 0) {
-        contents.push({ role: 'model', parts: [{ text: prefix }] });
-        contents.push({ role: 'user', parts: [{ text: continuePrompt(prefix) }] });
-      }
-      try {
-        sink = await geminiRound(cfg, url, system, contents, genCfg,
-          onToken ? (t) => onToken(round ? joinContinuation(prefix, t) : t) : null);
-      } catch (e) {
-        // 续写那一轮失败（过载、断网）不得连累已写出的部分：交还上文，标未写完
-        if (round === 0) throw e;
-        sink = { full: '', truncated: true, truncReason: 'cut', streamError: e.message || String(e) };
-        break;
-      }
-      sofar = round ? joinContinuation(prefix, sink.full) : sink.full;
-      if (!canContinue(sink) || round >= MAX_CONTINUE) break;
-      if (hooks && hooks.say) hooks.say(`回答在半途断了，正从断处续写（第 ${round + 1} 次）…`);
-      if (hooks) hooks.continued = round + 1;
-    }
-    sink.full = sofar;
-    sink.continued = hooks ? hooks.continued || 0 : 0;
-    return finalize(stripThink(sofar), sink, cfg, 'Gemini ');
-  }
-
-  /** 一次 Gemini 流式请求。返回 sink（不抛 AbortError：已写出的部分照常交还）。 */
-  async function geminiRound(cfg, url, system, contents, genCfg, onToken) {
-    const guard = makeIdleAbort(numOr(cfg.idleTimeoutMs, DEF.idleTimeoutMs), numOr(cfg.totalTimeoutMs, DEF.totalTimeoutMs));
-    const sink = { full: '', truncated: false, finished: false };
     try {
       const r = await fetch(url, {
         method: 'POST',
@@ -355,76 +284,38 @@ const LLM = (() => {
         signal: guard.signal,
         body: JSON.stringify({
           system_instruction: { parts: [{ text: system }] },
-          contents: contents,
+          contents: [{ role: 'user', parts: [{ text: user }] }],
           generationConfig: genCfg
         })
       });
       if (!r.ok) throw await httpError(r, 'Gemini');
       await readSSE(r, onToken, (obj) => {
-        // 流中报错（如过载）以 {error:{…}} 的形状夹在流里，没有 candidates——此前被当成空块吞掉
-        if (obj.error) { sink.streamError = obj.error.message || obj.error.status || 'error'; return ''; }
         const c = obj.candidates && obj.candidates[0];
         if (!c) return '';
         // finishReason 必须看：MAX_TOKENS 时答案是被截断的，与写完了长得一模一样
-        if (c.finishReason) {
-          sink.finished = true;
-          if (c.finishReason !== 'STOP') {
-            sink.truncated = true;
-            sink.truncReason = c.finishReason === 'MAX_TOKENS' ? 'maxTokens'
-              : /SAFETY|RECITATION|BLOCK/i.test(c.finishReason) ? 'safety' : 'other';
-            sink.finishReason = c.finishReason;
-          }
+        if (c.finishReason && c.finishReason !== 'STOP') {
+          sink.truncated = true;
+          sink.truncReason = c.finishReason === 'MAX_TOKENS' ? 'maxTokens'
+            : /SAFETY|RECITATION|BLOCK/i.test(c.finishReason) ? 'safety' : 'other';
+          sink.finishReason = c.finishReason;
         }
-        // 思考片段（thought:true）不是正文——自检早就这么分，作答这一路此前漏了
-        return c.content && c.content.parts
-          ? c.content.parts.map(p => p.thought ? '' : (p.text || '')).join('') : '';
+        return c.content && c.content.parts ? c.content.parts.map(p => p.text || '').join('') : '';
       }, guard, sink);
-      // 流关了却没见到 finishReason：没写完，只是看起来像写完了
-      if (!sink.finished && !sink.truncated) { sink.truncated = true; sink.truncReason = 'cut'; }
-      return sink;
+      return finalize(stripThink(sink.full), sink, cfg, 'Gemini ');
     } catch (e) {
-      if (e.name === 'AbortError') { abortOutcome(guard, sink, 'Gemini ', cfg); return sink; }
+      if (e.name === 'AbortError') return finalize(stripThink(abortOutcome(guard, sink, 'Gemini ', cfg)), sink, cfg, 'Gemini ');
       throw e;
     } finally { guard.done(); }
   }
 
   /* ---------------- 3) 自定义 OpenAI 兼容端点 ---------------- */
-  async function callCustom(cfg, system, user, onToken, isRetry, modelOverride, hooks) {
+  async function callCustom(cfg, system, user, onToken, isRetry, modelOverride) {
     if (!cfg.customUrl) throw new Error('未填写自定义端点 URL（OpenAI 兼容 /chat/completions）');
     const base = cfg.customUrl.replace(/\/$/, '');
     const url = base.endsWith('/chat/completions') ? base : base + '/chat/completions';
-    if (isRetry && onToken) onToken('');
-    let sofar = '', sink = null;
-    for (let round = 0; ; round++) {
-      const prefix = sofar;
-      const messages = [{ role: 'system', content: system }, { role: 'user', content: user }];
-      if (round > 0) {
-        messages.push({ role: 'assistant', content: prefix });
-        messages.push({ role: 'user', content: continuePrompt(prefix) });
-      }
-      try {
-        sink = await customRound(cfg, url, modelOverride, messages,
-          onToken ? (t) => onToken(round ? joinContinuation(prefix, t) : t) : null);
-      } catch (e) {
-        // 续写那一轮失败（过载、断网）不得连累已写出的部分：交还上文，标未写完
-        if (round === 0) throw e;
-        sink = { full: '', truncated: true, truncReason: 'cut', streamError: e.message || String(e) };
-        break;
-      }
-      // <think> 段不进上文：续写时交回去的必须是正文
-      sofar = round ? joinContinuation(prefix, stripThink(sink.full)) : stripThink(sink.full);
-      if (!canContinue(sink) || round >= MAX_CONTINUE) break;
-      if (hooks && hooks.say) hooks.say(`回答在半途断了，正从断处续写（第 ${round + 1} 次）…`);
-      if (hooks) hooks.continued = round + 1;
-    }
-    sink.full = sofar;
-    sink.continued = hooks ? hooks.continued || 0 : 0;
-    return finalize(sofar, sink, cfg, '自定义端点 ');
-  }
-
-  async function customRound(cfg, url, modelOverride, messages, onToken) {
     const guard = makeIdleAbort(numOr(cfg.idleTimeoutMs, DEF.idleTimeoutMs), numOr(cfg.totalTimeoutMs, DEF.totalTimeoutMs));
-    const sink = { full: '', truncated: false, finished: false };
+    const sink = { full: '', truncated: false };
+    if (isRetry && onToken) onToken('');
     try {
       const r = await fetch(url, {
         method: 'POST',
@@ -437,30 +328,24 @@ const LLM = (() => {
           max_tokens: numOr(cfg.maxTokens, DEF.maxTokens),
           // 开流式是本次修复的关键：整体生成时长响应必然撞总超时，且用户全程看不到进展
           stream: true,
-          messages: messages
+          messages: [{ role: 'system', content: system }, { role: 'user', content: user }]
         })
       });
       if (!r.ok) throw await httpError(r, '自定义端点');
       if (looksSSE(r)) {
         await readSSE(r, onToken, (obj) => {
-          if (obj.error) { sink.streamError = obj.error.message || 'error'; return ''; }
           const c = obj.choices && obj.choices[0];
           if (!c) return '';
           // finish_reason='length' 即被 max_tokens 截断；与写完了(stop)必须分得开
-          if (c.finish_reason) {
-            sink.finished = true;
-            if (c.finish_reason !== 'stop') {
-              sink.truncated = true;
-              sink.truncReason = c.finish_reason === 'length' ? 'maxTokens'
-                : /content_filter|safety/i.test(c.finish_reason) ? 'safety' : 'other';
-              sink.finishReason = c.finish_reason;
-            }
+          if (c.finish_reason && c.finish_reason !== 'stop') {
+            sink.truncated = true;
+            sink.truncReason = c.finish_reason === 'length' ? 'maxTokens'
+              : /content_filter|safety/i.test(c.finish_reason) ? 'safety' : 'other';
+            sink.finishReason = c.finish_reason;
           }
           // 流式取 delta.content；个别端点在流里回 message.content，一并兼容
           return (c.delta && c.delta.content) || (c.message && c.message.content) || '';
         }, guard, sink);
-        // 既无 finish_reason 也无 [DONE]：流是被掐断的，不是写完了
-        if (!sink.finished && !sink.sawDone && !sink.truncated) { sink.truncated = true; sink.truncReason = 'cut'; }
       } else {
         // 端点忽略了 stream:true，按普通 JSON 解析——不能因此报错，能出结果就行
         const d = await r.json();
@@ -473,9 +358,9 @@ const LLM = (() => {
         }
         if (onToken && sink.full) onToken(sink.full);
       }
-      return sink;
+      return finalize(stripThink(sink.full), sink, cfg, '自定义端点 ');
     } catch (e) {
-      if (e.name === 'AbortError') { abortOutcome(guard, sink, '自定义端点 ', cfg); return sink; }
+      if (e.name === 'AbortError') return finalize(stripThink(abortOutcome(guard, sink, '自定义端点 ', cfg)), sink, cfg, '自定义端点 ');
       throw e;
     } finally { guard.done(); }
   }
@@ -513,10 +398,10 @@ const LLM = (() => {
     return 'Gemini/' + (model || cfg.geminiModel || 'gemini-3.5-flash');
   }
 
-  function callOne(step, cfg, system, user, onToken, isRetry, hooks) {
+  function callOne(step, cfg, system, user, onToken, isRetry) {
     if (step.provider === 'local') return callOllama(cfg, system, user, onToken);
-    if (step.provider === 'custom') return callCustom(cfg, system, user, onToken, isRetry, step.model, hooks);
-    return callGemini(cfg, system, user, onToken, isRetry, step.model, hooks);
+    if (step.provider === 'custom') return callCustom(cfg, system, user, onToken, isRetry, step.model);
+    return callGemini(cfg, system, user, onToken, isRetry, step.model);
   }
 
   /* ---------------- 主入口 ---------------- */
@@ -557,16 +442,14 @@ const LLM = (() => {
       if (ci > 0) say(`改用备用：${step.label}…`);
       for (let attempt = 0; attempt <= maxRetries; attempt++) {
         try {
-          const hooks = { say: say, continued: 0 };
-          const text = await callOne(step, cfg, system, user, onToken, attempt > 0, hooks);
+          const text = await callOne(step, cfg, system, user, onToken, attempt > 0);
           _lastUsed = {
             provider: step.provider,
             model: step.model || modelOf(cfg, step.provider),
             label: step.label,
             fellBack: ci > 0,                 // 是否由备用接管
             configured: cfg.provider || 'gemini',
-            retries: attempt,
-            continued: hooks.continued        // 断流后自动续写了几次（0＝一次写完）
+            retries: attempt
           };
           return text;
         } catch (e) {
@@ -801,8 +684,7 @@ const LLM = (() => {
     current,    // 正在作答的那一路（流式途中界面标题据此写）
     // 供单测与诊断使用的纯函数（不参与业务流程）
     _internals: { isTransient, isOverloaded, isFatalConfig, backoffMs, parseRetryAfter, buildChain, labelOf, modelOf, reasonOf, finalize, probeRead, numOr, numOr0,
-      parseGeminiModels, parseOpenAIModels, parseOllamaModels, modelsUrl,
-      joinContinuation, continuePrompt, canContinue, MAX_CONTINUE }
+      parseGeminiModels, parseOpenAIModels, parseOllamaModels, modelsUrl }
   };
 })();
 
