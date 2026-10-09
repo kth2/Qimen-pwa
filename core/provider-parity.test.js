@@ -138,10 +138,14 @@ function run() {
       var fs = require('fs');
       var APP = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
       return t('userMsg 以 tailAnchor 收尾，且 tailAnchor 排在最后一项', function () {
-        var m = APP.match(/const userMsg = ([\s\S]{0,200}?);/);
-        assert.ok(m, '找不到 userMsg 的拼接');
-        assert.ok(/tailAnchor\(q, rc, catMap\)\s*;?\s*$/.test(m[1].trim()),
-          'tailAnchor 必须是最后一项，否则近因效应无从谈起：' + m[1].trim());
+        // Phase 39 起有两种读法，userMsg 在两个分支里各拼一次——两处都得以收尾锚结尾
+        var ms = APP.match(/\buserMsg = ([\s\S]{0,260}?);/g) || [];
+        assert.ok(ms.length >= 2, '找不到两种读法各自的 userMsg 拼接（实得 ' + ms.length + ' 处）');
+        ms.forEach(function (s) {
+          var body = s.replace(/^userMsg = /, '').replace(/;$/, '').trim();
+          assert.ok(/tailAnchor\(q, rc, catMap\)$/.test(body),
+            'tailAnchor 必须是最后一项，否则近因效应无从谈起：' + body);
+        });
       }).then(function () {
         return t('收尾锚重述问题、占类与三条硬约束', function () {
           var seg = tailAnchorSrc(APP);

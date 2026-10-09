@@ -30,6 +30,12 @@
 
   function pct(a, b) { return b ? Math.round(1000 * a / b) / 10 : null; }
   function round(x, n) { var p = Math.pow(10, n == null ? 3 : n); return Math.round(x * p) / p; }
+  /** 标准正态分布函数（Abramowitz–Stegun 7.1.26，误差 < 1.5e-7），只供两比例检验用 */
+  function normCdf(x) {
+    var t = 1 / (1 + 0.3275911 * Math.abs(x) / Math.SQRT2);
+    var y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x / 2);
+    return x >= 0 ? (1 + y) / 2 : (1 - y) / 2;
+  }
   function median(a) {
     if (!a.length) return null;
     var s = a.slice().sort(function (x, y) { return x - y; });
@@ -213,6 +219,71 @@
           '只能比对此后新积累的这一组。'
       };
     }
+
+    /* ---------- 按读法（Phase 39）：标准 vs 全盘叙事 ----------
+     * 与「按模型」不同，这一项**是对照实验**：读法设为「轮流」时，每次解读以 1/2 概率随机分到一种，
+     * 两组拿到的盘与问题是随机分的。所以只有 meta.readModeAssigned === 'random' 的那些进比较；
+     * 用户手选的（manual）另列，不进比较——人会挑题，挑过的就不随机了。
+     * 想用叙事却退回标准的（readModeFellBack），按 intention-to-treat 本应算叙事组，
+     * 但退回的原因是象义卡没建出来，与读法好坏无关；故单独计数、不进任一组，并报出个数。 */
+    var rmg = {}, rmManual = {}, rmFellBack = 0, rmNone = 0;
+    function rmAdd(bucket, k, c) {
+      var t = (bucket[k] = bucket[k] || { key: k, n: 0, happened: 0, partial: 0, fail: 0, score: 0 });
+      t.n++;
+      if (c.feedback.outcome === 'happened') t.happened++;
+      else if (c.feedback.outcome === 'partial') t.partial++;
+      else t.fail++;
+      var sc4 = CB && CB.caseScore ? CB.caseScore(c) : null;
+      if (sc4) t.score += sc4.score;
+    }
+    graded.forEach(function (c) {
+      var m = c.meta || {};
+      if (!m.readMode) { rmNone++; return; }
+      if (m.readModeFellBack) { rmFellBack++; return; }
+      if (m.readModeAssigned === 'random') rmAdd(rmg, m.readMode, c);
+      else if (m.readModeAssigned === 'manual') rmAdd(rmManual, m.readMode, c);
+    });
+    var RM_LABEL = { standard: '标准', narrative: '全盘叙事' };
+    function rmRows(bucket) {
+      return ['standard', 'narrative'].filter(function (k) { return bucket[k]; }).map(function (k) {
+        var t = bucket[k], enough = t.n >= minN;
+        return {
+          key: k, label: RM_LABEL[k], n: t.n, enough: enough, happened: t.happened, fail: t.fail,
+          exactRate: enough ? pct(t.happened, t.n) : null,
+          failRate: enough ? pct(t.fail, t.n) : null,
+          weightedScore: enough ? round(t.score / t.n) : null,
+          display: enough
+            ? '完全应验 ' + pct(t.happened, t.n) + '%　未应验/相反 ' + pct(t.fail, t.n) + '%　加权 ' + round(t.score / t.n)
+            : '样本不足 ' + t.n + '/' + minN + '（不给率，小样本的百分比会被当成精度）'
+        };
+      });
+    }
+    var rmRandom = rmRows(rmg);
+    var cmp = null;
+    var rs0 = rmg.standard, rn0 = rmg.narrative;
+    if (rs0 && rn0 && rs0.n >= minN && rn0.n >= minN) {
+      // 两比例 z 检验（完全应验率）。只给一个 p，不给「显著」二字：样本小时它说明不了什么，
+      // 且这张报告里同时比的东西不止一项。
+      var p1 = rs0.happened / rs0.n, p2 = rn0.happened / rn0.n;
+      var pp = (rs0.happened + rn0.happened) / (rs0.n + rn0.n);
+      var se = Math.sqrt(pp * (1 - pp) * (1 / rs0.n + 1 / rn0.n));
+      var z = se ? (p2 - p1) / se : 0;
+      cmp = {
+        diffExact: round(100 * (p2 - p1), 1),
+        diffScore: round(rn0.score / rn0.n - rs0.score / rs0.n),
+        z: round(z, 2),
+        pTwoSided: round(2 * (1 - normCdf(Math.abs(z))), 3)
+      };
+    }
+    rep.byReadMode = {
+      minSamples: minN, random: rmRandom, manual: rmRows(rmManual),
+      comparison: cmp, fellBack: rmFellBack, unrecorded: rmNone,
+      _note: '只有「轮流」随机分到的案例进比较；手选的另列不比。' +
+        (rmFellBack ? '另有 ' + rmFellBack + ' 例想用叙事却因象义卡未建成退回标准，不进任一组。' : '') +
+        (rmNone ? '另有 ' + rmNone + ' 例未记录读法（Phase 39 之前，或飞盘/山向之外的旧案例）。' : ''),
+      _caveat: '这是随机对照：两组之差可以归因于读法本身。但每组至少要几十例，差距才不至于全是运气；' +
+        'p 值只作参考，不要因为一次 p<0.05 就定案——这张报告同时在比好几样东西。'
+    };
 
     /* ---------- 规则与象义可靠度：直接取 casebook 的口径，不另算一套 ---------- */
     if (CB && CB.calibrate) {
@@ -419,6 +490,24 @@
         }
         L.push('  ' + r.byModel._caveat);
       }
+      L.push('');
+    }
+    if (r.byReadMode && (r.byReadMode.random.length || r.byReadMode.manual.length)) {
+      L.push('■ 按读法（标准 vs 全盘叙事；随机对照）');
+      if (!r.byReadMode.random.length) L.push('  尚无随机分配的案例——读法选「轮流」后，新存的案例才进比较。');
+      r.byReadMode.random.forEach(function (x) { line(x.label + '(n=' + x.n + ')', x.display); });
+      if (r.byReadMode.comparison) {
+        var cm = r.byReadMode.comparison;
+        L.push('  叙事减标准：完全应验率 ' + (cm.diffExact >= 0 ? '+' : '') + cm.diffExact + ' 个百分点，加权分 ' +
+          (cm.diffScore >= 0 ? '+' : '') + cm.diffScore + '（z=' + cm.z + '，双侧 p=' + cm.pTwoSided + '）');
+      } else if (r.byReadMode.random.length) {
+        L.push('  **目前还比不出来**：两组都要达到 ' + r.byReadMode.minSamples + ' 例才比。');
+      }
+      if (r.byReadMode.manual.length) {
+        L.push('  手选（不进比较）：' + r.byReadMode.manual.map(function (x) { return x.label + ' n=' + x.n; }).join('，'));
+      }
+      L.push('  ' + r.byReadMode._note);
+      L.push('  ' + r.byReadMode._caveat);
       L.push('');
     }
     if (r.byFraming && r.byFraming.rows.length) {

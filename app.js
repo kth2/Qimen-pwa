@@ -13,6 +13,7 @@
   const SG = window.ShiGe;      // 时格层（Phase 16：五不遇时／天显时格；缺则不判时格）
   const QS = window.QuShu;      // 取数层（Phase 21：河图数＋先天/后天宫数；缺则取数仍只有河图数一路）
   const FR = window.Framing;    // 问句方向（Phase 38：检出「怕发生之事」；缺则不提示，判读照旧）
+  const XK = window.XiangKa;    // 九宫象义卡（Phase 39：全盘象义叙事读法；缺则一律按标准读法）
   const MD = window.MdLite;     // 极简 Markdown 渲染（Phase 25；缺则答案退回纯文本，功能不受影响）
   const CB = window.Casebook;   // 案例本·经验层（Phase 5；只统计与建议，绝不改写教义规则）
   const CSTORE = window.CaseStore;
@@ -414,6 +415,52 @@
     return text;
   }
 
+  /* ---------- 读法：标准 / 全盘象义叙事（Phase 39） ----------
+   * 三套方法（纲要、古籍、五行推理）在 391 例上回测，是非吉凶的区分力都接近瞎猜。
+   * 叙事读法换一条路：不计票、不比力量，把九宫之象关联到所问之事上，编成一个故事。
+   * 它比标准读法好还是坏，**只有对照实验说得清**——故缺省设为「轮流」：
+   * 每次解读以 1/2 概率随机分到一种读法，并把分到哪一种记进案例（meta.readMode）。
+   * 两组拿到的盘与问题是随机分的，日后评估器按读法分组比较，才是真正的 A/B。
+   * 只用于转盘时家：飞盘与山向各有专属纲要，象义卡也是转盘专有（零串味）。 */
+  const READMODE_LS = 'qimen.readMode';
+  function readModePref() {
+    const el = $('aiReadMode');
+    return (el && el.value) || 'alternate';
+  }
+  /** 本次用哪种读法。返回 { mode: 'standard'|'narrative', assigned: 'random'|'manual'|'n/a' } */
+  function pickReadMode() {
+    if (school === 'feipan' || mode === 'shanxiang' || !XK) return { mode: 'standard', assigned: 'n/a' };
+    const pref = readModePref();
+    if (pref === 'standard' || pref === 'narrative') return { mode: pref, assigned: 'manual' };
+    return { mode: Math.random() < 0.5 ? 'narrative' : 'standard', assigned: 'random' };
+  }
+  /**
+   * 叙事读法下，引擎提示词里有三样东西会把模型拉回计票：「引擎·总体」一句定吉凶、「引擎·建议」、
+   * 以及末尾那段「请按以下骨架作答」（第 1 条就是「结合引擎已判吉凶定论」）。这三样删去；
+   * 九宫行里的格局名照留（格名本身是象），叙事纲要另行交代「小吉/小凶」字样不作计票。
+   * 删不到（引擎改了措辞）就原样返回——宁可对照不纯，不可把盘面删坏。
+   */
+  function narrativeUser(user) {
+    let u = String(user || '');
+    const at = u.indexOf('【请按以下骨架作答】');
+    if (at > 0) u = u.slice(0, at).replace(/\s+$/, '') + '\n';
+    return u.split('\n').filter(l => !/^【引擎·(总体|建议)】/.test(l)).join('\n');
+  }
+  /** 日干/时干落宫块的末行教的是「以生克盗泄定成败」，那是标准读法；叙事读法只取落宫，不取这条判法。 */
+  function narrativeRiShi(block) {
+    return String(block || '').replace(/\n请按纲要「日干为人、时干为事」[^\n]*$/, '');
+  }
+  let _narrativeMethod = '';
+  async function getNarrativeMethod() {
+    if (_narrativeMethod) return _narrativeMethod;
+    const r = await fetch('assets/narrative-method.md');
+    if (!r.ok) throw new Error('叙事读法纲要加载失败(HTTP ' + r.status + ')');
+    const text = (await r.text()).trim();
+    if (!text) throw new Error('叙事读法纲要内容为空');
+    _narrativeMethod = text;
+    return text;
+  }
+
   /* ---------- 结构化知识库（象义 + 占类用神） ---------- */
   // 两份 JSON 随 SW 预缓存，离线可用。加载失败不是致命错误：
   // 证据层只是"增益"，缺失时 runAI 自动退回原有的纯文本纲要流程，功能不减。
@@ -427,6 +474,7 @@
   let _gejuReady = false;       // 81 格表同理：缺席只是不带格之断语
   let _shigeReady = false;      // 时格规则库同理：缺席只是不判五不遇时与天显时格
   let _qushuReady = false;      // 取数规则库同理：缺席只是退回原状（用神宫河图数仍由 TIMING 承载）
+  let _xiangkaReady = false;    // 象义卡同理：缺席则叙事读法不可用，一律退回标准读法
   async function loadKnowledge() {
     if (!YS || !EV) return false;
     const get = (p) => fetch(p).then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)));
@@ -479,6 +527,16 @@
     if (_kbReady && QS && !_qushuReady) {
       try { _qushuReady = QS.load(await get('knowledge/qushu-rules.json')); }
       catch (e) { console.warn('[qushu] 取数规则库加载失败，本次取数只有河图数一路：', e.message); _qushuReady = false; }
+    }
+    // 象义卡：纲要类象表（leixiang.json）必需，古籍象义表可缺——缺则卡上只列纲要之象
+    if (_kbReady && XK && !_xiangkaReady) {
+      try {
+        const lx = await get('knowledge/leixiang.json');
+        let cl = null;
+        try { cl = await get('knowledge/classics-xiangyi.json'); }
+        catch (e2) { console.warn('[xiangka] 古籍象义表加载失败，象义卡只列纲要之象：', e2.message); }
+        _xiangkaReady = XK.load(lx, cl);
+      } catch (e) { console.warn('[xiangka] 象义卡加载失败，本次不用叙事读法：', e.message); _xiangkaReady = false; }
     }
     return _kbReady;
   }
@@ -799,11 +857,13 @@
    * 备用接管时注明主选是谁——否则「Gemini 过载、自定义端点接的班」看上去就像 Gemini 答的。
    * u 缺席（尚未开始作答）时退回配置值。
    */
-  function answerHead(category, u, info) {
+  function answerHead(category, u, info, readMode) {
     const cat = category || '综合';
-    if (!u) return `【占类：${cat}　模型：${info.provider}/${info.model}】\n\n`;
+    // 读法只在叙事时标出：标准读法是一向的样子，不必每次都写
+    const rm = readMode === 'narrative' ? '　读法：全盘叙事' : '';
+    if (!u) return `【占类：${cat}　模型：${info.provider}/${info.model}${rm}】\n\n`;
     const fb = u.fellBack ? `（备用接管；主选 ${info.provider}/${info.model} 未能作答）` : '';
-    return `【占类：${cat}　模型：${u.provider}/${u.model}${fb}】\n\n`;
+    return `【占类：${cat}　模型：${u.provider}/${u.model}${fb}${rm}】\n\n`;
   }
 
   async function runAI() {
@@ -840,7 +900,15 @@
       // 标题按**实际作答**那一路写：流式途中取 current()，答完取 lastUsed()。
       // 此前一律写配置值，备用接管后仍挂着主选的名（统计本就取 lastUsed，未受影响，但看的人会被误导）。
       const catName = prompt.context.category || '综合';
-      const headNow = () => answerHead(catName, (LLM.current && LLM.current()) || null, LLM.info());
+      // 读法在作答前定下（随机分配也在此刻），标题与存档用同一个值
+      const rm = pickReadMode();
+      let readMode = rm.mode;
+      let narrativeMethod = '';
+      if (readMode === 'narrative') {
+        try { narrativeMethod = await getNarrativeMethod(); }
+        catch (ne) { console.warn('[narrative]', ne.message, '——本次退回标准读法'); readMode = 'standard'; }
+      }
+      const headNow = () => answerHead(catName, (LLM.current && LLM.current()) || null, LLM.info(), readMode);
       let head = headNow();
       // 流式：边生成边显示，既提升观感也避免长响应在网关侧 504
       $('aiStatus').textContent = 'AI 解读中…(边生成边显示)';
@@ -1081,16 +1149,61 @@
           evBlock = '';
         }
       }
-      // 证据包可用时由它承载旺衰/应期；不可用则退回原有的两段拼接。山向段始终保留。
-      const analysisBlocks = evBlock || (wsBlock + yqBlock);
-      const userMsg = prompt.user + (school !== 'feipan' ? riShiGanBlock(pan, $('aiNianMing').value) : '')
-        + analysisBlocks + sxBlock + tailAnchor(q, rc, catMap);
-      const answer = await LLM.chat(prompt.system + '\n' + AI_DISCIPLINE + sysExtra, userMsg, (full) => {
+      // 叙事读法：九宫象义卡代替证据包。各层照算照存（统计要用），只是不送 READING／计票类内容进提示词——
+      // 送进去，模型就又回到计票上了，两种读法便分不开。卡建不出来（库未加载等）则退回标准读法。
+      let xkBlock = '';
+      if (readMode === 'narrative') {
+        try {
+          if (!_xiangkaReady) throw new Error('象义卡未加载');
+          const extraRoles = [];
+          const xy = runOut.xiangyi;
+          if (xy && xy.applicable) {
+            xy.focus.forEach(f => extraRoles.push({ gong: String(f.gong), role: '用神·' + f.name + (f.aspect ? '(' + f.aspect + ')' : '') }));
+          } else {
+            ysGongs.forEach(g => extraRoles.push({ gong: String(g), role: '用神' }));
+          }
+          const lxr = runOut.leixiang;
+          if (lxr && lxr.applicable) {
+            lxr.candidates.filter(c => c.located).forEach(c => extraRoles.push({
+              gong: String(c.gong), role: '类象·' + c.symbol + '（所问「' + (c.terms || []).join('/') + '」）'
+            }));
+          }
+          const card = XK.build({
+            chart: pan, extraRoles,
+            wangshuai: (window.WangShuai && window.WangShuai.analyze) ? window.WangShuai.analyze(pan) : null
+          });
+          xkBlock = XK.toPromptBlock(card);
+          if (!xkBlock) throw new Error(card.reason || '象义卡为空');
+          runOut.xiangka = { applicable: true, roles: card.roles, version: card.version };
+        } catch (ke) {
+          console.warn('[xiangka] 象义卡不可用，本次退回标准读法：', ke.message);
+          readMode = 'standard'; xkBlock = '';
+        }
+      }
+      let sysMsg, userMsg;
+      if (readMode === 'narrative') {
+        // 应期锚点仍给：TIMING 段若在则用它（已折成具体日期），否则给 yingqi 原块。
+        // 问句方向（怕发生之事）只提一句，不附 READING 的助阻翻转说明——那是计票用的。
+        const tmBlock = (runOut.timing && TM && TM.toPromptBlock) ? TM.toPromptBlock(runOut.timing) : '';
+        const fr = FR ? (() => { try { return FR.detect(q); } catch (e) { return null; } })() : null;
+        const frLine = (fr && fr.direction === 'adverse')
+          ? '\n【问句方向】本问所问之事若发生，对求测人是坏事（怕发生之事）。故事讲的是「那件坏事会不会成真」。\n' : '';
+        sysMsg = prompt.system + '\n' + narrativeMethod;
+        userMsg = narrativeUser(prompt.user) + narrativeRiShi(riShiGanBlock(pan, $('aiNianMing').value))
+          + xkBlock + (tmBlock ? '\n' + tmBlock : yqBlock) + frLine + sxBlock + tailAnchor(q, rc, catMap);
+      } else {
+        // 证据包可用时由它承载旺衰/应期；不可用则退回原有的两段拼接。山向段始终保留。
+        const analysisBlocks = evBlock || (wsBlock + yqBlock);
+        sysMsg = prompt.system + '\n' + AI_DISCIPLINE + sysExtra;
+        userMsg = prompt.user + (school !== 'feipan' ? riShiGanBlock(pan, $('aiNianMing').value) : '')
+          + analysisBlocks + sxBlock + tailAnchor(q, rc, catMap);
+      }
+      const answer = await LLM.chat(sysMsg, userMsg, (full) => {
         streamed = true; streamAnswer(headNow() + (full || ''));
       // onStatus：把重试与备用切换过程显示出来。干等两分钟再报错，是最劝退的体验
       }, (msg) => { $('aiStatus').textContent = msg; });
       // 收尾用清理后的完整文本（去 <think> 等），并在此**一次性**渲染 Markdown
-      head = answerHead(catName, (LLM.lastUsed && LLM.lastUsed()) || null, LLM.info());
+      head = answerHead(catName, (LLM.lastUsed && LLM.lastUsed()) || null, LLM.info(), readMode);
       _answerRaw = head + ((!streamed || !answer) ? (answer || '(无内容)') : answer);
       paintAnswer();
       $('aiStatus').textContent = '完成';
@@ -1116,11 +1229,18 @@
           meta: (function () {
             const u = (LLM.lastUsed && LLM.lastUsed()) || null;
             const i = LLM.info();
-            return u
+            const m = u
               ? { provider: u.provider, model: u.model, label: u.label,
                   fellBack: !!u.fellBack, configured: u.configured, retries: u.retries }
               : { provider: i.provider, model: i.model, label: i.provider + '/' + i.model,
                   fellBack: false, configured: i.provider, _note: 'lastUsed 缺席，退回配置值' };
+            // 读法（Phase 39）：readMode 是**实际用了**哪种；readModeAssigned 说它是怎么来的——
+            // 'random' 才是对照实验的样本，'manual' 是用户手选的，'n/a' 是飞盘/山向（只有标准读法）。
+            // 想用叙事却退回了标准的（卡建不出来），记 standard，并注 readModeFellBack，免得混进叙事组。
+            m.readMode = readMode;
+            m.readModeAssigned = rm.assigned;
+            if (rm.mode !== readMode) m.readModeFellBack = true;
+            return m;
           })()
         };
         $('caseSaveBar').style.display = 'block';
@@ -2188,6 +2308,16 @@
         await renderArchive();
       });
       refreshCaseCount(); renderCaseViews(); loadRevisions();
+    }
+    // 读法下拉：记住用户的选择（存不下也无妨，缺省就是「轮流」）
+    if ($('aiReadMode')) {
+      try {
+        const v = localStorage.getItem(READMODE_LS);
+        if (v === 'alternate' || v === 'standard' || v === 'narrative') $('aiReadMode').value = v;
+      } catch (e) { /* 隐私模式等读不到，留缺省 */ }
+      $('aiReadMode').addEventListener('change', () => {
+        try { localStorage.setItem(READMODE_LS, $('aiReadMode').value); } catch (e) { /* 存不下不影响本次 */ }
+      });
     }
     if ($('aiRawToggle')) {
       $('aiRawToggle').addEventListener('click', () => { _answerShowRaw = !_answerShowRaw; paintAnswer(); });
