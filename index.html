@@ -192,6 +192,13 @@
             <option>戊</option><option>己</option><option>庚</option><option>辛</option><option>壬</option><option>癸</option>
           </select>
         </label>
+        <label class="muted" title="全盘叙事：不计吉凶、不比力量，把九宫之象关联到所问之事，编成一个故事来断。轮流＝每次随机分一种并记进案例，日后比得出哪种更准。只用于转盘时家。">读法
+          <select id="aiReadMode">
+            <option value="alternate">轮流（对照实验）</option>
+            <option value="standard">标准</option>
+            <option value="narrative">全盘叙事</option>
+          </select>
+        </label>
         <button class="btn" id="aiBtn">AI 解读此盘</button>
         <span class="muted" id="aiStatus"></span>
       </div>
@@ -267,6 +274,8 @@
   <!-- 问句方向：检出「怕发生之事」，READING 的 [助]/[阻] 在这类问题里要反过来读 -->
   <script src="core/framing.js"></script>
   <script src="core/evidence.js"></script>
+  <!-- 九宫象义卡：全盘象义叙事读法的取材表（Phase 39；转盘专有） -->
+  <script src="core/xiangka.js"></script>
   <!-- 案例本：经验层。与教义层(knowledge/*.json)严格分离，反馈永不改写规则 -->
   <script src="core/casebook.js"></script>
   <!-- 案例本评估器：把整本跑成可重复、可比对的成绩单 -->
