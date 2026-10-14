@@ -55,12 +55,15 @@ const LLM = (() => {
   /** 瞬时错误：值得重试。过载 503 / 限流 429 / 网关 504 / 断网 / 端点 500-502。 */
   function isTransient(e) {
     if (!e) return false;
+    // 429 里的「每日额度用完 / 额度为 0」不是瞬时的：重试只会再耗一次配额。交给备用链接手。
+    if (isHardQuota(e)) return false;
     const s = e.status;
     if (s === 429 || s === 500 || s === 502 || s === 503 || s === 504) return true;
     return /Failed to fetch|NetworkError|network error|ECONNRESET|socket hang up/i.test(e.message || '');
   }
   /** 过载类：错误信息值得对用户另行说明「这不是你的 key 或配置的问题」。 */
   function isOverloaded(e) {
+    if (isHardQuota(e)) return false;   // 额度用完是用户这边的账，不能说成「服务方过载」
     return !!e && (e.status === 503 || e.status === 429 ||
       /high demand|overloaded|rate limit|quota/i.test(e.message || ''));
   }
@@ -71,7 +74,11 @@ const LLM = (() => {
   function reasonOf(e) {
     if (!e) return '未知错误';
     const s = e.status;
-    if (s === 429) return '配额/频率受限(429)';
+    if (s === 429) {
+      const sc = e.quota && e.quota.scope;
+      return sc === 'day' ? '今日配额用尽(429)' : sc === 'none' ? '该模型无可用额度(429)'
+        : sc === 'minute' ? '每分钟频率受限(429)' : '配额/频率受限(429)';
+    }
     if (s === 503) return '服务方过载(503)';
     if (s === 500) return '服务方内部错误(500)';
     if (s === 502) return '网关错误(502)';
@@ -102,6 +109,104 @@ const LLM = (() => {
     const t = Date.parse(v);
     if (!isNaN(t)) return Math.max(0, Math.round((t - Date.now()) / 1000));
     return 0;
+  }
+
+  /* ---------------- 读懂 429：每分钟限流 ≠ 每日额度用完 ---------------- */
+
+  /**
+   * 同是 429，性质天差地别：「每分钟」超限等几十秒就好；「每日」额度用完要等到太平洋时间午夜，
+   * 「额度为 0」则永远不会好。后两者重试只会白打请求、继续消耗配额（实测：一次提问 429 后
+   * 连打 4 次，自检再打 2 次，全落在同一个已用完的每日额度上）。
+   * 分辨靠 Gemini 响应体里的 QuotaFailure.quotaId（…PerDay… / …PerMinute…）与 RetryInfo.retryDelay；
+   * 解不出结构化字段时退回读 message 里的「limit: N, model: X」「retry in Ns」。
+   * @returns {null | {scope:'day'|'minute'|'none'|'', quotaId, metric, limit, model, retryDelaySec}}
+   *   scope：day 每日用完 / minute 每分钟超限 / none 该模型额度为 0 / '' 认不出
+   */
+  function parseQuota(raw) {
+    let j;
+    try { j = JSON.parse(String(raw || '')); } catch (_) { return null; }
+    const err = Array.isArray(j) ? (j[0] && j[0].error) : (j && j.error);
+    if (!err || typeof err !== 'object') return null;
+    const msg = String(err.message || '');
+    const details = Array.isArray(err.details) ? err.details : [];
+    const scopeOf = (id) => /PerDay/i.test(id) ? 'day' : /PerMinute/i.test(id) ? 'minute' : '';
+    const rank = { none: 3, day: 2, minute: 1, '': 0 };
+    const q = { scope: '', quotaId: '', metric: '', limit: null, model: '', retryDelaySec: 0 };
+    let found = false;
+    details.forEach((d) => {
+      const t = String((d && d['@type']) || '');
+      if (/QuotaFailure$/.test(t) && Array.isArray(d.violations)) {
+        // 同时撞了几条时取最严的：额度为 0 > 每日 > 每分钟
+        d.violations.forEach((v) => {
+          if (!v) return;
+          const lim = v.quotaValue != null && v.quotaValue !== '' && isFinite(Number(v.quotaValue)) ? Number(v.quotaValue) : null;
+          const sc = lim === 0 ? 'none' : scopeOf(String(v.quotaId || ''));
+          if (found && rank[sc] <= rank[q.scope]) return;
+          found = true;
+          q.scope = sc;
+          q.quotaId = String(v.quotaId || '');
+          q.metric = String(v.quotaMetric || '');
+          q.limit = lim;
+          q.model = String((v.quotaDimensions && v.quotaDimensions.model) || '');
+        });
+      }
+      if (/RetryInfo$/.test(t)) {
+        const m = /^([\d.]+)s$/.exec(String(d.retryDelay || ''));
+        if (m) q.retryDelaySec = Math.ceil(Number(m[1]));
+      }
+    });
+    if (!found) {
+      if (!/quota/i.test(msg)) return null;
+      const lim = /limit:\s*(\d+)/i.exec(msg);
+      const mod = /model:\s*([\w\-]+(?:\.[\w\-]+)*)/i.exec(msg);   // 不吞句末的点
+      if (lim) q.limit = Number(lim[1]);
+      if (mod) q.model = mod[1];
+      q.scope = q.limit === 0 ? 'none' : /per\s*day|PerDay/i.test(msg) ? 'day' : /per\s*minute|PerMinute/i.test(msg) ? 'minute' : '';
+    }
+    if (!q.retryDelaySec) {
+      const r = /retry in ([\d.]+)\s*s/i.exec(msg);
+      if (r) q.retryDelaySec = Math.ceil(Number(r[1]));
+    }
+    return q;
+  }
+
+  /** 额度用完或为 0：重试无用，只能换模型、等重置或开结算。 */
+  function isHardQuota(e) {
+    return !!(e && e.quota && (e.quota.scope === 'day' || e.quota.scope === 'none'));
+  }
+
+  /** 免费层每日额度在太平洋时间午夜重置。换算成本机时间，告诉用户「几点能再用」。 */
+  function quotaResetLocal(now) {
+    now = now || new Date();
+    try {
+      const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/Los_Angeles', hourCycle: 'h23', hour: '2-digit', minute: '2-digit', second: '2-digit'
+      }).formatToParts(now);
+      const g = (k) => Number((parts.find((p) => p.type === k) || {}).value || 0);
+      const left = (24 * 3600 - (g('hour') % 24) * 3600 - g('minute') * 60 - g('second')) * 1000;
+      const at = new Date(now.getTime() + left);
+      const pad = (n) => String(n).padStart(2, '0');
+      return { at, hours: left / 3600000, text: pad(at.getHours()) + ':' + pad(at.getMinutes()) };
+    } catch (_) { return null; }
+  }
+
+  /** 把 429 的结构化信息说成一句人话；quotaId 原样带上，便于对照 https://ai.dev/rate-limit。 */
+  function quotaText(q, now) {
+    if (!q) return '';
+    const what = /token/i.test(q.metric + q.quotaId) ? '输入 token' : '请求';
+    const who = q.model ? q.model + ' ' : '';
+    const id = q.quotaId ? `（${q.quotaId}）` : '';
+    if (q.scope === 'none') return `${who}在你的项目里额度为 0：免费层不提供该模型，或需开通结算${id}`;
+    if (q.scope === 'day') {
+      const r = quotaResetLocal(now);
+      return `${who}今日${what}额度已用完${q.limit != null ? `（上限 ${q.limit}）` : ''}${id}；` +
+        `太平洋时间午夜重置${r ? `，即本机时间约 ${r.text}（${r.hours < 1 ? '不到 1' : '约 ' + Math.round(r.hours)} 小时后）` : ''}`;
+    }
+    if (q.scope === 'minute') {
+      return `${who}每分钟${what}数超限${q.limit != null ? `（上限 ${q.limit}）` : ''}${id}` +
+        (q.retryDelaySec ? `；服务端要求 ${q.retryDelaySec} 秒后再试` : '');
+    }
+    return `配额受限${id}` + (q.retryDelaySec ? `；服务端要求 ${q.retryDelaySec} 秒后再试` : '');
   }
 
   /* ---------------- 空闲超时：流式的正确超时姿势 ---------------- */
@@ -177,9 +282,15 @@ const LLM = (() => {
 
   async function httpError(r, label) {
     const b = await r.text().catch(() => '');
-    const e = new Error(label + ' HTTP ' + r.status + (b ? ' ' + b.slice(0, 200) : ''));
+    // 429 的原文前 200 字恰好截在「Quota ex…」——真正的线索（哪条额度、等多久）全在后面。
+    // 读懂了就说人话，读不懂才退回原文。
+    const q = r.status === 429 ? parseQuota(b) : null;
+    const e = new Error(label + ' HTTP ' + r.status + (q ? ' ' + quotaText(q) : b ? ' ' + b.slice(0, 200) : ''));
     e.status = r.status;
-    e.retryAfter = parseRetryAfter(r.headers && r.headers.get && r.headers.get('retry-after'));
+    e.quota = q;
+    // Gemini 不发 Retry-After 头，等多久写在响应体的 RetryInfo 里
+    e.retryAfter = parseRetryAfter(r.headers && r.headers.get && r.headers.get('retry-after')) ||
+      (q && q.retryDelaySec) || 0;
     return e;
   }
 
@@ -374,10 +485,12 @@ const LLM = (() => {
   function buildChain(cfg) {
     const p = cfg.provider || 'gemini';
     const chain = [{ provider: p, model: '', label: labelOf(cfg, p, '') }];
-    if (p === 'gemini' && cfg.geminiFallbackModel) {
+    // 备用模型与主选同名则不入链：同一个模型共用同一份额度，主选 429 了它必然也 429，
+    // 只会把同一次失败再打一遍（实测自检里同一模型出现了两遍）。
+    if (p === 'gemini' && cfg.geminiFallbackModel && cfg.geminiFallbackModel !== modelOf(cfg, p)) {
       chain.push({ provider: 'gemini', model: cfg.geminiFallbackModel, label: 'Gemini/' + cfg.geminiFallbackModel });
     }
-    if (p === 'custom' && cfg.customFallbackModel) {
+    if (p === 'custom' && cfg.customFallbackModel && cfg.customFallbackModel !== modelOf(cfg, p)) {
       chain.push({ provider: 'custom', model: cfg.customFallbackModel, label: '自定义/' + cfg.customFallbackModel });
     }
     // 跨 provider 备用：仅当该 provider 的必填项已配好，否则加进来只会白白多报一次错
@@ -466,13 +579,25 @@ const LLM = (() => {
         }
       }
     }
+    // 额度用完：不是过载，也没重试（重试只会再耗配额）。说清楚何时恢复、现在能做什么。
+    if (isHardQuota(lastErr)) {
+      throw new Error(lastErr.message +
+        '\n—— 这不是服务方过载，重试也没用，故未重试。' +
+        (chain.length > 1 ? '备用也未能接管。' : '') +
+        '现在可以：① 换一个模型（各模型额度分开计）；② 在 AI 设置里填「备用模型」或「备用 Provider」，' +
+        '额度用完时自动接管；③ 在 Google AI Studio 为项目开通结算，额度会大幅提高。' +
+        '各模型的上限与已用量见 https://ai.dev/rate-limit');
+    }
     // 全链用尽：把「这不是你的配置问题」说清楚，并给出可操作的下一步
     if (isOverloaded(lastErr)) {
       const tip = chain.length > 1
         ? '备用也未能接管。'
         : '可在 AI 设置里填一个「备用模型」或「备用 Provider」，下次繁忙时自动接管。';
+      const why = lastErr.status === 429
+        ? '这是频率限制（每分钟请求或 token 数超限），等一分钟左右再问即可'
+        : '这是服务方临时过载，与你的 Key 或配置无关';
       throw new Error((lastErr.message || '模型繁忙') +
-        `\n—— 这是服务方临时过载，与你的 Key 或配置无关；已自动重试 ${maxRetries} 次。${tip}`);
+        `\n—— ${why}；已自动重试 ${maxRetries} 次。${tip}`);
     }
     if (lastErr && (lastErr.status === 500 || lastErr.status === 502 || lastErr.status === 504)) {
       throw new Error((lastErr.message || 'AI 调用失败') +
@@ -496,11 +621,19 @@ const LLM = (() => {
     const out = [];
     const chain = buildChain(cfg);
     for (const step of chain) {
+      let hard = false;
       for (const mode of ['非流式', '流式']) {
+        // 额度已确认用完，再打一次只会多耗一次配额，结果也必然相同
+        if (hard) {
+          out.push({ step: step.label, mode: mode, ms: 0, ok: false, status: 429,
+            detail: '未发请求：上一行已确认该模型额度用尽，再打只会多耗一次配额' });
+          continue;
+        }
         const t0 = Date.now();
         say(`自检 ${step.label}（${mode}）…`);
         try {
           const r = await oneProbe(step, cfg, mode === '流式');
+          hard = isHardQuota(r);
           out.push(Object.assign({ step: step.label, mode: mode, ms: Date.now() - t0 }, r));
         } catch (e) {
           out.push({
@@ -549,7 +682,12 @@ const LLM = (() => {
       }
       const r = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal: ctl.signal });
       const text = await r.text().catch(() => '');
-      if (!r.ok) return { ok: false, status: r.status, detail: text.slice(0, 300) };
+      if (!r.ok) {
+        // 429 原文前 300 字截在「Quota ex…」，读懂后把结论放最前，原文附后备查
+        const q = r.status === 429 ? parseQuota(text) : null;
+        return { ok: false, status: r.status, quota: q,
+          detail: q ? quotaText(q) + '\n    原文：' + text.slice(0, 300) : text.slice(0, 300) };
+      }
       // HTTP 200 不等于「拿到了答案」。自检只给 16 token 的额度，思考型模型会把
       // 这点额度全花在思考上，返回 finishReason=MAX_TOKENS 且正文一个字也没有。
       // 若此处只数字节数就报「正常」，自检恰好会漏掉用户真正遇到的那个故障。
@@ -683,7 +821,7 @@ const LLM = (() => {
     lastUsed,   // 实际作答的那一路（备用接管后与 info() 不同）——案例本据此归属模型
     current,    // 正在作答的那一路（流式途中界面标题据此写）
     // 供单测与诊断使用的纯函数（不参与业务流程）
-    _internals: { isTransient, isOverloaded, isFatalConfig, backoffMs, parseRetryAfter, buildChain, labelOf, modelOf, reasonOf, finalize, probeRead, numOr, numOr0,
+    _internals: { isTransient, isOverloaded, isFatalConfig, isHardQuota, parseQuota, quotaText, quotaResetLocal, backoffMs, parseRetryAfter, buildChain, labelOf, modelOf, reasonOf, finalize, probeRead, numOr, numOr0,
       parseGeminiModels, parseOpenAIModels, parseOllamaModels, modelsUrl }
   };
 })();
