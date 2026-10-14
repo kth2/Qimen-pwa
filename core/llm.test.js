@@ -392,6 +392,154 @@ t('设置面板写明「填 0 即不重试」', function () {
   assert.ok(/留空用默认/.test(seg), '也要说清留空是什么行为');
 });
 
+console.log('\n== 429 要读懂：每日额度用完不重试（实测：免费层每日额度用完后，一问连打 4 次） ==');
+// Gemini 真实 429 的形状：message 之外，details 里有 QuotaFailure 与 RetryInfo
+function gem429(quotaId, limit, model, delay) {
+  return JSON.stringify({ error: {
+    code: 429, status: 'RESOURCE_EXHAUSTED',
+    message: 'You exceeded your current quota, please check your plan and billing details. ' +
+      'For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. ' +
+      'To monitor your current usage, head to: https://ai.dev/rate-limit. \n* Quota exceeded for metric: ' +
+      'generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: ' + limit + ', model: ' + model +
+      '\nPlease retry in ' + delay + 's.',
+    details: [
+      { '@type': 'type.googleapis.com/google.rpc.Help', links: [{ description: 'Learn more', url: 'https://ai.google.dev/gemini-api/docs/rate-limits' }] },
+      { '@type': 'type.googleapis.com/google.rpc.QuotaFailure', violations: [{
+        quotaMetric: 'generativelanguage.googleapis.com/generate_content_free_tier_requests',
+        quotaId: quotaId, quotaDimensions: { location: 'global', model: model }, quotaValue: String(limit) }] },
+      { '@type': 'type.googleapis.com/google.rpc.RetryInfo', retryDelay: delay + 's' }
+    ] } });
+}
+var DAY = gem429('GenerateRequestsPerDayPerProjectPerModel-FreeTier', 20, 'gemini-3.8-flash', '37');
+var MIN = gem429('GenerateRequestsPerMinutePerProjectPerModel-FreeTier', 5, 'gemini-3.8-flash', '1');
+
+t('parseQuota：每日额度——认出 scope/上限/模型/quotaId/等待秒数', function () {
+  var q = I.parseQuota(DAY);
+  assert.strictEqual(q.scope, 'day');
+  assert.strictEqual(q.limit, 20);
+  assert.strictEqual(q.model, 'gemini-3.8-flash');
+  assert.strictEqual(q.quotaId, 'GenerateRequestsPerDayPerProjectPerModel-FreeTier');
+  assert.strictEqual(q.retryDelaySec, 37);
+  assert.strictEqual(I.parseQuota(MIN).scope, 'minute');
+});
+t('parseQuota：多条违规取最严的（每日压过每分钟）', function () {
+  var j = JSON.parse(MIN);
+  j.error.details[1].violations.push({ quotaId: 'GenerateRequestsPerDayPerProjectPerModel-FreeTier', quotaValue: '20' });
+  assert.strictEqual(I.parseQuota(JSON.stringify(j)).scope, 'day');
+});
+t('parseQuota：没有 details 时退回读 message；limit: 0 判为「额度为 0」', function () {
+  var q = I.parseQuota(JSON.stringify({ error: { code: 429,
+    message: 'Quota exceeded for metric: x, limit: 0, model: gemini-x-pro. Please retry in 12.5s.' } }));
+  assert.strictEqual(q.scope, 'none');
+  assert.strictEqual(q.model, 'gemini-x-pro');
+  assert.strictEqual(q.retryDelaySec, 13);
+  // 流式端点有时回数组形状
+  assert.strictEqual(I.parseQuota('[' + DAY + ']').scope, 'day');
+});
+t('parseQuota：非配额错误、坏 JSON 一律 null', function () {
+  assert.strictEqual(I.parseQuota(''), null);
+  assert.strictEqual(I.parseQuota('<html>429</html>'), null);
+  assert.strictEqual(I.parseQuota(JSON.stringify({ error: { code: 429, message: 'Resource has been exhausted' } })), null);
+});
+t('分类：每日/额度为 0 不重试、不说成过载；每分钟照旧重试', function () {
+  var day = { status: 429, quota: I.parseQuota(DAY) };
+  var min = { status: 429, quota: I.parseQuota(MIN) };
+  var none = { status: 429, quota: { scope: 'none' } };
+  assert.ok(!I.isTransient(day) && !I.isTransient(none), '额度用完重试只会再耗配额');
+  assert.ok(!I.isOverloaded(day), '额度用完不是服务方过载');
+  assert.ok(I.isHardQuota(day) && I.isHardQuota(none) && !I.isHardQuota(min));
+  assert.ok(I.isTransient(min) && I.isOverloaded(min));
+  assert.ok(/今日配额用尽/.test(I.reasonOf(day)));
+  assert.ok(/每分钟/.test(I.reasonOf(min)));
+});
+t('重置时刻：太平洋时间午夜，换算到本机（含夏令时）', function () {
+  // 2026-10-14 03:16Z = PDT 20:16，距午夜 3h44m → 07:00Z
+  var r = I.quotaResetLocal(new Date('2026-10-14T03:16:00Z'));
+  assert.strictEqual(r.at.toISOString(), '2026-10-14T07:00:00.000Z');
+  // 冬令时 PST = UTC-8：2026-01-10 20:00Z = PST 12:00 → 午夜在 2026-01-11 08:00Z
+  assert.strictEqual(I.quotaResetLocal(new Date('2026-01-10T20:00:00Z')).at.toISOString(), '2026-01-11T08:00:00.000Z');
+});
+t('quotaText：说出模型、上限、quotaId 与何时恢复', function () {
+  var s = I.quotaText(I.parseQuota(DAY));
+  ['gemini-3.8-flash', '今日', '上限 20', 'GenerateRequestsPerDayPerProjectPerModel-FreeTier', '太平洋时间午夜'].forEach(function (k) {
+    assert.ok(s.indexOf(k) >= 0, '缺「' + k + '」：' + s);
+  });
+  assert.ok(/1 秒后再试/.test(I.quotaText(I.parseQuota(MIN))));
+});
+t('备用模型与主选同名不入链（同一份额度，必然同败）', function () {
+  assert.strictEqual(I.buildChain({ provider: 'gemini', geminiModel: 'm1', geminiFallbackModel: 'm1' }).length, 1);
+  assert.strictEqual(I.buildChain({ provider: 'gemini', geminiFallbackModel: 'gemini-3.5-flash' }).length, 1, '主选留空即默认模型，同名亦算');
+  assert.strictEqual(I.buildChain({ provider: 'custom', customUrl: 'u', customModel: 'a', customFallbackModel: 'a' }).length, 1);
+});
+
+(function () {
+  // 数实际请求次数——「不重试」要看行为，不看算式
+  function run(cfg, responder) {
+    var n = 0, realFetch = global.fetch;
+    global.fetch = function (u) { n++; return Promise.resolve(responder(n, u)); };
+    LLM.saveCfg(cfg);
+    return LLM.chat('s', 'u').then(
+      function (txt) { global.fetch = realFetch; return { n: n, txt: txt }; },
+      function (e) { global.fetch = realFetch; return { n: n, err: e }; });
+  }
+  function rec(label, fn) {
+    return function () {
+      return Promise.resolve().then(fn).then(
+        function () { pass++; console.log('  ✓ ' + label); },
+        function (e) { fail++; console.log('  ✗ ' + label + '  ->  ' + e.message); });
+    };
+  }
+  var sse = function () {
+    return new Response('data: ' + JSON.stringify({ candidates: [{ content: { parts: [{ text: '好' }] }, finishReason: 'STOP' }] }) + '\n\n',
+      { status: 200, headers: { 'content-type': 'text/event-stream' } });
+  };
+  var day429 = function () { return new Response(DAY, { status: 429 }); };
+  // 等前面那几组跑完再开始：大家共用 global.fetch 与同一份配置，并发会互相踩
+  pending.push(Promise.all(pending.slice())
+    .then(rec('每日额度用完：只请求 1 次（修复前 4 次），报错说清原因与出路、不说「过载」', function () {
+      return run({ provider: 'gemini', geminiKey: 'K', geminiModel: 'gemini-3.8-flash', fallbackProvider: 'none' }, day429)
+        .then(function (r) {
+          assert.strictEqual(r.n, 1, '实得 ' + r.n + ' 次');
+          var m = r.err && r.err.message || '';
+          assert.ok(/今日请求额度已用完/.test(m) && /上限 20/.test(m), m);
+          assert.ok(/ai\.dev\/rate-limit/.test(m) && /备用模型/.test(m), '须给出可操作的下一步：' + m);
+          assert.ok(!/服务方临时过载/.test(m), '额度用完不是过载：' + m);
+          assert.ok(!/Quota ex$/.test(m.split('\n')[0]), '不得截在半句');
+        });
+    }))
+    .then(rec('每日额度用完：立刻交给备用模型，不在主选上空转', function () {
+      return run({ provider: 'gemini', geminiKey: 'K', geminiModel: 'gemini-3.8-flash', geminiFallbackModel: 'gemini-3.6-flash',
+        fallbackProvider: 'none' }, function (n) { return n === 1 ? day429() : sse(); })
+        .then(function (r) {
+          assert.ok(!r.err, r.err && r.err.message);
+          assert.strictEqual(r.n, 2, '主选 1 次 + 备用 1 次，实得 ' + r.n);
+          assert.strictEqual(LLM.lastUsed().model, 'gemini-3.6-flash');
+        });
+    }))
+    .then(rec('每分钟限流：仍重试，且按 RetryInfo 等待', function () {
+      var t0 = Date.now();
+      return run({ provider: 'gemini', geminiKey: 'K', geminiModel: 'm', fallbackProvider: 'none', maxRetries: 1 },
+        function (n) { return n === 1 ? new Response(MIN, { status: 429 }) : sse(); })
+        .then(function (r) {
+          assert.ok(!r.err, r.err && r.err.message);
+          assert.strictEqual(r.n, 2);
+          assert.ok(Date.now() - t0 >= 950, 'RetryInfo 给了 1s，应等满');
+        });
+    }))
+    .then(rec('自检：非流式已确认每日额度用完，流式那行不再发请求', function () {
+      var n = 0, realFetch = global.fetch;
+      global.fetch = function () { n++; return Promise.resolve(day429()); };
+      LLM.saveCfg({ provider: 'gemini', geminiKey: 'K', geminiModel: 'gemini-3.8-flash', fallbackProvider: 'none' });
+      return LLM.probe(function () {}).then(function (rows) {
+        global.fetch = realFetch;
+        assert.strictEqual(n, 1, '实发 ' + n + ' 次');
+        assert.strictEqual(rows.length, 2);
+        assert.ok(/今日请求额度已用完/.test(rows[0].detail), '结论须在最前，不被截断：' + rows[0].detail);
+        assert.ok(/未发请求/.test(rows[1].detail));
+      });
+    })));
+})();
+
 Promise.all(pending).then(function () {
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
