@@ -31,7 +31,7 @@
   'use strict';
 
   var DB = null;
-  var VERSION = '5.0.0';
+  var VERSION = '5.1.0';
   var MAX_ANCHORS = 12;   // 应期锚点不宜多：候选越多越等于没给答案
 
   /* 单位 → 四柱中的哪一柱。同一个支在不同柱上各读一次，故位次也各按各柱起算。 */
@@ -285,7 +285,10 @@
       var tg = targetsAt(targets, gong);
       // 强弱＝机制与用神的关系，非打分。级别由规则库显式声明（mechanism.onTarget），
       // 不由描述字段的有无去推断——落到用神宫才谈得上强弱，否则一律 low。
-      var strength = tg.length ? (m.onTarget || 'medium') : 'low';
+      // v5.1：onTargetBySchool 允许某派单独降级（冲实只在转盘经检验降级，飞盘维持原级）；
+      // fixedStrength 用于经前瞻检验通过、不以是否落用神宫论强弱的机制（应期融合）。
+      var onT = (m.onTargetBySchool && m.onTargetBySchool[school]) || m.onTarget || 'medium';
+      var strength = m.fixedStrength || (tg.length ? onT : 'low');
       // 伏吟局中马星升格：纲要既言「静中以马星为动机」，则此盘之动机全系于马星一条。
       // 只在落用神宫（已谈得上强弱）时升，且只升 medium→high，不无中生有。
       var raised = '';
@@ -302,7 +305,8 @@
         id: mechName + ':' + value + '@' + (gong || '-') + '#' + (seq++),
         mechanism: mechName, label: m.label || mechName,
         kind: kind, value: value, display: value + '日',
-        unit: unit, why: tg.length ? (m.onTargetWhy || '') : '所指之宫非本占用神宫',
+        unit: unit, why: (m.fixedStrength || tg.length) ? (m.onTargetWhy || '') : '所指之宫非本占用神宫',
+        fixed: !!m.fixedStrength,
         raisedBy: raised,
         gong: gong ? String(gong) : '',
         targets: tg, weight: maxWeight(tg), strength: strength,
@@ -313,6 +317,15 @@
         basis: m.basis || '', caution: m.caution || '',
         note: (extra && extra.note) || ''
       });
+    }
+
+    /* ---------- ⓪ 应期融合法 v1（仅转盘；前瞻检验通过，列为首选） ----------
+     * 支取自 yingqi.fusion（同一份 yingqi 计算），本层不另推。 */
+    if (enabled('应期融合') && yq.fusion && (yq.fusion.picks || []).length) {
+      var fp = yq.fusion.parts || {};
+      var voteNote = '得 ' + yq.fusion.maxVotes + ' 票（三票：填实[' + (fp['填实'] || []).join('') + ']、值符宫支合[' +
+        (fp['值符宫支合'] || []).join('') + ']、克用神(' + (yq.fusion.yName || '') + ')宫之支[' + (fp['克用神宫之支'] || []).join('') + ']）';
+      yq.fusion.picks.forEach(function (z) { push('应期融合', z, '', { note: voteNote }); });
     }
 
     /* ---------- ① 空亡 → 填实 / 冲实（纲要：须待填实/冲实之时方应） ---------- */
@@ -369,6 +382,7 @@
 
     /* ---------- ⑥ 排序：先按强弱，再按用神权重，最后按距今位次（同分以 id 稳定） ---------- */
     out.sort(function (a, b) {
+      if (a.fixed !== b.fixed) return a.fixed ? -1 : 1;   // 经前瞻检验的融合法恒居首
       var sa = STRENGTH_RANK[a.strength] || 0, sb = STRENGTH_RANK[b.strength] || 0;
       if (sa !== sb) return sb - sa;
       if (a.weight !== b.weight) return b.weight - a.weight;
@@ -504,6 +518,15 @@
         '问「这两三个月」就断月；问「今年明年」「哪一年」就断年。同一批锚点按哪一级读，答案就落在哪一级——' +
         '不要一律断成某日，也不要因为用户问的是远事就说「本盘只能断日」。');
       if (res.horizon.caution) L.push('  ⚠ ' + res.horizon.caution);
+    }
+
+    /* ---- 应期融合法：唯一经前瞻检验通过的取期法，先摆出来 ---- */
+    var fus = res.anchors.filter(function (a) { return a.mechanism === '应期融合'; });
+    if (fus.length) {
+      L.push('· 【应期融合法·首选】' + fus.map(function (a) { return a.value + '日'; }).join('、') + '　' + (fus[0].note || ''));
+      L.push('  这是本仓唯一经前瞻盲测通过的取期法（2026-10-14：13 例命中 7，瞎猜期望 3.25，约 2 倍）。' +
+        '断日时先取此，再看其余锚点有无更贴本事者；并列之支都列出，不要只挑一支冒充唯一答案。' +
+        '冲实、马星两法前瞻检验低于瞎猜，在转盘已降为参考级。');
     }
 
     /* ---- 锚点：每条给出机制原文所许的单位，与由远近推及的其余单位 ---- */

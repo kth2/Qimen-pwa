@@ -41,7 +41,7 @@ function run(chart, domain, opts) {
   var ws = WS.analyze(chart);
   var xy = opts.noXiangyi ? null : XY.analyze({ domain: domain || 'wealth', chart: chart, wangshuai: ws, options: opts.xyOptions });
   var gongs = xy && xy.applicable ? xy.focus.map(function (f) { return f.gong; }) : (opts.yongShenGongs || []);
-  var yq = opts.noYingqi ? null : YQ.analyze(chart, { yongShenGongs: gongs });
+  var yq = opts.noYingqi ? null : YQ.analyze(chart, { yongShenGongs: gongs, domain: domain || 'wealth' });
   return TM.analyze({
     chart: chart, yingqi: yq, xiangyi: xy, wangshuai: opts.noWangshuai ? null : ws,
     options: { domain: domain || 'wealth', school: opts.school, yongShenGongs: opts.yongShenGongs }
@@ -110,6 +110,7 @@ t('每个锚点的干支都出自 yingqi，未自造日辰', function () {
     (yq.kongWang.chongShi || []).forEach(function (d) { okZhi[d.charAt(0)] = 1; });
     (yq.ruMu || []).forEach(function (m) { okZhi[m.chongMu.charAt(0)] = 1; });
     if (yq.maXing && yq.maXing.zhi) okZhi[yq.maXing.zhi] = 1;
+    ((yq.fusion && yq.fusion.picks) || []).forEach(function (z) { okZhi[z] = 1; });
     Object.keys(yq.gongGan || {}).forEach(function (g) {
       okGan[yq.gongGan[g].tianGan] = 1; okGan[yq.gongGan[g].diGan] = 1;
     });
@@ -172,12 +173,13 @@ t('强弱级别由规则库显式声明，不由描述字段推断', function ()
   SAMPLES.forEach(function (c) {
     run(c, 'wealth').anchors.forEach(function (a) {
       var m = RULES.mechanisms[a.mechanism];
-      var expect = a.targets.length ? m.onTarget : 'low';
+      var onT = (m.onTargetBySchool && m.onTargetBySchool.zhuanpan) || m.onTarget;
+      var expect = m.fixedStrength || (a.targets.length ? onT : 'low');
       assert.strictEqual(a.strength, expect, a.id + ' 强弱应为 ' + expect);
     });
   });
 });
-t('落在用神宫的填实/冲实/冲墓为 high，宫干定日与马星为 medium', function () {
+t('落在用神宫的填实/冲墓为 high，宫干定日为 medium；转盘下冲实、马星经前瞻检验降为 low', function () {
   var seen = {};
   SAMPLES.forEach(function (c) {
     run(c, 'wealth').anchors.forEach(function (a) {
@@ -185,11 +187,14 @@ t('落在用神宫的填实/冲实/冲墓为 high，宫干定日与马星为 med
       seen[a.mechanism] = a.strength;
     });
   });
-  ['填实', '冲实', '冲墓'].forEach(function (k) {
+  ['填实', '冲墓'].forEach(function (k) {
     if (seen[k]) assert.strictEqual(seen[k], 'high', k + ' 落用神宫应为 high');
   });
-  ['宫干定日', '马星'].forEach(function (k) {
+  ['宫干定日'].forEach(function (k) {
     if (seen[k]) assert.strictEqual(seen[k], 'medium', k + ' 应为 medium（非解开某一害）');
+  });
+  ['冲实', '马星'].forEach(function (k) {
+    if (seen[k]) assert.strictEqual(seen[k], 'low', k + ' 在转盘已降为次要（2026-10-14 前瞻检验低于瞎猜）');
   });
   assert.ok(Object.keys(seen).length >= 3, '样本应覆盖多种机制，实得 ' + Object.keys(seen).join('/'));
 });
@@ -197,7 +202,7 @@ t('非用神宫的锚点一律 low，且如实标注', function () {
   var got = 0;
   SAMPLES.forEach(function (c) {
     run(c, 'wealth').anchors.forEach(function (a) {
-      if (a.targets.length) return;
+      if (a.targets.length || a.fixed) return;   // 应期融合不以落宫论强弱，另有专测
       got++;
       assert.strictEqual(a.strength, 'low');
       assert.ok(/非本占用神宫/.test(a.why), '非用神宫锚点须说明缘由：' + a.why);
@@ -264,6 +269,8 @@ t('anchors 按强弱→权重→位次排序（与 timeline 各司其职）', fu
     var an = run(c, 'wealth').anchors;
     for (var i = 1; i < an.length; i++) {
       var a = an[i - 1], b = an[i];
+      assert.ok(!(b.fixed && !a.fixed), '应期融合须居首：' + b.id + ' 排在 ' + a.id + ' 之后');
+      if (a.fixed !== b.fixed) continue;
       var sa = RANK[a.strength], sb = RANK[b.strength];
       assert.ok(sa > sb || (sa === sb && (a.weight > b.weight ||
         (a.weight === b.weight && ((a.offset == null ? 99 : a.offset) <= (b.offset == null ? 99 : b.offset))))),
@@ -378,8 +385,53 @@ t('既无 xiangyi 又无 yongShenGongs 时，锚点全记参考级并留痕', fu
   var yq = YQ.analyze(CHART, {});
   var r = TM.analyze({ chart: CHART, yingqi: yq, options: {} });
   assert.strictEqual(r.targetSource, '');
-  r.anchors.forEach(function (a) { assert.strictEqual(a.strength, 'low'); });
+  r.anchors.forEach(function (a) { if (!a.fixed) assert.strictEqual(a.strength, 'low'); });
   assert.ok(r.notes.some(function (n) { return /参考级/.test(n); }), '须留痕说明无法排主次');
+});
+
+console.log('== 应期融合法 v1（转盘；2026-10-14 前瞻检验通过） ==');
+t('三票各自取法正确：填实＝空亡支，值符宫支合＝值符宫地支之六合，克用神宫之支＝克该宫五行之支', function () {
+  var HE = { 子: '丑', 丑: '子', 寅: '亥', 亥: '寅', 卯: '戌', 戌: '卯', 辰: '酉', 酉: '辰', 巳: '申', 申: '巳', 午: '未', 未: '午' };
+  var checked = 0;
+  SAMPLES.forEach(function (c) {
+    var f = YQ.analyze(c, { domain: 'wealth' }).fusion;
+    assert.ok(f, '转盘应有融合结果');
+    assert.deepStrictEqual(f.parts['填实'].slice().sort(), (c.kongWangZhi || []).filter(function (z, i, a) { return a.indexOf(z) === i; }).sort());
+    var want = (YQ.GONG_ZHI[String(c.zhiFuGong)] || []).map(function (z) { return HE[z]; });
+    assert.deepStrictEqual(f.parts['值符宫支合'].slice().sort(), want.sort());
+    assert.strictEqual(f.yName, '生门');
+    // 票数最高者全取
+    var max = Math.max.apply(null, f.picks.map(function (z) { return f.votes[z]; }));
+    Object.keys(f.votes).forEach(function (z) { assert.ok(f.votes[z] <= max); if (f.votes[z] === max) assert.ok(f.picks.indexOf(z) >= 0, z + ' 与最高票并列却未取'); });
+    checked++;
+  });
+  assert.ok(checked > 50);
+});
+t('回归：前瞻检验中的命中例照样取到（同一实现，非事后改写）', function () {
+  // 2026-09-14 14:35 风水（签合同）实应辰日；2025-08-14 22:47 综合（面试通知）实应己未日
+  var a = YQ.analyze(QM.qimen.calculate(new Date(2026, 8, 14, 14, 35), { type: '四柱', method: '时家', purpose: '综合' }), { domain: 'fengshui' }).fusion;
+  assert.deepStrictEqual(a.picks, ['辰']);
+  var b = YQ.analyze(QM.qimen.calculate(new Date(2025, 7, 14, 22, 47), { type: '四柱', method: '时家', purpose: '综合' }), { domain: 'general' }).fusion;
+  assert.deepStrictEqual(b.picks, ['未']);
+});
+t('转盘：融合锚点恒为 high 且排在最前，提示词先列「应期融合法·首选」', function () {
+  var r = run(CHART, 'wealth');
+  var fus = r.anchors.filter(function (a) { return a.mechanism === '应期融合'; });
+  assert.ok(fus.length > 0, '转盘应出融合锚点');
+  fus.forEach(function (a) { assert.strictEqual(a.strength, 'high'); assert.strictEqual(a.kind, 'zhi'); });
+  assert.strictEqual(r.anchors[0].mechanism, '应期融合');
+  assert.ok(/【应期融合法·首选】/.test(TM.toPromptBlock(r)));
+});
+t('零串味：飞盘不出融合票，也不出融合锚点', function () {
+  var fp = Object.assign({}, CHART, { renPanMen: { '1': '休门' } });
+  assert.strictEqual(YQ.analyze(fp, { domain: 'wealth' }).fusion, null);
+  var r = run(fp, 'wealth', { school: 'feipan', noXiangyi: true, yongShenGongs: ['1'] });
+  assert.ok(!r.anchors.some(function (a) { return a.mechanism === '应期融合'; }));
+});
+t('飞盘下冲实维持原级（降级只据转盘检验，不推及飞盘）', function () {
+  assert.strictEqual(RULES.mechanisms['冲实'].onTarget, 'high');
+  assert.strictEqual(RULES.mechanisms['冲实'].onTargetBySchool.zhuanpan, 'low');
+  assert.ok(!RULES.mechanisms['冲实'].onTargetBySchool.feipan);
 });
 
 console.log('== 确定性与防御性 ==');

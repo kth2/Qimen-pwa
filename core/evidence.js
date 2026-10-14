@@ -483,7 +483,8 @@
       else if (x.type === 'TIMING') {
         times.push('  - [' + (STR[x.strength] || '') + '] ' + x.label + '：' + x.value +
           (x.gong ? '　(' + x.gong + '宫)' : '') +
-          (x.targets.length ? '　用神：' + x.targets.join('、') : '　（非用神宫）') +
+          (x.mechanism === '应期融合' ? '　〔首选·前瞻检验通过〕'
+            : (x.targets.length ? '　用神：' + x.targets.join('、') : '　（非用神宫）')) +
           (x.content.length ? '　—— ' + x.content.join('') : ''));
         // 四级读法另起一行。〔推及〕＝该法原文只写了日，这一级是由「近事看日时、中事看月、
         // 远事看年」推来的——标出来，才不至于把断法悄悄推广到纲要没说的地方。
@@ -853,6 +854,11 @@
           '问哪一年就断年。同一批锚点按哪一级读，答案就落在哪一级，不要一律断成某日；' +
           '也不要因为用户问的是远事，就说「本盘只能断日」。');
         if (tmi.horizon.caution) L.push('  ⚠ ' + tmi.horizon.caution);
+      }
+      if (ev.items.some(function (x) { return x.type === 'TIMING' && x.mechanism === '应期融合'; })) {
+        L.push('  · 【应期融合法·首选】标「应期融合法」的几条，是本仓唯一经前瞻盲测通过的取期法' +
+          '（2026-10-14：13 例命中 7，瞎猜期望 3.25，约 2 倍）。断日先取它；并列之支都列出，不要只挑一支冒充唯一答案。' +
+          '冲实、马星两法同一检验低于瞎猜，在转盘只作参考。');
       }
       L = L.concat(times);
       L.push('  · 单位出处：无标记者＝该法在纲要里就写明了这一级（马星「之日/月」、转盘冲墓「之年月日时」、' +
