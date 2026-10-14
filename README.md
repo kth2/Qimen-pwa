@@ -3947,3 +3947,7 @@ CACHE → `qimen-pwa-fangxiang`。
 - `app.js`：把占类传给 `YingQi.analyze`。
 
 样本只有 13 例，置信区间很宽；下一份导出照样按同一口径记命中，若跌回 1.0× 以下，再议降级。
+
+全量 38 个测试文件全绿。Chromium 实测：页面载入无脚本错误（唯一的 404 是早已缺失的 `assets/icon-192.png`，与本期无关），`YingQi.analyze` 在浏览器内对 2026-10-06 借钱一盘给出融合票寅、卯。
+
+CACHE → `qimen-pwa-ronghe`。
