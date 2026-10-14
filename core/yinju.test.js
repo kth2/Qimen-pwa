@@ -387,18 +387,21 @@ function timingFor(iso, withYinju, domain) {
   if (withYinju) args.yinju = Y.analyze({ chart: p });
   return TM.analyze(args);
 }
-t('传入伏吟后，落用神宫的马星锚点由中升为高', function () {
-  // 扫出一张「见伏吟 且 马星落用神宫」的盘，若全无则本测无从验证，应显式失败
-  var t0 = new Date('2026-01-01T00:00:00').getTime(), found = null;
-  for (var i = 0; i < 800 && !found; i++) {
+t('马星已降为次要（2026-10-14 前瞻检验 0.92×）：伏吟局中也不再升格', function () {
+  // 原测「伏吟时马星由中升高」。马星在转盘降为 low 后，升格条件（须先为 medium）不再成立——
+  // 这是有意为之：纲要「静中以马星为动机」一句经案例检验低于瞎猜，不宜再把它抬到首位。
+  var t0 = new Date('2026-01-01T00:00:00').getTime(), seen = 0;
+  for (var i = 0; i < 800; i++) {
     var iso = new Date(t0 + i * 3600 * 1000 * 3).toISOString();
-    var a = timingFor(iso, false), b = timingFor(iso, true);
-    var ma = a.anchors.filter(function (x) { return x.mechanism === '马星'; })[0];
-    var mb = b.anchors.filter(function (x) { return x.mechanism === '马星'; })[0];
-    if (ma && mb && ma.strength === 'medium' && mb.strength === 'high') found = { iso: iso, a: ma, b: mb };
+    var b = timingFor(iso, true);
+    b.anchors.forEach(function (x) {
+      if (x.mechanism !== '马星') return;
+      seen++;
+      assert.notStrictEqual(x.strength, 'high', '马星降级后不得再被伏吟抬为 high');
+      assert.ok(!x.raisedBy, '降级后不应再有升格说明');
+    });
   }
-  assert.ok(found, '八百盘内未找到「伏吟且马星临用神宫」之盘，此接线无从验证');
-  assert.ok(/伏吟主静/.test(found.b.raisedBy), '升格必须写明缘由，实得：' + found.b.raisedBy);
+  assert.ok(seen > 0, '应至少验到若干马星锚点');
 });
 t('不见伏吟之盘，马星不被抬升', function () {
   var t0 = new Date('2026-02-01T00:00:00').getTime(), checked = 0;

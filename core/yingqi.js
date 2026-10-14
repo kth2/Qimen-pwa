@@ -37,6 +37,51 @@
   var MU_GONG_ZHI = { '6': '戌', '2': '未', '8': '丑', '4': '辰' };
   var MA_ZHI = ['寅', '申', '巳', '亥'];
 
+  /* ---------- 应期融合法 v1（转盘专用；2026-10-14 前瞻检验通过） ----------
+   * 规格：claude/应期融合法v1-冻结规格.md。三法等权投票，取得票最多之支（并列全取）：
+   *   ① 填实：本盘空亡二支；
+   *   ② 值符宫支合：值符落宫所含地支（隅宫两支）各取其六合支；
+   *   ③ 克用神宫之支：五行能克用神落宫五行的地支。用神按占类：求财/风水/产育/健康取生门，
+   *      事业/官司/行人取开门，学业取景门，感情/寻人取六合，其余取时干；落中五则此票不投。
+   * 前瞻检验（2026-10-08 之后录入、实况写明日子的 13 例）：命中 7，瞎猜期望 3.25，2.15×，单侧 p=0.015。
+   * 只在转盘启用：检验数据全是转盘，不推及飞盘（零串味）。 */
+  var LIU_HE = { '子': '丑', '丑': '子', '寅': '亥', '亥': '寅', '卯': '戌', '戌': '卯', '辰': '酉', '酉': '辰', '巳': '申', '申': '巳', '午': '未', '未': '午' };
+  var ZHI_ORDER = ['子', '丑', '寅', '卯', '辰', '巳', '午', '未', '申', '酉', '戌', '亥'];
+  var ZHI_WX = { '寅': '木', '卯': '木', '巳': '火', '午': '火', '申': '金', '酉': '金', '亥': '水', '子': '水', '辰': '土', '戌': '土', '丑': '土', '未': '土' };
+  var GONG_WX = { '1': '水', '2': '土', '3': '木', '4': '木', '5': '土', '6': '金', '7': '金', '8': '土', '9': '火' };
+  var KE = { '木': '土', '土': '水', '水': '火', '火': '金', '金': '木' };
+  var FUSION_Y = { wealth: '生门', fengshui: '生门', pregnancy: '生门', health: '生门',
+    career: '开门', lawsuit: '开门', traveler: '开门', study: '景门', relationship: '六合', find_person: '六合' };
+  var LIU_JIA_DUN = { '甲子': '戊', '甲戌': '己', '甲申': '庚', '甲午': '辛', '甲辰': '壬', '甲寅': '癸' };
+
+  function findGong(map, v) { for (var k in (map || {})) if (map[k] === v) return String(k); return ''; }
+  function fusionYGong(pan, domain) {
+    var y = FUSION_Y[domain];
+    if (y && /门$/.test(y)) return { name: y, gong: findGong(pan.baMen, y) };
+    if (y) return { name: y, gong: findGong(pan.baShen, y) };
+    var t = String((pan.siZhu || {}).time || ''), g = t.charAt(0);
+    if (g === '甲') return { name: '时干', gong: pan.zhiFuGong != null ? String(pan.zhiFuGong) : '' };
+    return { name: '时干', gong: findGong(pan.tianPan, g) || findGong(pan.diPan, g) };
+  }
+  /** 应期融合法 v1。飞盘、或无日柱者返回 null。 */
+  function fusionV1(pan, domain) {
+    if (!pan || pan.renPanMen || pan.tianPanYi || pan.diPanShen) return null;
+    var parts = { '填实': [], '值符宫支合': [], '克用神宫之支': [] };
+    parts['填实'] = uniq(pan.kongWangZhi || []);
+    var fg = pan.zhiFuGong != null ? String(pan.zhiFuGong) : '';
+    parts['值符宫支合'] = uniq((GONG_ZHI[fg] || []).map(function (z) { return LIU_HE[z]; }));
+    var y = fusionYGong(pan, domain || '');
+    if (y.gong && y.gong !== '5') {
+      parts['克用神宫之支'] = ZHI_ORDER.filter(function (z) { return KE[ZHI_WX[z]] === GONG_WX[y.gong]; });
+    }
+    var votes = {};
+    Object.keys(parts).forEach(function (k) { parts[k].forEach(function (z) { votes[z] = (votes[z] || 0) + 1; }); });
+    var max = 0; Object.keys(votes).forEach(function (z) { if (votes[z] > max) max = votes[z]; });
+    var picks = ZHI_ORDER.filter(function (z) { return max > 0 && votes[z] === max; });
+    return { version: '1.0.0', picks: picks, maxVotes: max, votes: votes, parts: parts,
+      yName: y.name, yGong: y.gong, zhiFuGong: fg };
+  }
+
   function chongOf(zhi) { return CHONG[zhi] || ''; }
   function heTuOf(gan) { return HE_TU[gan] || null; }
 
@@ -98,7 +143,10 @@
 
     var yong = (opts.yongShenGongs || []).map(String).filter(function (g) { return gongGan[g]; });
 
-    return { kongWang: kongWang, maXing: ma, ruMu: ruMu, gongGan: gongGan, yongShenGongs: yong, siZhu: pan.siZhu || {} };
+    // 应期融合法 v1：需知占类（定用神）。未传 domain 时按「其余」取时干，与规格一致。
+    var fusion = fusionV1(pan, opts.domain || '');
+
+    return { kongWang: kongWang, maXing: ma, ruMu: ruMu, gongGan: gongGan, yongShenGongs: yong, siZhu: pan.siZhu || {}, fusion: fusion };
   }
 
   /** 生成喂给 AI 的【应期与数字】文本块——所有干支均已算好，禁止自行臆造 */
@@ -120,6 +168,14 @@
       L.push('  - 注意：填实/冲实只能是上列这几个日辰。**不得改用天干（如戊己日）或其它地支充数。**');
     } else {
       L.push('· 本盘无空亡（不可编造空亡应期）');
+    }
+
+    // 应期融合法 v1（转盘）
+    // 只在调用方给了占类时才写：未给占类则用神无从定，避免与 TIMING 块两套说法
+    if (opts.domain && r.fusion && r.fusion.picks.length) {
+      var fp = r.fusion.parts;
+      L.push('· 应期融合法（前瞻检验通过，转盘首选）：**' + r.fusion.picks.map(function (z) { return z + '日'; }).join('、') + '**'
+        + '（得 ' + r.fusion.maxVotes + ' 票；三票＝填实[' + fp['填实'].join('') + ']、值符宫支合[' + fp['值符宫支合'].join('') + ']、克用神(' + r.fusion.yName + ')宫之支[' + fp['克用神宫之支'].join('') + ']）');
     }
 
     // 驿马
@@ -161,7 +217,7 @@
 
   return {
     CHONG: CHONG, HE_TU: HE_TU, GONG_ZHI: GONG_ZHI, MU_GONG_ZHI: MU_GONG_ZHI,
-    chongOf: chongOf, heTuOf: heTuOf,
+    chongOf: chongOf, heTuOf: heTuOf, fusionV1: fusionV1,
     analyze: analyze, toPromptBlock: toPromptBlock
   };
 });

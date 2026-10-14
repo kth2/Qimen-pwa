@@ -946,7 +946,7 @@
               const ysGongsForTiming = [...new Set([...baseGongs.map(String), ...lxGongs])];
               timing = TM.analyze({
                 chart: pan,
-                yingqi: window.YingQi.analyze(pan, { yongShenGongs: ysGongsForTiming }),
+                yingqi: window.YingQi.analyze(pan, { yongShenGongs: ysGongsForTiming, domain }),   // domain：应期融合法定用神所需
                 xiangyi, leixiang, yinju,
                 wangshuai: (window.WangShuai && window.WangShuai.analyze) ? window.WangShuai.analyze(pan) : null,
                 options: { domain, school: school === 'feipan' ? 'feipan' : 'zhuanpan', yongShenGongs: ysGongsForTiming }
