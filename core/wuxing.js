@@ -10,8 +10,15 @@
  *   · 前瞻第一批（2026-10-14 导出，33 题）52.8%（纲要引擎 47.0%、纲要盲断 47.9%），未到预定评估点；
  *   · 2026-10-16 用户决定纳入 app（〔用户所定·2026-10-16〕）。
  *
+ * 两派都用（〔用户所定·2026-10-16〕：五行生克是两派共通之理，一视同仁）。零串味守在**取用**一级：
+ *   · 转盘：我＝日干宫，事＝本占用神宫（照冻结规格 v1 的占类取法）；
+ *   · 飞盘：我＝年命宫（飞盘纲要一节「年命宫＝求测人自身」），事＝引擎按《鸣法》用神章取出的用神宫，
+ *           无专用用神时取时干宫（三乙四宫之一，「禀盘主宰」）；宫内五行取明门、天盘星、天盘仪、地盘干。
+ *           未提供年命则不断——飞盘以年命为我，不借转盘的日干代之。
+ *   · 飞盘未经案例检验（案例本只有 9 例飞盘），提示词如实写明。
+ *
  * 边界：
- *   ① 转盘专用（零串味）：飞盘盘面返回 applicable=false。
+ *   ① 取用分派，五行打分两派同一套。
  *   ② 不重算盘：宫旺衰与四害一律取自 core/wangshuai.js 的 analyze() 结果。
  *   ③ 只断是非题的方向；不管何物、何地、何时、多少。
  *   ④ 「如愿」＝事情朝求测人所盼的方向走；问的若是怕发生之事，如愿即所怕之事不发生。
@@ -59,11 +66,12 @@
     return p;
   }
   function lvl(p) { return p >= 0.8 ? '太过' : p <= 0.3 ? '不及' : '平'; }
+  function isFeipan(ch) { return !!(ch && (ch.renPanMen || ch.tianPanYi || ch.diPanShen)); }
   function innerWx(ch, g) {
-    var s = {};
-    var m = (ch.baMen || {})[g]; if (MEN_WX[m]) s[MEN_WX[m]] = 1;
-    String((ch.jiuXing || {})[g] || '').split('').forEach(function (c) { if (XING_WX[c]) s[XING_WX[c]] = 1; });
-    var t = (ch.tianPan || {})[g], d = (ch.diPan || {})[g];
+    var s = {}, fp = isFeipan(ch);
+    var m = ((fp ? ch.renPanMen : ch.baMen) || {})[g]; if (MEN_WX[m]) s[MEN_WX[m]] = 1;
+    String(((fp ? ch.tianPanXing : ch.jiuXing) || {})[g] || '').split('').forEach(function (c) { if (XING_WX[c]) s[XING_WX[c]] = 1; });
+    var t = ((fp ? ch.tianPanYi : ch.tianPan) || {})[g], d = (ch.diPan || {})[g];
     if (GAN_WX[t]) s[GAN_WX[t]] = 1; if (GAN_WX[d]) s[GAN_WX[d]] = 1;
     return s;
   }
@@ -105,17 +113,31 @@
 
   /**
    * 主入口。
-   * @param {object} a { chart, wangshuai, domain }
+   * @param {object} a { chart, wangshuai, domain, feipan? }
+   *   feipan（飞盘必传，取自引擎 feipanPredict.buildPrompt 的 context）：
+   *     { nianMingGong, shiGanGong, yongGong, yongName }
    */
   function analyze(a) {
     a = a || {};
     var ch = a.chart || {};
     var res = { version: VERSION, applicable: false, reason: '', domain: a.domain || '' };
-    if (ch.renPanMen || ch.tianPanYi || ch.diPanShen) { res.reason = '飞盘盘面：五行推理为转盘专用，本层停用。'; return res; }
     if (!a.wangshuai || !a.wangshuai.gongs) { res.reason = '缺旺衰结果，本层停用（不自行重算）。'; return res; }
-    var R = riGanGong(ch), yo = yGong(ch, a.domain || ''), Y = yo.g;
-    res.R = R; res.Y = Y; res.yName = yo.name;
-    if (!R || !Y) { res.reason = '日干宫或用神宫未见，本层弃权。'; return res; }
+    var R, Y, yName, rLabel;
+    if (isFeipan(ch)) {
+      res.school = 'feipan';
+      var f = a.feipan || {};
+      R = f.nianMingGong ? String(f.nianMingGong) : '';
+      if (!R) { res.reason = '飞盘以年命宫为我（飞盘纲要一节）；未提供年命或年命无法定宫，本层不断，不借转盘的日干代之。'; return res; }
+      if (f.yongGong) { Y = String(f.yongGong); yName = f.yongName || '用神'; }
+      else { Y = f.shiGanGong ? String(f.shiGanGong) : ''; yName = '时干'; }
+      rLabel = '年命宫';
+    } else {
+      res.school = 'zhuanpan';
+      var yo = yGong(ch, a.domain || '');
+      R = riGanGong(ch); Y = yo.g; yName = yo.name; rLabel = '日干宫';
+    }
+    res.R = R; res.Y = Y; res.yName = yName; res.rLabel = rLabel;
+    if (!R || !Y) { res.reason = rLabel + '或用神宫未见，本层弃权。'; return res; }
     var s = score(ch, a.wangshuai, R, Y);
     res.applicable = true;
     res.rName = GONG_NAME[R]; res.yGongName = GONG_NAME[Y];
@@ -130,13 +152,18 @@
     if (!r || !r.applicable) return [];
     var L = [];
     L.push('· 【五行推理 v1】本盘断：**' + r.verdict + '**（得分 ' + (r.score > 0 ? '+' : '') + r.score + '）');
-    L.push('  我＝日干宫' + r.rName + '（' + r.rWx + '，' + r.lR + '）；事＝' + r.yName + '宫' + r.yGongName +
+    L.push('  我＝' + (r.rLabel || '日干宫') + r.rName + '（' + r.rWx + '，' + r.lR + '）；事＝' + r.yName + '宫' + r.yGongName +
       '（' + r.yWx + '，' + r.lY + '）；关系：' + r.relation + '——' + r.why + '。');
     if (framingAdverse) L.push('  本问为怕发生之事：「如愿」即所怕之事**不发生**，「不如愿」即它发生。');
     L.push('  用法〔用户所定·2026-10-16〕：是非题作答须参考此断，并在理由里写明五行推理的结论；' +
       '与纲要判读相左时两者都写出来，再给出唯一答案。只管是非方向，不管何物、何地、何时、多少。');
-    L.push('  检验记录：前瞻第一批 33 题平衡准确率 52.8%（纲要引擎 47.0%）；此法断「如愿」偏多（82%，实际 58%），' +
-      '纲要则偏断不成——两者正好互补，故相左时须把两边理由都摆出来再定。');
+    if (r.school === 'feipan') {
+      L.push('  飞盘：此法以年命宫为我、以《鸣法》用神为事，与飞盘纲要「用神对年命之生克盗泄」同一路，' +
+        '另加乘侮、亢害承制、子盗母气、通关诸变。飞盘尚无案例检验（案例本只有 9 例飞盘），〔用户所定·2026-10-16〕两派一视同仁纳入。');
+    } else {
+      L.push('  检验记录：前瞻第一批 33 题平衡准确率 52.8%（纲要引擎 47.0%）；此法断「如愿」偏多（82%，实际 58%），' +
+        '纲要则偏断不成——两者正好互补，故相左时须把两边理由都摆出来再定。');
+    }
     return L;
   }
 
