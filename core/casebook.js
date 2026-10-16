@@ -568,7 +568,7 @@
       wuxing: (function () {
         var w = a.wuxing;
         if (!w || !w.version || !w.applicable) return null;
-        return { version: w.version, verdict: w.verdict, score: w.score, relation: w.relation, R: w.R, Y: w.Y, yName: w.yName };
+        return { version: w.version, school: w.school || '', verdict: w.verdict, score: w.score, relation: w.relation, R: w.R, Y: w.Y, yName: w.yName };
       })(),
       severity: (function () {
         var sv = a.severity;

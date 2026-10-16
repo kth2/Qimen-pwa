@@ -13,7 +13,7 @@
   const SG = window.ShiGe;      // 时格层（Phase 16：五不遇时／天显时格；缺则不判时格）
   const QS = window.QuShu;      // 取数层（Phase 21：河图数＋先天/后天宫数；缺则取数仍只有河图数一路）
   const FR = window.Framing;    // 问句方向（Phase 38：检出「怕发生之事」；缺则不提示，判读照旧）
-  const WX = window.WuXing;     // 五行推理（Phase 40：是非方向另一路断语；转盘专用，缺则不提示）
+  const WX = window.WuXing;     // 五行推理（Phase 40/41：是非方向另一路断语；两派都用、取用分派，缺则不提示）
   const MD = window.MdLite;     // 极简 Markdown 渲染（Phase 25；缺则答案退回纯文本，功能不受影响）
   const CB = window.Casebook;   // 案例本·经验层（Phase 5；只统计与建议，绝不改写教义规则）
   const CSTORE = window.CaseStore;
@@ -1053,10 +1053,17 @@
             try { framing = FR.detect(q); }
             catch (fe) { console.warn('[framing] 检问句方向失败，本次不提示：', fe.message); framing = null; }
           }
-          // 五行推理（Phase 40）：转盘专用，旺衰取自 wangshuai 同一份分析。
+          // 五行推理（Phase 40/41）：两派都用，取用分派——转盘我＝日干宫；飞盘我＝年命宫、事＝引擎《鸣法》用神宫。
+          // 旺衰取自 wangshuai 同一份分析。
           let wuxing = null;
-          if (WX && school !== 'feipan') {
-            try { wuxing = WX.analyze({ chart: pan, wangshuai: (window.WangShuai && window.WangShuai.analyze) ? window.WangShuai.analyze(pan) : null, domain }); }
+          if (WX) {
+            const ctx = prompt.context || {};
+            const fpLoc = ((ctx.yong && ctx.yong.located) || [])[0] || null;
+            const feipanCtx = school === 'feipan' ? {
+              nianMingGong: ctx.sanyi && ctx.sanyi.nianMingGong, shiGanGong: ctx.sanyi && ctx.sanyi.shiGanGong,
+              yongGong: fpLoc && fpLoc.gong, yongName: fpLoc && fpLoc.name
+            } : null;
+            try { wuxing = WX.analyze({ chart: pan, wangshuai: (window.WangShuai && window.WangShuai.analyze) ? window.WangShuai.analyze(pan) : null, domain, feipan: feipanCtx }); }
             catch (we) { console.warn('[wuxing] 五行推理失败，本次不含：', we.message); wuxing = null; }
           }
           const evidence = EV.build({

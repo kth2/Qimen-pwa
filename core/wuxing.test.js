@@ -4,7 +4,7 @@
  *
  * 守住四件事：
  *   ① 与冻结规格《五行推理断法 v1》逐条一致（影子跟踪所用实现同一断语，471 盘已对拍）；
- *   ② 转盘专用：飞盘不出断语（零串味）；
+ *   ② 两派都用、取用分派：转盘我＝日干宫；飞盘我＝年命宫、事＝引擎《鸣法》用神宫，无年命不断；
  *   ③ 不重算旺衰：缺 wangshuai 即停用；
  *   ④ 进证据包：提示词里有【五行推理 v1】一段，怕发生之事另加换算一句。
  */
@@ -62,11 +62,45 @@ t('同盘同占类两次调用完全一致', function () {
 });
 
 console.log('== 边界 ==');
-t('飞盘不出断语（零串味）', function () {
-  var ch = Object.assign({}, cast(2026, 10, 6, 1, 14), { renPanMen: { '1': '休门' } });
-  var r = WX.analyze({ chart: ch, wangshuai: WS.analyze(cast(2026, 10, 6, 1, 14)), domain: 'wealth' });
+function feipan() { return QM.feipanQimen.calculate(new Date(2026, 9, 6, 1, 14), { method: '时家', purpose: '财运' }); }
+function fpCtx(ch, nm) {
+  var p = QM.feipanPredict.buildPrompt(ch, '向舅妈借钱会不会借', { nianMingGan: nm });
+  var loc = (p.context.yong.located || [])[0] || null;
+  return { nianMingGong: p.context.sanyi.nianMingGong, shiGanGong: p.context.sanyi.shiGanGong,
+    yongGong: loc && loc.gong, yongName: loc && loc.name };
+}
+t('飞盘：我＝年命宫、事＝引擎《鸣法》用神宫（求财取生门），出断语', function () {
+  var ch = feipan(), ctx = fpCtx(ch, '庚');
+  var r = WX.analyze({ chart: ch, wangshuai: WS.analyze(ch), domain: 'wealth', feipan: ctx });
+  assert.ok(r.applicable, r.reason);
+  assert.strictEqual(r.school, 'feipan');
+  assert.strictEqual(r.rLabel, '年命宫');
+  assert.strictEqual(r.R, String(ctx.nianMingGong));
+  assert.strictEqual(r.yName, '生门'); assert.strictEqual(r.Y, String(ctx.yongGong));
+  assert.ok(['如愿', '不如愿', '不定'].indexOf(r.verdict) >= 0);
+  assert.ok(r.lines.some(function (l) { return /飞盘尚无案例检验/.test(l); }), '飞盘须如实写明未经检验');
+});
+t('飞盘：未提供年命则不断，不借转盘日干代之', function () {
+  var ch = feipan();
+  var r = WX.analyze({ chart: ch, wangshuai: WS.analyze(ch), domain: 'wealth', feipan: fpCtx(ch, '') });
   assert.strictEqual(r.applicable, false);
-  assert.ok(/飞盘/.test(r.reason));
+  assert.ok(/年命/.test(r.reason) && /不借转盘/.test(r.reason));
+});
+t('飞盘：无专用用神时，事取时干宫（三乙四宫之一）', function () {
+  var ch = feipan(), ctx = fpCtx(ch, '庚'); ctx.yongGong = null; ctx.yongName = null;
+  var r = WX.analyze({ chart: ch, wangshuai: WS.analyze(ch), domain: 'general', feipan: ctx });
+  assert.ok(r.applicable);
+  assert.strictEqual(r.yName, '时干'); assert.strictEqual(r.Y, String(ctx.shiGanGong));
+});
+t('飞盘宫内五行取明门、天盘星、天盘仪、地盘干（通关/承制据此）', function () {
+  var ch = feipan();
+  // 构造：只看 innerWx 是否读飞盘字段——借 score 的通关分支间接验证
+  var ws = WS.analyze(ch), any = false;
+  for (var g = 1; g <= 9; g++) for (var h = 1; h <= 9; h++) {
+    var s = WX.score(ch, ws, String(g), String(h));
+    if (/通关/.test(s.why) || /承制/.test(s.why)) any = true;
+  }
+  assert.ok(any, '飞盘九宫两两配对中应至少出现一次通关或承制（证明宫内五行确有读到）');
 });
 t('缺 wangshuai 即停用，不自行重算旺衰', function () {
   var r = WX.analyze({ chart: cast(2026, 10, 6, 1, 14), domain: 'wealth' });
