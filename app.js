@@ -13,6 +13,7 @@
   const SG = window.ShiGe;      // 时格层（Phase 16：五不遇时／天显时格；缺则不判时格）
   const QS = window.QuShu;      // 取数层（Phase 21：河图数＋先天/后天宫数；缺则取数仍只有河图数一路）
   const FR = window.Framing;    // 问句方向（Phase 38：检出「怕发生之事」；缺则不提示，判读照旧）
+  const WX = window.WuXing;     // 五行推理（Phase 40：是非方向另一路断语；转盘专用，缺则不提示）
   const MD = window.MdLite;     // 极简 Markdown 渲染（Phase 25；缺则答案退回纯文本，功能不受影响）
   const CB = window.Casebook;   // 案例本·经验层（Phase 5；只统计与建议，绝不改写教义规则）
   const CSTORE = window.CaseStore;
@@ -866,7 +867,7 @@
       // 按次作用域收集本轮的结构化产物。**不能靠 window._xiangyi 之类的全局量**：
       // 知识库加载失败或证据构建抛错时那些全局量不会被更新，仍留着上一次解读的值，
       // 存案例就会把「别的盘」的象义记进这一条里——统计从此全错。
-      const runOut = { yongshen: null, xiangyi: null, timing: null, leixiang: null, severity: null, qushu: null, evidence: null, domain: '' };
+      const runOut = { yongshen: null, xiangyi: null, timing: null, leixiang: null, severity: null, qushu: null, wuxing: null, evidence: null, domain: '' };
       window._evidence = window._xiangyi = window._timing = window._leixiang = window._severity = null;   // 先清干净，宁可为空也不串盘
       if (await loadKnowledge()) {
         try {
@@ -1052,13 +1053,20 @@
             try { framing = FR.detect(q); }
             catch (fe) { console.warn('[framing] 检问句方向失败，本次不提示：', fe.message); framing = null; }
           }
+          // 五行推理（Phase 40）：转盘专用，旺衰取自 wangshuai 同一份分析。
+          let wuxing = null;
+          if (WX && school !== 'feipan') {
+            try { wuxing = WX.analyze({ chart: pan, wangshuai: (window.WangShuai && window.WangShuai.analyze) ? window.WangShuai.analyze(pan) : null, domain }); }
+            catch (we) { console.warn('[wuxing] 五行推理失败，本次不含：', we.message); wuxing = null; }
+          }
           const evidence = EV.build({
-            question: q, domain, chart: pan, yongshen, xiangyi, timing, leixiang, severity, converge, yinju, geju, shige, qushu, calibration, categoryMap: catMap, framing,
+            question: q, domain, chart: pan, yongshen, xiangyi, timing, leixiang, severity, converge, yinju, geju, shige, qushu, calibration, categoryMap: catMap, framing, wuxing,
             wangshuai: wsBlock, yingqi: yqBlock
           });
           runOut.yongshen = yongshen; runOut.xiangyi = xiangyi;
           runOut.timing = timing; runOut.leixiang = leixiang; runOut.severity = severity;
           runOut.yinju = yinju; runOut.geju = geju; runOut.shige = shige; runOut.qushu = qushu;
+          runOut.wuxing = wuxing; window._wuxing = wuxing;   // 核对五行推理断了什么
           // converge 此前一直漏在这里没赋值：_lastReading 取的是 runOut.converge，
           // 于是自 Phase 13 起**每一条存下的案例其 converge 都是 null**——
           // 「说是 A 级的后来对了几成」这条校准曲线因此从未有过数据。
@@ -1109,6 +1117,7 @@
           // 取数层同理：不存，「宫数入候选之后数字题是不是更准」就永远考核不了——
           // 而这正是本层唯一还欠着的那个问题。
           qushu: runOut.qushu,
+          wuxing: runOut.wuxing,             // Phase 40：存下五行断语，日后才算得出它在 app 里准不准
           answer: String(answer || '').slice(0, 8000),
           // 哪个模型答的。取 LLM.lastUsed() 而非 LLM.info()——备用链接管时后者仍报主选那一路，
           // 拿它记账会把「Gemini 过载、自定义端点接的班」记成 Gemini。

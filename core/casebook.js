@@ -564,6 +564,12 @@
           })
         };
       })(),
+      // 五行推理快照（Phase 40）：存断语与得分，日后才考核得了它在 app 里的准确率。
+      wuxing: (function () {
+        var w = a.wuxing;
+        if (!w || !w.version || !w.applicable) return null;
+        return { version: w.version, verdict: w.verdict, score: w.score, relation: w.relation, R: w.R, Y: w.Y, yName: w.yName };
+      })(),
       severity: (function () {
         var sv = a.severity;
         if (!sv || !sv.version || !sv.applicable) return null;

@@ -38,6 +38,8 @@ GitHub Pages 静态托管。支持 **时家奇门**（转盘 / 飞盘）与 **�
 | `core/evidence.js` | **证据包核心（纯函数、可移植）**，见「结构化推理层」 |
 | `core/evidence.test.js` | 证据包单元测试（`node core/evidence.test.js`） |
 | `core/framing.js` | **问句方向核心（纯函数、可移植）**：检出「怕发生之事」，见 Phase 38 |
+| `core/wuxing.js` | **五行推理核心（纯函数、可移植）**：乘侮、亢害承制、母子相及、通关，断是非方向，转盘专用，见 Phase 40 |
+| `core/wuxing.test.js` | 五行推理单元测试（`node core/wuxing.test.js`） |
 | `core/framing.test.js` | Phase 38 回归测试（`node core/framing.test.js`） |
 | `core/reconciliation.test.js` | 用神归属与两派隔离回归测试（`node core/reconciliation.test.js`） |
 | `knowledge/symbols.json` | 结构化象义知识库（五行/八卦/九宫/天干/九星/八门/八神），**与占类无关** |
@@ -3951,3 +3953,24 @@ CACHE → `qimen-pwa-fangxiang`。
 全量 38 个测试文件全绿。Chromium 实测：页面载入无脚本错误（唯一的 404 是早已缺失的 `assets/icon-192.png`，与本期无关），`YingQi.analyze` 在浏览器内对 2026-10-06 借钱一盘给出融合票寅、卯。
 
 CACHE → `qimen-pwa-ronghe`。
+
+## Phase 40：五行推理 v1 纳入 app——是非题的另一路断语
+
+〔用户所定·2026-10-16〕：用户决定不再等影子跟踪的评估点，直接把五行推理纳入 app。
+
+**检验记录**（如实写进提示词，供模型权衡）：
+- 旧案例本 189 题平衡准确率 47.3%，纲要 54.0%。
+- 前瞻第一批（2026-10-14 导出，33 题）：五行 52.8%，纲要引擎 47.0%，纲要盲断代理 47.9%。
+- 五行断「如愿」的比例 82%，实际如愿 58%；纲要则偏断不成，两者方向相反。
+
+**改动**：
+- 新增 `core/wuxing.js`：与冻结规格逐条一致。和后台影子跟踪所用的实现，在 471 张转盘上逐盘对拍，断语全同。转盘专用；旺衰取自 `wangshuai`。
+- `core/evidence.js`：证据包加【五行推理 v1】一段，写明断语、我与事的五行和力量、所据关系、用法与检验记录。问的若是怕发生之事，另加换算一句。
+- `assets/zhuanpan-method.md`：四之二节末加「五行推理」一小节，解读流程加 3.4 步。纲要原句未动。
+- `core/casebook.js`：案例存下五行断语与得分，日后可直接算它在 app 里的应验率。
+- `app.js`、`index.html`、`sw.js`：接线，CACHE → `qimen-pwa-wuxing`。
+- 顺带修正：Phase 39 换了 CACHE 名，却没同步 `core/panmarks.test.js` 里钉住的名字，那条测试在 main 上是红的，本期一并改正。
+
+**影子跟踪照旧**：账本比的是固定公式对比案例录入时的引擎判断，不受本期影响。到 40 题评估点照样报数。
+
+全量 39 个测试文件全绿。

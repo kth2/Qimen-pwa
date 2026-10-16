@@ -208,6 +208,7 @@
     var sg = (args.shige && args.shige.version) ? args.shige : null;
     var qs = (args.qushu && args.qushu.version) ? args.qushu : null;
     var fr = (args.framing && args.framing.version) ? args.framing : null;
+    var wxr = (args.wuxing && args.wuxing.version && args.wuxing.applicable) ? args.wuxing : null;   // Phase 40 五行推理
     var cm = args.categoryMap || null;
     var domain = args.domain || (ys && ys.domain) || 'general';
     var items = [];
@@ -439,6 +440,11 @@
       framing: fr ? {
         version: fr.version, direction: fr.direction, event: fr.event, phrase: fr.phrase
       } : null,
+      // 五行推理（Phase 40，〔用户所定·2026-10-16〕纳入）：只断是非方向。
+      wuxing: wxr ? {
+        version: wxr.version, verdict: wxr.verdict, score: wxr.score, relation: wxr.relation, why: wxr.why,
+        R: wxr.R, Y: wxr.Y, yName: wxr.yName, lR: wxr.lR, lY: wxr.lY, lines: (wxr.lines || []).slice()
+      } : null,
       // 时格层元信息（五不遇时／天显时格）。分量随条带出——「增加几率」不是「必然如此」。
       shige: sg ? {
         version: sg.version, riGan: sg.riGan, shiGan: sg.shiGan,
@@ -548,6 +554,11 @@
       L.push('· ⚠ **问句方向：所问之事「' + fri.event + '」是求测人（或所问之人）不愿其发生之事**' +
         '（问句检出：「' + fri.phrase + '」）。下文 READING 的 [助]/[阻] 指**此事得成／不成**，' +
         '对求测人的吉凶**恰好相反**；时干宫即这件怕发生的事本身。换算与断法见 E30。');
+    }
+    // 五行推理（Phase 40）：是非方向的另一路断语，与 READING 并列，不替代
+    if (ev.wuxing && ev.wuxing.lines && ev.wuxing.lines.length) {
+      L = L.concat(ev.wuxing.lines);
+      if (fri && fri.direction === 'adverse') L.push('  本问为怕发生之事：「如愿」即所怕之事**不发生**，「不如愿」即它发生。');
     }
     if (ev.yongshen) {
       var eng = ev.yongshen.engine, dom = ev.yongshen.domain, res = ev.yongshen.resolution;
