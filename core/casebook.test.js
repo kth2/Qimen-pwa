@@ -1153,7 +1153,7 @@ t('六层都在 _lastReading 里被带上（否则永远考核不了）', functi
   var fs = require('fs');
   var src = fs.readFileSync(require('path').join(__dirname, '..', 'app.js'), 'utf8');
   var seg = src.slice(src.indexOf('_lastReading = {'), src.indexOf('_lastReading = {') + 1400);
-  ['converge', 'yinju', 'geju', 'shige', 'severity', 'qushu'].forEach(function (k) {
+  ['converge', 'yinju', 'geju', 'shige', 'severity', 'qushu', 'wuxing'].forEach(function (k) {
     assert.ok(new RegExp(k + ':\\s*runOut\\.' + k).test(seg), '_lastReading 未带上 ' + k);
   });
 });
