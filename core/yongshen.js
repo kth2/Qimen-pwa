@@ -106,12 +106,22 @@
         why = ns[eng] || ('引擎在' + (sch === 'feipan' ? '飞盘' : '转盘') + '上不认此占类。');
       }
     }
+    // 占类自身声明只立了某一派（Phase 42：终身局、异梦只有转盘取用）。引擎按「综合」排盘不会报错，
+    // 但这一派没有它的用神——照实标「不支持」、规则退回通用条，不拿另一派的取用来顶。
+    var unsupportedName = '';
+    if (Array.isArray(d.schools) && d.schools.indexOf(sch) < 0) {
+      supported = false;
+      why = d.schoolNote || ('本占类未立' + (sch === 'feipan' ? '飞盘' : '转盘') + '取用。');
+      unsupportedName = d.label || ui;
+      dom = 'general'; d = getDomain(dom) || {};
+    }
     return {
       ui: ui, school: sch, loaded: true,
       engineCategory: eng,
       engineSupported: supported,
       degradedTo: supported ? '' : ((sup && sup.degradesTo) || '综合'),
       degradeWhy: why,
+      unsupportedName: unsupportedName,   // 不支持的是界面占类本身（引擎占类是「综合」，报它会让人看不懂）
       ruleDomain: dom,
       ruleLabel: d.label || '',
       // general 是通用兜底占类，落到它就等于「本占类无专条，判读退用通用条」。

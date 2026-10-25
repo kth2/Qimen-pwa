@@ -46,9 +46,9 @@ var UI = uiPurposes();
 var FEIPAN_ONLY = ['追捕', '逃亡', '讨债', '盗贼', '避难', '文书音讯', '口舌斗殴', '家宅'];
 
 console.log('\n== 三套词表串得上 ==');
-t('界面下拉有 25 个占类，且从 index.html 直接读取（不另抄一份）', function () {
-  // 16（Phase 22）＋ 行人 ＋ 飞盘专有八类（Phase 33）
-  assert.strictEqual(UI.length, 25, '实得 ' + UI.length + '：' + UI.join('、'));
+t('界面下拉有 27 个占类，且从 index.html 直接读取（不另抄一份）', function () {
+  // 16（Phase 22）＋ 行人 ＋ 飞盘专有八类（Phase 33）＋ 终身局、异梦（Phase 42）
+  assert.strictEqual(UI.length, 27, '实得 ' + UI.length + '：' + UI.join('、'));
   assert.ok(UI.indexOf('综合') >= 0 && UI.indexOf('学业') >= 0 && UI.indexOf('股市') >= 0);
   assert.ok(UI.indexOf('行人') >= 0, '缺行人');
   FEIPAN_ONLY.forEach(function (c) { assert.ok(UI.indexOf(c) >= 0, '缺飞盘专有：' + c); });
@@ -214,7 +214,7 @@ t('综合仍落 general，且被认作「就是通用占类」而非降级', fun
   assert.strictEqual(m.ruleDomain, 'general');
   assert.strictEqual(m.isZongHe, true, '综合须被单独认出，免得界面把它报成「无专条」');
 });
-t('十六个占类皆有专条（Phase 33 行人加入）；只余「综合」与飞盘专有八类用通用条', function () {
+t('十八个占类皆有专条（Phase 33 行人、Phase 42 终身局与异梦加入）；只余「综合」与飞盘专有八类用通用条', function () {
   var yes = [], no = [];
   UI.forEach(function (u) {
     var m = YS.categoryMap(u, 'zhuanpan');
@@ -223,7 +223,8 @@ t('十六个占类皆有专条（Phase 33 行人加入）；只余「综合」�
   // 飞盘专有八类无专条：象义规则库只适用于转盘（domain-rules.json appliesTo=zhuanpan），
   // 而转盘纲要未列这八类，无从据以立条——如实退用通用条。
   assert.deepStrictEqual(no, ['综合'].concat(FEIPAN_ONLY), '退用通用条的应恰为综合与飞盘专有八类：' + no.join('、'));
-  assert.strictEqual(yes.length, 16, '实得 ' + yes.length);
+  assert.strictEqual(yes.length, 18, '实得 ' + yes.length);
+  assert.ok(yes.indexOf('终身局') >= 0 && yes.indexOf('异梦') >= 0, '终身局、异梦应有专条');
   assert.ok(yes.indexOf('行人') >= 0, '行人应有专条');
 });
 

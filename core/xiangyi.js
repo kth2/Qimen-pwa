@@ -101,8 +101,11 @@
    * 干可同时出现在多宫（天盘一处、地盘另一处）：primary 取「天盘 > 地盘 > 暗干」为其主位
    * （与 yongshen.locate 同序），而 at[g] 收全部层次——判「同宫」时天地盘皆算数。
    */
-  function indexChart(chart) {
+  function indexChart(chart, opts) {
     var c = chart || {};
+    // 年命（Phase 42）：求测人出生年之干，甲年须连年支（甲子/甲戌…）才定得了所遁之仪。
+    // 不传就没有——年命不随盘而来，绝不拿年柱或旬首去顶（终身局例外，由调用方传本盘年柱进来）。
+    var nm = String((opts && opts.nianMing) || '').trim();
     var men = c.baMen || {}, xing = c.jiuXing || {}, shen = c.baShen || {};
     var tian = c.tianPan || {}, di = c.diPan || {}, an = c.anGan || {};
     var at = {}, primary = {}, layer = {}, g, i;
@@ -137,8 +140,9 @@
     var sz = c.siZhu || {};
     return {
       at: at, primary: primary, layer: layer,
-      actors: { 日干: (sz.day || '').charAt(0) || '', 时干: (sz.time || '').charAt(0) || '' },
+      actors: { 日干: (sz.day || '').charAt(0) || '', 时干: (sz.time || '').charAt(0) || '', 年命: nm.charAt(0) || '' },
       riZhu: sz.day || '',   // 日干为甲时按本日之甲所遁之仪取宫，须知日支
+      nianZhu: nm,           // 年命为甲时同理，须知年支（只给一个「甲」则定不了宫）
       zhiFuGong: c.zhiFuLuoGong != null ? String(c.zhiFuLuoGong) : (c.zhiFuGong != null ? String(c.zhiFuGong) : ''),
       zhiShiGong: c.zhiShiGong != null ? String(c.zhiShiGong) : '',
       zhiShiMen: c.zhiShiMen || '',
@@ -158,11 +162,16 @@
     if (!name || !idx) return null;
     var kind = kindOf(name), resolved = name, gong = null, lay = '', via = '';
 
-    if (name === '日干' || name === '时干') {
+    if (name === '日干' || name === '时干' || name === '年命') {
       var gan = idx.actors[name];
       if (!gan) return null;
       resolved = gan;
-      if (gan === '甲' && name === '日干') {
+      if (gan === '甲' && name === '年命') {
+        // 年命为甲：按本年之甲所遁之仪取宫，与日干同理（纲要一节〔用户所定·2026-09-24〕）
+        var nyi = LIU_JIA_DUN[idx.nianZhu];
+        if (!nyi) return null;
+        gong = idx.primary[nyi] || null; lay = 'dunYi'; via = idx.nianZhu + '遁于' + nyi + '，以' + nyi + '落宫论';
+      } else if (gan === '甲' && name === '日干') {
         // 日干为甲：按本日之甲所遁之仪取宫（纲要一节〔用户所定·2026-09-24〕）。不走值符——
         // 甲日十二时辰全在甲子旬或甲戌旬，按值符取则任何甲日都只会取到戊或己。
         var yi = LIU_JIA_DUN[idx.riZhu];
@@ -357,7 +366,7 @@
     base.applicable = true;
     base.reason = '占类「' + (d.label || id) + '」规则已建成，按 domain-rules.json 逐条求值。';
 
-    var idx = indexChart(chart);
+    var idx = indexChart(chart, { nianMing: options.nianMing });
     var located = {};   // name -> element | null（null 表示盘上未见）
     var roleNames = Object.keys(d.roles || {});
 
@@ -368,7 +377,7 @@
     /** 同宫元素集合：含该宫门/星/神/天盘干/地盘干/暗干，并把日干/时干按其实干折算进去 */
     function sameGongNames(gong) {
       var names = (idx.at[gong] || []).slice();
-      ['日干', '时干'].forEach(function (alias) {
+      ['日干', '时干', '年命'].forEach(function (alias) {
         var e = loc(alias);
         if (e && e.gong === gong && names.indexOf(alias) < 0) names.push(alias);
       });
@@ -380,7 +389,7 @@
      * 庚的地盘落宫上漏判。日干/时干是"人/事"之代称，按传统仍只取其主位（天盘），不放宽。
      */
     function gongsOf(name) {
-      if (name === '日干' || name === '时干' || name === '值使') {
+      if (name === '日干' || name === '时干' || name === '年命' || name === '值使') {
         var e = loc(name);
         return e ? [e.gong] : [];
       }

@@ -625,6 +625,17 @@
       + '断错者 **6 例断「会发生」而实际没发生**（举报、被抓、投诉、出问题、处分、裁员），3 例相反。'
       + '（②的换算为〔本层归纳·据纲要一节生克原句〕，纲要未就「怕发生之事」另立条文，**本仓未测过它准不准**；'
       + '实测数为〔据案例本导出 2026-10-05·18 例〕，样本小，只作纠偏之据，不作概率用。）',
+    // Phase 42：终身局、异梦两个占类，取用为〔用户所定·2026-10-25〕（转盘纲要无原文）。
+    'E31. 占类为**终身局**或**异梦**时（取用皆为〔用户所定·2026-10-25〕，转盘纲要无此二占类原文，引用时须说明）：'
+      + '【终身局】① 本盘按**出生年月日时**起，年命宫＝命主一生之象，为主用神；分项借纲要二节各占类之用神：'
+      + '事业看开门、财看生门、婚姻男看乙女看庚（据问句定男女，定不了就两条都说并写明）、健康看天芮、学业看景门、贵人看值符，'
+      + '各以其宫与年命宫的生克盗泄论得失。② **应期一律按「年」断**：TIMING 的「第 N 年后」是从**出生那年**起算，'
+      + '须换算成公历年份并注明虚岁；问过去之事答过去，问将来只取今年以后的那一个，不得把「第 N 日后」当成从今天算。'
+      + '③ **不断寿元、死期**，不作「注定」「一辈子都不会」一类宿命论断语。'
+      + '【异梦】① 以腾蛇为主用神（纲要原文仅「腾蛇(凶)：虚惊怪异」），先分两路：腾蛇宫实（不空）且克日干、或逢死门白虎者，'
+      + '方说「确有其扰」；腾蛇空亡、日干空亡（纲要：日干宫空亡主自身心神不定）、天芮临日干者，先往睡眠、情绪、身体上断。'
+      + '② **不得断定「必是鬼神作祟」**，不劝人花钱做法事、买符化解；趋避只给作息、环境、就医一类具体可行之议。'
+      + '③ 两占类的判读条目标〔用户所定〕者是用户采纳的草案，不得说成纲要原文。',
     'E20. 数证据数的是**互不相干的路数**，不是象义条数。同一个元素的多个别名（如玄武的'
       + '「盗/失物/暗昧/欺诈」）只算**一路**；五条同源的话不等于五路旁证，不得据此说「多重印证」。',
     // Phase 9：力量校验与断语范围。以下四条全部出自实测案例本的失败复盘，逐条对应一类真实误判。
@@ -807,6 +818,16 @@
     return `【占类：${cat}　模型：${u.provider}/${u.model}${fb}】\n\n`;
   }
 
+  /** 本次解读所用的年命（Phase 42）。用户选了就用他选的；**终身局**按出生年月日时起盘，
+   *  命主之年命即本盘年柱——没选时自动取（甲年连年支，才定得了所遁之仪）。别的占类没选就是没有，
+   *  绝不拿占时的年柱去顶：那是起盘这一年，不是求测人出生那一年。 */
+  function effectiveNianMing(ruleDomain, pan) {
+    const v = ($('aiNianMing') && $('aiNianMing').value) || '';
+    if (v || ruleDomain !== 'lifetime') return v;
+    const y = String((pan && pan.siZhu && pan.siZhu.year) || '');
+    return y.charAt(0) === '甲' ? y.slice(0, 2) : y.charAt(0);
+  }
+
   async function runAI() {
     const pan = window._pan; if (!pan) { $('aiStatus').textContent = '请先排盘'; return; }
     const q = $('aiQuestion').value.trim(); if (!q) { $('aiStatus').textContent = '请填写占问'; return; }
@@ -836,6 +857,8 @@
       // 传引擎占类进去就又绕回 wealth，股市专条依旧跑不到——正是这一步我先前写错过。
       const catMap = (YS && YS.categoryMap)
         ? YS.categoryMap(rc.uiPick || rc.category || fallbackCategory, school === 'feipan' ? 'feipan' : 'zhuanpan') : null;
+      const nianMing = effectiveNianMing(rc.explicit && catMap ? catMap.ruleDomain : '', pan);
+      opts.nianMingGan = nianMing;
       const builder = school === 'feipan' ? QM.feipanPredict : QM.zhuanpanPredict;
       const prompt = builder.buildPrompt(pan, q, opts);
       // 标题按**实际作答**那一路写：流式途中取 current()，答完取 lastUsed()。
@@ -881,7 +904,7 @@
             domain, chart: pan,
             options: {
               engineYong: prompt.context && prompt.context.yong,
-              nianMingGan: $('aiNianMing').value,
+              nianMingGan: nianMing,
               school: school === 'feipan' ? 'feipan' : 'zhuanpan'   // 盘别显式下传，杜绝两派取用互串
             }
           });
@@ -897,7 +920,7 @@
                 // 传 wangshuai 的**分析结果**（非文本块）：旺衰与四害由它单一供给，
                 // 象义层只读不重算，避免与 wangshuai 出现两套说法。
                 wangshuai: (window.WangShuai && window.WangShuai.analyze) ? window.WangShuai.analyze(pan) : null,
-                options: { school: school === 'feipan' ? 'feipan' : 'zhuanpan' }
+                options: { school: school === 'feipan' ? 'feipan' : 'zhuanpan', nianMing: nianMing }
               });
             } catch (xe) { console.warn('[xiangyi] 判读失败，本次不含 READING：', xe.message); xiangyi = null; }
           }
@@ -1098,7 +1121,7 @@
       }
       // 证据包可用时由它承载旺衰/应期；不可用则退回原有的两段拼接。山向段始终保留。
       const analysisBlocks = evBlock || (wsBlock + yqBlock);
-      const userMsg = prompt.user + (school !== 'feipan' ? riShiGanBlock(pan, $('aiNianMing').value) : '')
+      const userMsg = prompt.user + (school !== 'feipan' ? riShiGanBlock(pan, nianMing) : '')
         + analysisBlocks + sxBlock + tailAnchor(q, rc, catMap);
       const answer = await LLM.chat(prompt.system + '\n' + AI_DISCIPLINE + sysExtra, userMsg, (full) => {
         streamed = true; streamAnswer(headNow() + (full || ''));
@@ -2084,12 +2107,17 @@
     if (m && m.loaded === false) notes = '';
     else if (m && !m.engineSupported) {
       notes += '<br><b style="color:#a94442">⚠ ' + (school === 'feipan' ? '飞盘' : '转盘')
-        + '不支持「' + esc(m.engineCategory) + '」占类，本次会落回「' + esc(m.degradedTo)
+        + '不支持「' + esc(m.unsupportedName || m.engineCategory) + '」占类，本次会落回「' + esc(m.degradedTo)
         + '」且取不到专用用神。</b><span class="muted">' + esc(m.degradeWhy) + '</span>';
     }
     else if (m && m.engineSupported && !m.hasDedicatedRules && !m.isZongHe) {
       notes += '<br><span class="muted">用神按「' + esc(m.engineCategory) + '」取；象义规则库暂无此占类专条，'
         + '判读退用通用占类 <b>' + esc(m.ruleLabel) + '</b>——是规则未建，不是判错。</span>';
+    }
+    // 终身局按出生年月日时起盘（Phase 42，用户所定）：选了就提醒改排盘时间——用占时起的盘断不了一生
+    if (m && m.engineSupported && m.ruleDomain === 'lifetime') {
+      notes += '<br><b style="color:#8a6d3b">⚠ 终身局须按出生年月日时起盘：请把上方排盘的日期、时间改成命主的出生时间再排一次。</b>'
+        + '<span class="muted">年命不选时自动取本盘年柱。</span>';
     }
     tag.innerHTML = '→ 本次按 <b>' + esc(cat || '综合') + '</b> 断'
       + (rc.source === 'ai' ? '<span class="muted">（你指定的）</span>'
