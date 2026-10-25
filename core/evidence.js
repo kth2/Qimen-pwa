@@ -532,10 +532,10 @@
      * 任一层降级都要说出来——静默降级是此前最伤的一类问题。 */
     var cmi = ev.categoryMap;
     if (cmi && !cmi.engineSupported) {
-      L.push('· ⚠ **本盘别不支持「' + cmi.engineCategory + '」占类**：' + cmi.degradeWhy +
+      L.push('· ⚠ **本盘别不支持「' + (cmi.unsupportedName || cmi.engineCategory) + '」占类**：' + cmi.degradeWhy +
         '本次已落回「' + cmi.degradedTo + '」，**取不到该占类的专用用神**。' +
         '请按综合法作答（值符值使＋日干时干＋全盘旺衰生克），' +
-        '**不要凭「' + cmi.engineCategory + '」之名硬套一套本盘并未算出的用神**。');
+        '**不要凭「' + (cmi.unsupportedName || cmi.engineCategory) + '」之名硬套一套本盘并未算出的用神**。');
     } else if (cmi && !cmi.hasDedicatedRules && !cmi.isZongHe) {
       L.push('· 占类两级：**引擎按「' + cmi.engineCategory + '」取用神**；象义规则库尚无「' +
         cmi.engineCategory + '」专条，故判读条目退用通用占类 ' + cmi.ruleDomain + '(' + cmi.ruleLabel + ')。' +
@@ -856,6 +856,11 @@
       var tmi = ev.timing || {};
       L.push('· TIMING（应期锚点：干支取自上方 yingqi 同一组计算，此处只是筛过、定过强弱、排过序的那一份。' +
         '取期只在这些候选中选，不得自造日辰）：');
+      // 终身局（Phase 42）按出生年月日时起盘：此处「第 N 日/月/年后」都从出生那一刻起算，不是从今天
+      if (ev.domain === 'lifetime') {
+        L.push('  ⚠ **本盘为终身局，按出生年月日时起**：以下「第 N 日／月／年后」皆自**出生时**起算。' +
+          '应期一律按年断，换算成公历年并注明虚岁；问将来只取今年以后的那一个（见 E31）。');
+      }
       // 远近必须摆在锚点**之前**：放在后面，模型读到时早已把每一条都当成「某日」断完了，
       // 远期之问（几个月后、哪一年）就永远得不到答案。
       if (tmi.horizon) {
