@@ -791,3 +791,20 @@ body {
      * 与飞盘同一处明说的降级。 */
     .gong-content .hg > .harm-mark { display: none; }
 }
+
+/* 万年历（calendar-ui.js） */
+.cal .cal-nav { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.cal .cal-nav select { font-size: 14px; }
+.cal .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; margin-top: 6px; }
+.cal .cal-wh { text-align: center; font-size: 12px; color: #888; padding: 2px 0; }
+.cal .cal-c { border: 1px solid #eee; border-radius: 4px; padding: 2px 1px; text-align: center; cursor: pointer; min-height: 52px; background: #fff; line-height: 1.25; }
+.cal .cal-c .n { font-size: 15px; font-weight: bold; }
+.cal .cal-c .l, .cal .cal-c .g { font-size: 11px; color: #666; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cal .cal-c .l.t { color: #3c763d; font-weight: bold; } .cal .cal-c .l.f { color: #a94442; }
+.cal .cal-c.out { opacity: .4; } .cal .cal-c.today { border-color: #3c763d; } .cal .cal-c.sel { background: #e5f4e4; border-color: #3c763d; }
+.cal .cal-c.we .n { color: #a94442; }
+.cal .cal-find { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; margin-top: 6px; font-size: 13px; } .cal .cal-find select { font-size: 14px; margin-left: 2px; }
+.cal .cal-fbox { margin-top: 10px; border: 1px solid #ddd; border-radius: 6px; padding: 6px; } .cal .cal-fbox > summary { cursor: pointer; }
+.cal .cal-hit { font-size: 13px; padding: 3px 0; border-bottom: 1px dashed #eee; }
+.cal .cal-d { margin-top: 8px; font-size: 13px; line-height: 1.7; }
+.cal .cal-h { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 2px 8px; font-size: 12px; }

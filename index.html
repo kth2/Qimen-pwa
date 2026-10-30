@@ -79,6 +79,7 @@
     </span>
     <label>日期 <input type="date" id="inDate"></label>
     <label>时间 <input type="time" id="inTime"></label>
+    <button class="btn" type="button" id="calBtn" style="background:#666;">📅 万年历</button>
     <label>局
       <select id="inJuShu">
         <option value="">跟随日期时间（自动起局）</option>
@@ -97,6 +98,7 @@
     <button class="btn" id="castBtn">排盘</button>
   </div>
 
+  <div id="calPanel" class="panel cal" style="display:none;"></div>
   <div id="basicInfo" class="panel" style="display:none;"></div>
   <div id="chart"></div>
   <div id="analysis"></div>
@@ -278,6 +280,9 @@
   <script src="core/revise.js"></script>
   <script src="llm.js"></script>
   <script src="app.js"></script>
+  <script src="lib/tyme4ts.js"></script>
+  <script src="core/calendar.js"></script>
+  <script src="calendar-ui.js"></script>
   <script>
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
   </script>

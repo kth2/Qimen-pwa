@@ -206,7 +206,7 @@ t('E31 进了系统提示词：两级出处、年为单位、不断寿元、不�
 t('界面：下拉有两项、选终身局时提醒改填出生时间；离线缓存换了新名', function () {
   assert.ok(/<option value="终身局">/.test(HTML) && /<option value="异梦">/.test(HTML));
   assert.ok(/终身局须按出生年月日时起盘/.test(APP));
-  assert.ok(/qimen-pwa-zhongshen/.test(SW));
+  assert.ok(/qimen-pwa-wannianli/.test(SW));
 });
 
 console.log('\n== 别的占类不受影响 ==');
