@@ -157,6 +157,13 @@ t('取数：宫数一路仅有的两条实测记录皆为反例，且照实说',
   assert.ok(/绝不能说它有效/.test(f.gongNumberCases), '不得因样本少就含糊过去');
   assert.ok(/仍无定论/.test(QS._measured._effectNotMeasured), '效应仍须标为未定');
 });
+t('取数第二批（2026-11-02 回看 39 条）：宫数「其数必应之一」与随机无别，照实记、不升格、立影子跟踪', function () {
+  var f = QS._measured.secondData;
+  assert.ok(f, '缺第二批数据');
+  assert.ok(/31\/39 对随机 30\.2/.test(f.anyDigit), '须并列随机基线，不得只报命中');
+  assert.ok(/只挑中正确选项 0 题/.test(f.multipleChoice));
+  assert.ok(/不把宫数升为主数源/.test(f.whatFollows) && /影子跟踪/.test(f.whatFollows));
+});
 t('吟局：4 例带反馈，明写样本不足、不作调整', function () {
   var m = YJ._measuredOutcome;
   assert.ok(m, '缺记录');
