@@ -186,5 +186,50 @@ t('飞盘在无引擎取用时，不得擅自套用转盘占类取用', function
   assert.ok(r.resolution.excluded.length > 0, '排除须留痕而非静默丢弃');
 });
 
+console.log('== 主用神 pickMain（Phase 44）==');
+function mainOf(ui, sch, date, nm) {
+  var ec = YS.toEngineCategory(ui, sch);
+  var p = sch === 'feipan' ? QM.feipanQimen.calculate(date, { method: '时家', purpose: ui })
+    : QM.qimen.calculate(date, { type: '四柱', method: '时家', purpose: ui, location: '默认位置' });
+  var b = sch === 'feipan' ? QM.feipanPredict : QM.zhuanpanPredict;
+  var ctx = (b.buildPrompt(p, '', { category: ec, fallbackCategory: ec, nianMingGan: nm || '' }) || {}).context || {};
+  return { pan: p, m: YS.pickMain(YS.resolve({ domain: ui, chart: p, options: { engineYong: ctx.yong, school: sch, nianMingGan: nm || '' } })) };
+}
+var D1 = new Date(2026, 9, 30, 12, 46);   // 阴遁
+var D2 = new Date(2026, 3, 10, 9, 0);     // 阳遁
+t('引擎本盘分析不认的占类也有主用神：股市→生门（按求财）、行人→开门', function () {
+  var s = mainOf('股市', 'zhuanpan', D1);
+  assert.ok(!(s.pan.analysis && s.pan.analysis.yongShen), '前提：引擎本盘分析不认股市');
+  assert.strictEqual(s.m.name, '生门'); assert.strictEqual(s.m.source, 'engine'); assert.strictEqual(s.m.category, '求财');
+  assert.strictEqual(String(s.pan.baMen[s.m.gong]), '生门');
+  assert.strictEqual(mainOf('行人', 'zhuanpan', D1).m.name, '开门');
+});
+t('引擎无此占类（按综合排）→ 取占类表 primary：终身局→年命、异梦→腾蛇；终身局无年命则无', function () {
+  var a = mainOf('终身局', 'zhuanpan', D1, '庚').m;
+  assert.strictEqual(a.name, '年命'); assert.strictEqual(a.source, 'domain');
+  assert.strictEqual(mainOf('异梦', 'zhuanpan', D1).m.name, '腾蛇');
+  assert.strictEqual(mainOf('终身局', 'zhuanpan', D1, '').m, null);
+  assert.strictEqual(mainOf('综合', 'zhuanpan', D1).m, null, '综合（通用占类）不挑，照旧综观全盘');
+});
+t('飞盘阳遁无白虎：出行顺延到开门；阴遁照取白虎。盗贼阳遁无玄武即无，不以朱雀代', function () {
+  var y = mainOf('出行', 'feipan', D2);
+  assert.strictEqual(y.pan.juShu.type, 'yang');
+  assert.strictEqual(y.m.name, '开门');
+  var n = mainOf('出行', 'feipan', D1);
+  assert.strictEqual(n.pan.juShu.type, 'yin');
+  assert.strictEqual(n.m.name, '白虎');
+  assert.strictEqual(mainOf('盗贼', 'feipan', D2).m, null);
+});
+t('飞盘三乙四宫的天乙、太乙：locate 不认得，取引擎自己定的宫（射覆天乙、家宅太乙）', function () {
+  var a = mainOf('射覆', 'feipan', D1).m, b = mainOf('家宅', 'feipan', D1).m;
+  assert.strictEqual(a.name, '天乙'); assert.ok(a.gong);
+  assert.strictEqual(b.name, '太乙'); assert.ok(b.gong);
+});
+t('转盘天芮写作「禽芮」：主用神取其宫（与 locate 的星名合称规则一致）', function () {
+  var s = mainOf('健康', 'zhuanpan', D1);
+  assert.strictEqual(s.m.name, '天芮');
+  assert.ok(/芮/.test(s.pan.jiuXing[s.m.gong]));
+});
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);
