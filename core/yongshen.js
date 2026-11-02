@@ -439,8 +439,18 @@
       return null;
     };
     var eng = r.engineRule && r.engineRule.matched ? (r.engineRule.yongshen || []) : [];
+    var engLoc = (r.engineRule && r.engineRule.located) || [];
     for (var i = 0; i < eng.length; i++) {
       if (eng[i] === '日干') continue;
+      // 先信引擎自己定的宫（飞盘三乙四宫的天乙、太乙等，locate 不认得，引擎认得）；
+      // 引擎宫空（如转盘天芮写作「禽芮」）才用 locate 的结果
+      var el = null;
+      for (var k = 0; k < engLoc.length; k++) if (engLoc[k] && engLoc[k].name === eng[i] && engLoc[k].gong) { el = engLoc[k]; break; }
+      if (el) {
+        var gm = gongMeta(String(el.gong), null);
+        return { name: el.name, gong: String(el.gong), gongName: el.gongName || gm.gongName, direction: el.fangwei || el.direction || gm.direction,
+          source: 'engine', category: r.engineRule.category || '' };
+      }
       var e = at(eng[i], ['engine', 'both']);
       if (e) return { name: e.name, gong: e.gong, gongName: e.gongName, direction: e.direction, source: 'engine', category: r.engineRule.category || '' };
     }

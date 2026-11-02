@@ -220,6 +220,11 @@ t('飞盘阳遁无白虎：出行顺延到开门；阴遁照取白虎。盗贼�
   assert.strictEqual(n.m.name, '白虎');
   assert.strictEqual(mainOf('盗贼', 'feipan', D2).m, null);
 });
+t('飞盘三乙四宫的天乙、太乙：locate 不认得，取引擎自己定的宫（射覆天乙、家宅太乙）', function () {
+  var a = mainOf('射覆', 'feipan', D1).m, b = mainOf('家宅', 'feipan', D1).m;
+  assert.strictEqual(a.name, '天乙'); assert.ok(a.gong);
+  assert.strictEqual(b.name, '太乙'); assert.ok(b.gong);
+});
 t('转盘天芮写作「禽芮」：主用神取其宫（与 locate 的星名合称规则一致）', function () {
   var s = mainOf('健康', 'zhuanpan', D1);
   assert.strictEqual(s.m.name, '天芮');
