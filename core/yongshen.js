@@ -421,6 +421,40 @@
     };
   }
 
+  /**
+   * 主用神：resolve() 结果里「第一个真落在盘上的」用神，供界面「分析与建议」与穿壬取事宫用。
+   *   ① 引擎已识别占类 → 依引擎用神次序，取第一个定得了宫的（飞盘阳遁九神无白虎、玄武，
+   *      引擎仍列其名而定不了宫，此时顺延到下一个，如出行之开门；不以勾陈、朱雀代之——纲要未言代用）；
+   *   ② 引擎未识别（综合一档，如终身局、异梦）且占类非通用 → 取占类表 primary 中第一个定得了宫的；
+   *   ③ 都没有 → null（调用方照旧落回时干或「无专一用神」）。
+   * 只是挑选，不改 resolve 的任何结果；日干恒为「我」，不当用神挑。
+   */
+  function pickMain(r) {
+    if (!r || !r.examine) return null;
+    var at = function (n, origins) {
+      for (var i = 0; i < r.examine.length; i++) {
+        var e = r.examine[i];
+        if (e.name === n && e.gong && origins.indexOf(e.origin) >= 0) return e;
+      }
+      return null;
+    };
+    var eng = r.engineRule && r.engineRule.matched ? (r.engineRule.yongshen || []) : [];
+    for (var i = 0; i < eng.length; i++) {
+      if (eng[i] === '日干') continue;
+      var e = at(eng[i], ['engine', 'both']);
+      if (e) return { name: e.name, gong: e.gong, gongName: e.gongName, direction: e.direction, source: 'engine', category: r.engineRule.category || '' };
+    }
+    if (r.domain && r.domain !== 'general') {
+      var pri = (r.domainRule && r.domainRule.primary) || [];
+      for (var j = 0; j < pri.length; j++) {
+        if (pri[j] === '日干') continue;
+        var d = at(pri[j], ['domain', 'both']);
+        if (d) return { name: d.name, gong: d.gong, gongName: d.gongName, direction: d.direction, source: 'domain', category: '' };
+      }
+    }
+    return null;
+  }
+
   return {
     load: load, isLoaded: isLoaded,
     domainIds: domainIds, getDomain: getDomain,
@@ -430,6 +464,7 @@
     locate: locate, gongMeta: gongMeta,
     LIU_JIA_DUN: LIU_JIA_DUN,
     GONG_INFO: GONG_INFO,
-    resolve: resolve
+    resolve: resolve,
+    pickMain: pickMain
   };
 });

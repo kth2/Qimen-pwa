@@ -171,6 +171,25 @@
     ].join('');
   }
 
+  /**
+   * 引擎本盘分析不认的占类（股市、行人、终身局、异梦……），「分析与建议」原先只写「无专一用神」，
+   * 而 AI 解读其实拿得到用神（股市按求财取生门、行人取开门、终身局取年命……）。
+   * 这里照 AI 解读同一路取：引擎 buildPrompt 的用神 → YongShen.resolve → pickMain（第一个落在盘上的）。
+   * 只补显示，不改引擎分析；山向盘、知识库未载、出错都返回 null，照旧显示「无专一用神」。
+   */
+  function mainYongFor(pan, ui) {
+    if (mode === 'shanxiang' || !YS || !YS.isLoaded || !YS.isLoaded() || !YS.pickMain) return null;
+    try {
+      const sch = school === 'feipan' ? 'feipan' : 'zhuanpan';
+      const ec = YS.toEngineCategory(ui, sch);
+      const cm = YS.categoryMap(ui, sch);
+      const nm = effectiveNianMing(cm && cm.ruleDomain, pan);
+      const builder = sch === 'feipan' ? QM.feipanPredict : QM.zhuanpanPredict;
+      const ctx = (builder.buildPrompt(pan, '', { category: ec, fallbackCategory: ec, nianMingGan: nm }) || {}).context || {};
+      return YS.pickMain(YS.resolve({ domain: ui, chart: pan, options: { engineYong: ctx.yong, school: sch, nianMingGan: nm } }));
+    } catch (e) { console.warn('[analysis] 取主用神失败：', e.message); return null; }
+  }
+
   function renderAnalysis(pan) {
     const a = pan.analysis || {}, ja = pan.jiuGongAnalysis || {};
     const purpose = (pan.basicInfo && pan.basicInfo.purpose) || '综合';
@@ -178,7 +197,10 @@
     if (school === 'feipan') html += `<p class="muted">飞盘解断复用通用奇门基线(五行生克/十干克应/门迫/空亡/格局/用神)，飞盘专法(遁干81格/三乙四宫)以 AI 占断为准。</p>`;
     // 分析与建议
     html += `<div class="panel"><h3>分析与建议 · 目的：${esc(purpose)}</h3>`;
+    const mainYs = a.yongShen ? null : mainYongFor(pan, purpose);
     if (a.yongShen) html += `<p>用神（${esc(purpose)}）：<b>${esc(a.yongShen.name)}</b> 落 <b>${esc(a.yongShen.direction)}方(${esc(a.yongShen.gongName)}宫，${esc(a.yongShen.jiXiongText)})</b> <span class="muted">${esc(a.yongShen.tip)}</span></p>`;
+    else if (mainYs) html += `<p>用神（${esc(purpose)}）：<b>${esc(mainYs.name)}</b> 落 <b>${esc(mainYs.direction)}方(${esc(mainYs.gongName)}宫)</b> `
+      + `<span class="muted">${mainYs.source === 'engine' ? '按引擎占类「' + esc(mainYs.category) + '」取' : '按占类表取（引擎无此占类）'}，与 AI 解读所用同一取用；引擎本盘分析未给此占类的吉凶提示</span></p>`;
     else html += `<p class="muted">目的「${esc(purpose)}」无专一用神，综观全盘。</p>`;
     if (Array.isArray(a.suggestions) && a.suggestions.length) html += `<b>建议:</b><ul class="suggestion-list">${a.suggestions.map(s => `<li>${esc(s)}</li>`).join('')}</ul>`;
     html += `</div>`;
@@ -1081,7 +1103,9 @@
           let wuxing = null;
           if (WX) {
             const ctx = prompt.context || {};
-            const fpLoc = ((ctx.yong && ctx.yong.located) || [])[0] || null;
+            // 取第一个定得了宫的引擎用神：飞盘阳遁九神无白虎、玄武，出行、盗贼的首用神在阳遁定不了宫，
+            // 原先照取 [0] 得空宫，五行推理便落回时干；出行应顺延到开门（Phase 44）
+            const fpLoc = ((ctx.yong && ctx.yong.located) || []).find(x => x && x.gong) || null;
             const feipanCtx = school === 'feipan' ? {
               nianMingGong: ctx.sanyi && ctx.sanyi.nianMingGong, shiGanGong: ctx.sanyi && ctx.sanyi.shiGanGong,
               yongGong: fpLoc && fpLoc.gong, yongName: fpLoc && fpLoc.name
