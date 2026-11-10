@@ -30,7 +30,7 @@ var QM = global.window.QM;
 var YS = require('./yongshen.js');
 YS.load(require('../knowledge/domains.json'));
 
-var APP = fs.readFileSync(path.join(ROOT, 'app.js'), 'utf8');
+var APP = (fs.readFileSync(path.join(ROOT, 'app.js'), 'utf8') + '\n' + fs.readFileSync(path.join(ROOT, 'core', 'reading.js'), 'utf8'));
 var HTML = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
 var BUNDLE = fs.readFileSync(path.join(ROOT, 'engine.bundle.js'), 'utf8');
 

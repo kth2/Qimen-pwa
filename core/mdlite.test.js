@@ -224,7 +224,7 @@ t('标签闭合齐整（简单配对检查）', function () {
 });
 
 console.log('\n== app.js 接线守卫 ==');
-var APP = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+var APP = (fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, '..', 'core', 'reading.js'), 'utf8'));
 t('流式期间不渲染——写到一半的表格不该被画成怪样', function () {
   var seg = APP.slice(APP.indexOf('function streamAnswer('), APP.indexOf('async function runAI()'));
   assert.ok(/textContent = text/.test(seg), '流式须走 textContent');

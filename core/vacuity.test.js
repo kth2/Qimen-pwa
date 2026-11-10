@@ -141,7 +141,7 @@ t('证据包把「施方力量仅 x、此路作虚读」写在那一条判读后
   assert.ok(/〔出处：〔用户所定/.test(b), '须随条带出处');
 });
 t('E27 已进系统提示词，且双向都堵住了', function () {
-  var APP = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+  var APP = (fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, '..', 'core', 'reading.js'), 'utf8'));
   assert.ok(/E27\./.test(APP));
   var seg = APP.slice(APP.indexOf('E27.'), APP.indexOf('E20.'));
   assert.ok(/直接压制|封死上限/.test(seg), '须点名要禁的那几句话');

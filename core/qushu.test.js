@@ -345,7 +345,7 @@ t('取数排不出时如实交代，不静默消失', function () {
 });
 
 console.log('\n== app.js 源码守卫：这一层会不会真的跑起来 ==');
-var APP = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+var APP = (fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, '..', 'core', 'reading.js'), 'utf8'));
 t('取数层已接线：加载规则库、排层、进证据包、存案例', function () {
   assert.ok(/window\.QuShu/.test(APP), '未取 window.QuShu');
   assert.ok(/knowledge\/qushu-rules\.json/.test(APP), '未加载取数规则库');

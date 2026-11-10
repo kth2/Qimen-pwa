@@ -307,7 +307,7 @@ t('adopt 记下易理依据、支撑案例、冲突案例与来源声明', funct
 console.log('\n== 界面说明：把「反推≠生效」和「只改这一层」写在明处 ==');
 (function () {
   var fs = require('fs');
-  var APP = fs.readFileSync(require('path').join(__dirname, '..', 'app.js'), 'utf8');
+  var APP = (fs.readFileSync(require('path').join(__dirname, '..', 'app.js'), 'utf8') + '\n' + fs.readFileSync(require('path').join(__dirname, '..', 'core', 'reading.js'), 'utf8'));
   var seg = APP.slice(APP.indexOf("$('caseRevView').innerHTML"), APP.indexOf("$('caseRevView').innerHTML") + 3000);
   t('说明里写明「反推本身不改变任何判读，须再点采纳」', function () {
     assert.ok(/反推本身不改变任何判读/.test(seg), '缺第①条');

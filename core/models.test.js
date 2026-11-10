@@ -16,7 +16,7 @@ var assert = require('assert');
 
 var LLM = require(path.join(__dirname, '..', 'llm.js'));
 var I = LLM._internals || {};
-var APP = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+var APP = (fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, '..', 'core', 'reading.js'), 'utf8'));
 var HTML = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 
 var pass = 0, fail = 0, pending = [];

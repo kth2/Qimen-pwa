@@ -16,7 +16,7 @@ var path = require('path');
 var fs = require('fs');
 var assert = require('assert');
 
-var APP = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+var APP = (fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, '..', 'core', 'reading.js'), 'utf8'));
 var pass = 0, fail = 0;
 function t(name, fn) {
   try { fn(); pass++; console.log('  ✓ ' + name); }

@@ -30,7 +30,7 @@ var DOMAINS = require('../knowledge/domains.json');
 var SYMBOLS = require('../knowledge/symbols.json');
 var TIMING_RULES = require('../knowledge/timing-rules.json');
 var ROOT = path.join(__dirname, '..');
-var APP = fs.readFileSync(path.join(ROOT, 'app.js'), 'utf8');
+var APP = (fs.readFileSync(path.join(ROOT, 'app.js'), 'utf8') + '\n' + fs.readFileSync(path.join(ROOT, 'core', 'reading.js'), 'utf8'));
 var HTML = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
 var SW = fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8');
 

@@ -96,12 +96,12 @@ t('【股市】与「财运」同走引擎「求财」，但规则占类必须�
   assert.strictEqual(YS.normalizeDomain('求财'), 'wealth');
 });
 t('app 显式选择时用 categoryMap.ruleDomain，不从引擎占类反推', function () {
-  var APP = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+  var APP = (fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, '..', 'core', 'reading.js'), 'utf8'));
   assert.ok(/rc\.explicit && catMap && catMap\.ruleDomain/.test(APP),
     '否则「财运」与「股市」这类同引擎占类的选项分不开');
 });
 t('【回归】catMap 必须由**界面选项**算出，不得传已转换的引擎占类', function () {
-  var APP = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+  var APP = (fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, '..', 'core', 'reading.js'), 'utf8'));
   // 传 rc.category（引擎占类「求财」）进去，categoryMap 会算回 wealth，
   // 股市专条又跑不到——这一步实际写错过一次，故钉死。
   assert.ok(/YS\.categoryMap\(rc\.uiPick \|\| rc\.category \|\| fallbackCategory/.test(APP),
@@ -240,14 +240,14 @@ t('知识库未加载时 categoryMap 报 loaded:false，不给确定答案', fun
   assert.strictEqual(Y2.categoryMap('失物', 'zhuanpan').loaded, true);
 });
 t('app.js 在数据未到位时不渲染结论，且首屏就会去加载', function () {
-  var APP = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+  var APP = (fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, '..', 'core', 'reading.js'), 'utf8'));
   assert.ok(/if \(m && m\.loaded === false\) notes = '';/.test(APP), '未加载时应不下结论');
   assert.ok(/markUnsupportedDomains\(\)[\s\S]{0,80}previewDomain\(\)/.test(APP));
   assert.ok(/loadKnowledge\(\)\.then\(\(\) => \{ markUnsupportedDomains\(\); previewDomain\(\); \}\)/.test(APP),
     '首屏须主动加载知识库并在加载后重算——否则预览永远是在数据缺席下算的');
 });
 t('markUnsupportedDomains 在未加载时直接返回，不乱标', function () {
-  var APP = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+  var APP = (fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, '..', 'core', 'reading.js'), 'utf8'));
   assert.ok(/!YS\.isLoaded \|\| !YS\.isLoaded\(\)\) return;/.test(APP));
 });
 
