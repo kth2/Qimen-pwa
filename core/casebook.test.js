@@ -1138,7 +1138,7 @@ t('存的是摘要不是整层输出：单条案例不因新层显著变胖', fu
 console.log('\n== 源码守卫：runOut 无漏赋值 ==');
 t('app.js 中 runOut 被读取的每个字段都曾被赋值', function () {
   var fs = require('fs');
-  var src = fs.readFileSync(require('path').join(__dirname, '..', 'app.js'), 'utf8');
+  var src = (fs.readFileSync(require('path').join(__dirname, '..', 'app.js'), 'utf8') + '\n' + fs.readFileSync(require('path').join(__dirname, '..', 'core', 'reading.js'), 'utf8'));
   var assigned = {}, used = {}, m;
   var reA = /runOut\.([A-Za-z_]\w*)\s*=/g;
   while ((m = reA.exec(src))) assigned[m[1]] = true;
@@ -1151,7 +1151,7 @@ t('app.js 中 runOut 被读取的每个字段都曾被赋值', function () {
 // 是「新加一层就得跟着存」——名单每长一个，就在这里补一个，不许只加层不加存。
 t('六层都在 _lastReading 里被带上（否则永远考核不了）', function () {
   var fs = require('fs');
-  var src = fs.readFileSync(require('path').join(__dirname, '..', 'app.js'), 'utf8');
+  var src = (fs.readFileSync(require('path').join(__dirname, '..', 'app.js'), 'utf8') + '\n' + fs.readFileSync(require('path').join(__dirname, '..', 'core', 'reading.js'), 'utf8'));
   var seg = src.slice(src.indexOf('_lastReading = {'), src.indexOf('_lastReading = {') + 1400);
   ['converge', 'yinju', 'geju', 'shige', 'severity', 'qushu', 'wuxing'].forEach(function (k) {
     assert.ok(new RegExp(k + ':\\s*runOut\\.' + k).test(seg), '_lastReading 未带上 ' + k);

@@ -21,7 +21,7 @@ var fs = require('fs');
 var assert = require('assert');
 
 var ROOT = path.join(__dirname, '..');
-var APP = fs.readFileSync(path.join(ROOT, 'app.js'), 'utf8');
+var APP = (fs.readFileSync(path.join(ROOT, 'app.js'), 'utf8') + '\n' + fs.readFileSync(path.join(ROOT, 'core', 'reading.js'), 'utf8'));
 var HTML = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
 var CSS = fs.readFileSync(path.join(ROOT, 'style.css'), 'utf8');
 

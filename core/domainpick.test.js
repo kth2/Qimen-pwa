@@ -30,7 +30,7 @@ function t(name, fn) {
   try { fn(); pass++; console.log('  ✓ ' + name); }
   catch (e) { fail++; console.log('  ✗ ' + name + '  ->  ' + e.message); }
 }
-var APP = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+var APP = (fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, '..', 'core', 'reading.js'), 'utf8'));
 function chart() {
   return QM.qimen.calculate(new Date('2026-08-27T10:00:00'),
     { type: '四柱', method: '时家', purpose: '综合', location: '默认位置' });

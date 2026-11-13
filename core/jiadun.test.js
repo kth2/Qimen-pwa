@@ -30,7 +30,7 @@ var YS = require('./yongshen.js');
 YS.load(require('../knowledge/domains.json'));
 var XY = require('./xiangyi.js');
 
-var APP = fs.readFileSync(path.join(ROOT, 'app.js'), 'utf8');
+var APP = (fs.readFileSync(path.join(ROOT, 'app.js'), 'utf8') + '\n' + fs.readFileSync(path.join(ROOT, 'core', 'reading.js'), 'utf8'));
 var BUNDLE = fs.readFileSync(path.join(ROOT, 'engine.bundle.js'), 'utf8');
 var ZP_METHOD = fs.readFileSync(path.join(ROOT, 'assets', 'zhuanpan-method.md'), 'utf8');
 

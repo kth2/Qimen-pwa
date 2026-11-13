@@ -168,7 +168,7 @@ function run() {
     });
   }).then(function () {
     console.log('\n== 接线守卫 ==');
-    var APP = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+    var APP = (fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, '..', 'core', 'reading.js'), 'utf8'));
     return t('案例本记的是 LLM.lastUsed()，不是 LLM.info()', function () {
       var seg = APP.slice(APP.indexOf('_lastReading = {'), APP.indexOf('_lastReading = {') + 2200);
       assert.ok(/meta:/.test(seg), '_lastReading 未带 meta');
@@ -176,7 +176,7 @@ function run() {
       assert.ok(/fellBack/.test(seg), '未留下「是否备用接管」');
     });
   }).then(function () {
-    var APP = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+    var APP = (fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, '..', 'core', 'reading.js'), 'utf8'));
     return t('统计面板不另算一套口径，直接取评估器的 byModel', function () {
       assert.ok(/window\.Evaluate\.evaluate\(rows\)\s*\|\|\s*\{\}\)\.byModel/.test(APP.replace(/\s+/g, ' ')) ||
         /\)\.byModel/.test(APP), '界面应复用评估器的 byModel');
@@ -194,7 +194,7 @@ function run() {
       assert.strictEqual(rec.meta.fellBack, true);
     });
   }).then(function () {
-    var APP = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+    var APP = (fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, '..', 'core', 'reading.js'), 'utf8'));
     return t('界面里不留 Markdown 星号（统计面板走 innerHTML，** 会原样显示）', function () {
       var seg = APP.slice(APP.indexOf('const mdHtml'), APP.indexOf('const psHtml'));
       assert.ok(!/\*\*/.test(seg.replace(/replace\(\/\\\*\\\*\/g[^)]*\)/g, '')),
@@ -202,7 +202,7 @@ function run() {
       assert.ok(/_caveat\)\.replace\(/.test(APP), '取自评估器的 _caveat 里带 **，界面上须剥掉');
     });
   }).then(function () {
-    var APP = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+    var APP = (fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, '..', 'core', 'reading.js'), 'utf8'));
     return t('案例列表容得下字段不齐的行（案例本支持导入，坏一行不该白屏整栏）', function () {
       // 造这批假案例时炸出来的：没有 chart / fired 的行会让整栏渲染中断。
       // 真实存下的案例字段都齐，但导入来的不一定齐——那正是它最该扛住的场合。
@@ -244,7 +244,7 @@ function run() {
     });
   }).then(function () {
     return t('answerHead：接管时写接管者并注明主选；未接管不加注；未开始作答退回配置值', function () {
-      var APP = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+      var APP = (fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, '..', 'core', 'reading.js'), 'utf8'));
       var at = APP.indexOf('function answerHead('), end = APP.indexOf('\n  }', at);
       assert.ok(at > 0 && end > at, 'app.js 里取不出 answerHead');
       var answerHead = new Function(APP.slice(at, end + 4) + '\n; return answerHead;')();
@@ -260,7 +260,7 @@ function run() {
     });
   }).then(function () {
     return t('runAI 的标题：流式取 current()、答完取 lastUsed()，不再直接写 info()', function () {
-      var APP = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+      var APP = (fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, '..', 'core', 'reading.js'), 'utf8'));
       var seg = APP.slice(APP.indexOf('async function runAI()'), APP.indexOf('_answerRaw = head +'));
       assert.ok(/streamAnswer\(headNow\(\) \+/.test(seg), '流式未用 headNow()');
       assert.ok(/head = answerHead\(catName, \(LLM\.lastUsed && LLM\.lastUsed\(\)\)/.test(seg), '答完未按 lastUsed 重写标题');

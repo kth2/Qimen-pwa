@@ -40,7 +40,8 @@ function t(name, fn) {
 function tailAnchorSrc(APP) {
   var fn = APP.indexOf('function tailAnchor(');
   var doc = APP.lastIndexOf('/**', fn);
-  return APP.slice(doc >= 0 ? doc : fn, APP.indexOf('async function runAI()'));
+  // tailAnchor 已搬到 core/reading.js，其后紧跟 evidenceFor
+  return APP.slice(doc >= 0 ? doc : fn, APP.indexOf('async function evidenceFor(', fn));
 }
 
 /** 截获一次 chat 调用的请求体。返回 {url, body}。 */
@@ -136,7 +137,7 @@ function run() {
     .then(function () {
       console.log('\n== 收尾锚：把问题钉在整条消息的最末尾 ==');
       var fs = require('fs');
-      var APP = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+      var APP = (fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, '..', 'core', 'reading.js'), 'utf8'));
       return t('userMsg 以 tailAnchor 收尾，且 tailAnchor 排在最后一项', function () {
         var m = APP.match(/const userMsg = ([\s\S]{0,200}?);/);
         assert.ok(m, '找不到 userMsg 的拼接');

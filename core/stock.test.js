@@ -123,7 +123,7 @@ t('戒律确实进了证据包（xiangyi → evidence 全程）', function () {
   assert.ok(/不能精准锁定/.test(blk));
 });
 t('E24 已进系统提示词，且四条俱全', function () {
-  var APP = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+  var APP = (fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8') + '\n' + fs.readFileSync(path.join(__dirname, '..', 'core', 'reading.js'), 'utf8'));
   assert.ok(/'E24\. 占类为\*\*股市\*\*时/.test(APP), '缺 E24');
   var seg = APP.slice(APP.indexOf("'E24."), APP.indexOf("'E24.") + 1400);
   assert.ok(/一卦一事/.test(seg));
