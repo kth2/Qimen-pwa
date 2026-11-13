@@ -596,7 +596,8 @@
       head = answerHead(catName, (LLM.lastUsed && LLM.lastUsed()) || null, LLM.info());
       _answerRaw = head + ((!streamed || !answer) ? (answer || '(无内容)') : answer);
       paintAnswer();
-      $('aiStatus').textContent = '完成';
+      // 离题检测：回复几乎不提盘面时提醒一句（不改回复、不改提示词）
+      $('aiStatus').textContent = (answer && RD.offChart(answer).off) ? RD.OFF_CHART_NOTE : '完成';
       // 备好「存为案例」的素材。答案截断到 8000 字：全文可能极长，手机存储不该被单条撑爆
       if (store && CB) {
         // 一律取本轮的 runOut，不读全局量——见上文「不能靠 window._xiangyi」的说明

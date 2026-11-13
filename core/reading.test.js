@@ -33,6 +33,14 @@ t('对外接口齐全', function () {
     });
   });
 }).then(function () {
+  return t('离题检测：不提盘面的回复判离题；照盘的回复不判；空回复不判', function () {
+    var off = '从现实和科学常识的角度来看，石头是自然界中的矿物集合体。建议多与信任的家人、朋友倾诉，或者寻求专业的心理健康顾问的建议。';
+    var on = '用神生门落艮八宫，乘天任、值符，旺相不空；日干落震三宫，时干宫生日干宫，事来就我。';
+    assert.strictEqual(RD.offChart(off).off, true);
+    assert.strictEqual(RD.offChart(on).off, false);
+    assert.strictEqual(RD.offChart('').off, false);
+  });
+}).then(function () {
   return t('空问句不产出收尾锚；有问句时以问句收束', function () {
     assert.strictEqual(RD.tailAnchor('', {}, null), '');
     assert.ok(/「能成吗」/.test(RD.tailAnchor('能成吗', { category: '综合' }, null)));

@@ -611,7 +611,23 @@
     return { evBlock, sysExtra, runOut };
   }
 
-  return { loadKnowledge, evidenceFor, riShiGanBlock, tailAnchor, AI_DISCIPLINE, EVIDENCE_DISCIPLINE,
+  /**
+   * 离题检测：模型有时丢开整份盘面与规则，改答科普或宽慰的话（多见于问句触到模型自身的安全习惯时）。
+   * 只数回复里出现了几种盘面用语（宫名、八门、九星、八神、用神等），不到 3 种即视为没有照盘作答。
+   * 只作提示，不改提示词，不动回复内容。
+   * @returns { off: bool, hits: 命中的用语种数 }
+   */
+  const CHART_TERMS = [/[坎坤震巽乾兑艮离中][一二三四五六七八九1-9]?宫/, /[休生伤杜景死惊开]门/, /天[蓬芮冲辅禽心柱任英]/,
+    /值符|值使/, /螣蛇|腾蛇|九地|九天|玄武|白虎|勾陈|朱雀|太阴|六合/, /用神/, /日干|时干|年命/, /空亡|旬空/,
+    /[甲乙丙丁戊己庚辛壬癸]\+[甲乙丙丁戊己庚辛壬癸]|[戊己庚辛壬癸丁丙乙]加[戊己庚辛壬癸丁丙乙]/, /三传|四课|初传|末传/];
+  function offChart(answer) {
+    const t = String(answer || '');
+    const hits = CHART_TERMS.filter((re) => re.test(t)).length;
+    return { off: t.trim().length > 0 && hits < 3, hits };
+  }
+  const OFF_CHART_NOTE = '⚠ 这次回复没有照盘作答（几乎没提到宫、门、星、神）。多半是问句让模型改答了常识或宽慰的话。可换个问法（问事的吉凶成败，不问事物的真假），或再问一次。';
+
+  return { loadKnowledge, evidenceFor, riShiGanBlock, tailAnchor, AI_DISCIPLINE, EVIDENCE_DISCIPLINE, offChart, OFF_CHART_NOTE,
     ready: () => ({ kb: _kbReady, rules: _rulesReady, timing: _timingReady, leixiang: _leixiangReady, severity: _severityReady,
       converge: _convergeReady, yinju: _yinjuReady, geju: _gejuReady, shige: _shigeReady, qushu: _qushuReady }) };
 });
